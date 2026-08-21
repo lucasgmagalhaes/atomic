@@ -1766,6 +1766,7 @@ dependencies = [
 name = "js-runtime"
 version = "0.1.0"
 dependencies = [
+ "dom",
  "quickjs-sys",
 ]
 
@@ -2391,6 +2392,9 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 [[package]]
 name = "platform-apis"
 version = "0.1.0"
+dependencies = [
+ "getrandom 0.4.3",
+]
 
 [[package]]
 name = "png"

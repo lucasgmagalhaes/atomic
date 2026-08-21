@@ -1765,6 +1765,9 @@ dependencies = [
 [[package]]
 name = "js-runtime"
 version = "0.1.0"
+dependencies = [
+ "quickjs-sys",
+]
 
 [[package]]
 name = "js-sys"

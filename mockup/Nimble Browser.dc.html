@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="_ds/nocturne-d8dcab77-61bb-4c14-8925-113953f3abbd/styles.css">
+<script src="_ds/nocturne-d8dcab77-61bb-4c14-8925-113953f3abbd/_ds_bundle.js"></script>
+<style>
+body{margin:0;background:#0e0f18}
+@keyframes ilspin{to{transform:rotate(360deg)}}
+@keyframes ilpulse{0%,100%{opacity:.35}50%{opacity:1}}
+</style>
+</helmet>
+<div style="min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding:28px;font-family:var(--font-body);color:var(--color-text)">
+<div style="width:1560px;flex:none;display:flex;flex-direction:column;border-radius:12px;overflow:hidden;box-shadow:var(--shadow-lg);background:var(--color-bg)">
+
+  <div style="height:44px;flex:none;display:flex;align-items:center;gap:10px;padding:0 6px 0 14px;background:#12131f;border-bottom:1px solid rgba(233,233,237,.07)">
+    <svg width="20" height="20" viewBox="0 0 48 48" fill="none" style="flex:none">
+      <rect x="4" y="4" width="40" height="40" rx="10" stroke="var(--color-neutral-700)" stroke-width="2"/>
+      <path d="M15 34V15l18 19V15" stroke="var(--color-accent)" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <div style="font-family:var(--font-heading);font-weight:500;font-size:13.5px;letter-spacing:.01em"><span style="color:var(--color-accent)">Nimble</span></div>
+    <div style="width:1px;height:16px;background:rgba(233,233,237,.12)"></div>
+    <div style="display:flex;gap:2px">
+      <div onClick="{{ goGrid }}" style="padding:4px 9px;border-radius:6px;font-size:12px;cursor:pointer;color:{{ tabGridColor }};background:{{ tabGridBg }}">Browser</div>
+      <div onClick="{{ goMonitor }}" style="padding:4px 9px;border-radius:6px;font-size:12px;cursor:pointer;color:{{ tabMonColor }};background:{{ tabMonBg }}" style-hover="background:rgba(233,233,237,.06)">Monitor</div>
+      <div onClick="{{ goAutomation }}" style="padding:4px 9px;border-radius:6px;font-size:12px;cursor:pointer;color:{{ tabAutoColor }};background:{{ tabAutoBg }}" style-hover="background:rgba(233,233,237,.06)">Automation</div>
+      <div onClick="{{ goDownloads }}" style="padding:4px 9px;border-radius:6px;font-size:12px;cursor:pointer;color:{{ tabDownColor }};background:{{ tabDownBg }}" style-hover="background:rgba(233,233,237,.06)">Downloads</div>
+      <div onClick="{{ goSettings }}" style="padding:4px 9px;border-radius:6px;font-size:12px;cursor:pointer;color:{{ tabSetColor }};background:{{ tabSetBg }}" style-hover="background:rgba(233,233,237,.06)">Settings</div>
+    </div>
+    <div style="flex:1"></div>
+    <div onClick="{{ openRelease }}" style="display:flex;align-items:center;gap:6px;padding:4px 9px;margin-right:6px;border-radius:999px;font-size:11px;color:var(--color-accent-300);border:1px solid var(--color-accent-800);cursor:pointer" style-hover="background:rgba(145,132,217,.12)">
+      <span style="width:6px;height:6px;border-radius:50%;background:var(--color-accent);box-shadow:0 0 6px var(--color-accent)"></span>v1.2.0 ready
+    </div>
+    <div style="display:flex;gap:2px;color:rgba(233,233,237,.6)">
+      <div style="width:38px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:6px" style-hover="background:rgba(233,233,237,.08)"><svg width="11" height="11" viewBox="0 0 11 11"><path d="M1 5.5h9" stroke="currentColor" stroke-width="1.2"/></svg></div>
+      <div style="width:38px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:6px" style-hover="background:rgba(233,233,237,.08)"><svg width="11" height="11" viewBox="0 0 11 11"><rect x="1.5" y="1.5" width="8" height="8" stroke="currentColor" fill="none" stroke-width="1.2"/></svg></div>
+      <div style="width:38px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:6px" style-hover="background:#8c3a48;color:#fff"><svg width="11" height="11" viewBox="0 0 11 11"><path d="M2 2l7 7M9 2l-7 7" stroke="currentColor" stroke-width="1.2"/></svg></div>
+    </div>
+  </div>
+
+  <div style="height:52px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px;background:var(--color-bg);border-bottom:1px solid rgba(233,233,237,.07)">
+    <div style="display:flex;gap:2px;color:rgba(233,233,237,.75)">
+      <div style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:8px;cursor:pointer" style-hover="background:rgba(233,233,237,.08)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 3.5L5.5 8l4.5 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></div>
+      <div style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:8px;cursor:pointer;opacity:.4"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 3.5L10.5 8L6 12.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></div>
+      <div onClick="{{ reloadAll }}" style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:8px;cursor:pointer" style-hover="background:rgba(233,233,237,.08)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13 8a5 5 0 11-1.6-3.7M13 2.6V5h-2.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></div>
+      <div style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:8px;cursor:pointer" style-hover="background:rgba(233,233,237,.08)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2.5 7.2L8 2.8l5.5 4.4V13H2.5z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></div>
+    </div>
+    <div style="flex:1;display:flex;align-items:center;gap:9px;height:34px;padding:0 12px;border-radius:{{ urlRadius }};background:var(--color-surface);border:1px solid rgba(233,233,237,.1)" style-hover="border-color:rgba(233,233,237,.24)">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="color:var(--color-accent)"><circle cx="8" cy="8" r="5.6" stroke="currentColor" stroke-width="1.3"/><path d="M2.4 8h11.2M8 2.4c1.7 1.7 1.7 9.5 0 11.2M8 2.4C6.3 4.1 6.3 11.9 8 13.6" stroke="currentColor" stroke-width="1.1"/></svg>
+      <div style="font-size:13px;color:rgba(233,233,237,.92);letter-spacing:.01em">https://idlegame.com/</div>
+      <div style="flex:1"></div>
+      <div style="font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:rgba(233,233,237,.4)">broadcast to all panes</div>
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" style="color:var(--color-accent)"><path d="M14 2L2 7l4.6 1.6L8.2 13 14 2z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+    </div>
+    <div style="display:flex;gap:1px;color:rgba(233,233,237,.62)">
+      <div onClick="{{ toggleMute }}" style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:8px;cursor:pointer" style-hover="background:rgba(233,233,237,.08)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 6h2l3-2.5v9L5 10H3z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M11 6l3 4M14 6l-3 4" stroke="currentColor" stroke-width="1.3"/></svg></div>
+      <div style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:8px;cursor:pointer" style-hover="background:rgba(233,233,237,.08)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.4" stroke="currentColor" stroke-width="1.3"/><path d="M10.4 10.4L14 14M5 7h4M7 5v4" stroke="currentColor" stroke-width="1.3"/></svg></div>
+      <div onClick="{{ goMonitor }}" style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:8px;cursor:pointer" style-hover="background:rgba(233,233,237,.08)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 12l3-4 2.6 2L11 5l3 2.4" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg></div>
+      <div onClick="{{ goDownloads }}" style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:8px;cursor:pointer" style-hover="background:rgba(233,233,237,.08)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2.6v7M5.2 7l2.8 2.8L10.8 7M3 13h10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></div>
+      <div onClick="{{ goSettings }}" style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:8px;cursor:pointer" style-hover="background:rgba(233,233,237,.08)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="2.2" stroke="currentColor" stroke-width="1.3"/><path d="M8 1.6v1.8M8 12.6v1.8M1.6 8h1.8M12.6 8h1.8M3.5 3.5l1.3 1.3M11.2 11.2l1.3 1.3M12.5 3.5l-1.3 1.3M4.8 11.2l-1.3 1.3" stroke="currentColor" stroke-width="1.2"/></svg></div>
+    </div>
+  </div>
+
+  <div style="display:flex;height:840px;min-height:0">
+
+    <div style="width:56px;flex:none;display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 0;background:#12131f;border-right:1px solid rgba(233,233,237,.07)">
+      <sc-for list="{{ workspaces }}" as="ws" hint-placeholder-count="4">
+        <div onClick="{{ ws.select }}" title="{{ ws.name }}" style="position:relative;width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-family:var(--font-heading);font-size:13px;color:{{ ws.color }};background:{{ ws.bg }};box-shadow:{{ ws.ring }}" style-hover="background:rgba(145,132,217,.16)">
+          {{ ws.initial }}
+          <span style="position:absolute;right:-2px;bottom:-2px;min-width:15px;height:15px;padding:0 3px;border-radius:8px;background:var(--color-accent-800);border:1.5px solid #12131f;color:var(--color-accent-200);font-size:9px;display:flex;align-items:center;justify-content:center">{{ ws.count }}</span>
+        </div>
+      </sc-for>
+      <div onClick="{{ openAdd }}" style="width:38px;height:38px;margin-top:4px;border-radius:10px;border:1px dashed rgba(233,233,237,.22);display:flex;align-items:center;justify-content:center;color:rgba(233,233,237,.55);cursor:pointer" style-hover="border-color:var(--color-accent);color:var(--color-accent)">
+        <svg width="15" height="15" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.3"/></svg>
+      </div>
+      <div style="flex:1"></div>
+      <div onClick="{{ goOnboarding }}" title="First run" style="width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;color:rgba(233,233,237,.4);cursor:pointer" style-hover="color:var(--color-accent)">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.2" stroke="currentColor" stroke-width="1.2"/><path d="M8 7.2v3.4M8 5.2v.9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+      </div>
+    </div>
+
+    <div style="width:{{ listWidth }};flex:none;display:flex;flex-direction:column;background:#141625;border-right:1px solid rgba(233,233,237,.07)">
+      <div style="height:44px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid rgba(233,233,237,.06)">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="color:var(--color-accent)"><rect x="2" y="2" width="5" height="5" stroke="currentColor" stroke-width="1.2"/><rect x="9" y="2" width="5" height="5" stroke="currentColor" stroke-width="1.2"/><rect x="2" y="9" width="5" height="5" stroke="currentColor" stroke-width="1.2"/><rect x="9" y="9" width="5" height="5" stroke="currentColor" stroke-width="1.2"/></svg>
+        <div style="font-family:var(--font-heading);font-size:13px;flex:1">{{ workspaceName }}</div>
+        <div onClick="{{ toggleDensity }}" title="Toggle density" style="width:26px;height:26px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:rgba(233,233,237,.5);cursor:pointer" style-hover="background:rgba(233,233,237,.08);color:var(--color-accent)">
+          <svg width="13" height="13" viewBox="0 0 16 16"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.2"/></svg>
+        </div>
+        <div onClick="{{ toggleList }}" title="Collapse list" style="width:26px;height:26px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:rgba(233,233,237,.5);cursor:pointer" style-hover="background:rgba(233,233,237,.08);color:var(--color-accent)">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="2" y="2.5" width="12" height="11" stroke="currentColor" stroke-width="1.2"/><path d="M6.2 2.5v11" stroke="currentColor" stroke-width="1.2"/></svg>
+        </div>
+      </div>
+      <div style="flex:1;overflow:hidden;padding:8px;display:flex;flex-direction:column;gap:6px">
+        <sc-for list="{{ accounts }}" as="acc" hint-placeholder-count="6">
+          <div onClick="{{ acc.select }}" style="padding:{{ cardPad }};border-radius:8px;cursor:pointer;background:{{ acc.bg }};box-shadow:{{ acc.ring }};display:flex;flex-direction:column;gap:3px" style-hover="background:rgba(233,233,237,.05)">
+            <div style="display:flex;align-items:center;gap:7px">
+              <span style="width:7px;height:7px;flex:none;border-radius:50%;background:{{ acc.hue }}"></span>
+              <div style="font-family:var(--font-heading);font-size:13px;flex:1">{{ acc.name }}</div>
+              <span style="width:6px;height:6px;border-radius:50%;background:{{ acc.liveDot }}"></span>
+            </div>
+            <div style="display:flex;align-items:baseline;gap:8px;padding-left:14px">
+              <div style="font-size:11.5px;color:{{ acc.statusColor }};flex:1">{{ acc.status }}</div>
+              <div style="font-size:11px;color:rgba(233,233,237,.35)">{{ acc.uptime }}</div>
+            </div>
+            <sc-if value="{{ acc.showMetrics }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;gap:12px;padding-left:14px;font-size:11px;color:rgba(233,233,237,.42)">
+                <span>CPU {{ acc.cpu }}</span><span>RAM {{ acc.ram }}</span>
+              </div>
+            </sc-if>
+          </div>
+        </sc-for>
+      </div>
+      <div style="flex:none;padding:10px;display:flex;gap:6px;border-top:1px solid rgba(233,233,237,.06)">
+        <button onClick="{{ openAdd }}" class="btn btn-secondary" style="flex:1;font-size:12.5px">
+          <svg width="13" height="13" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.3"/></svg>Add account
+        </button>
+        <button onClick="{{ launchAll }}" class="btn btn-primary" style="width:38px;padding:0" title="Launch all">
+          <svg width="13" height="13" viewBox="0 0 16 16"><path d="M4 3l9 5-9 5z" fill="currentColor"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column;background:linear-gradient(180deg,#171927,#131421)">
+
+      <sc-if value="{{ isGrid }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;flex-direction:column;height:100%;min-height:0">
+          <div style="height:40px;flex:none;display:flex;align-items:center;gap:10px;padding:0 12px;border-bottom:1px solid rgba(233,233,237,.06)">
+            <div style="font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:rgba(233,233,237,.4)">Tiling</div>
+            <div style="display:flex;border:1px solid rgba(233,233,237,.12);border-radius:8px;overflow:hidden">
+              <div onClick="{{ set1 }}" style="padding:5px 11px;font-size:12px;cursor:pointer;color:{{ g1c }};box-shadow:{{ g1r }}">1</div>
+              <div onClick="{{ set2 }}" style="padding:5px 11px;font-size:12px;cursor:pointer;border-left:1px solid rgba(233,233,237,.12);color:{{ g2c }};box-shadow:{{ g2r }}">2</div>
+              <div onClick="{{ set4 }}" style="padding:5px 11px;font-size:12px;cursor:pointer;border-left:1px solid rgba(233,233,237,.12);color:{{ g4c }};box-shadow:{{ g4r }}">4</div>
+              <div onClick="{{ set6 }}" style="padding:5px 11px;font-size:12px;cursor:pointer;border-left:1px solid rgba(233,233,237,.12);color:{{ g6c }};box-shadow:{{ g6r }}">6</div>
+            </div>
+            <div style="font-size:11.5px;color:rgba(233,233,237,.35)">{{ tilingLabel }}</div>
+            <div style="flex:1"></div>
+            <div onClick="{{ toggleSync }}" style="display:flex;align-items:center;gap:7px;padding:4px 10px;border-radius:8px;font-size:12px;cursor:pointer;color:{{ syncColor }};box-shadow:{{ syncRing }}">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M2 8a6 6 0 0110-4.3M14 8a6 6 0 01-10 4.3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+              Input sync {{ syncState }}
+            </div>
+          </div>
+          <div style="flex:1;min-height:0;padding:10px;display:grid;gap:10px;grid-template-columns:{{ gridCols }};grid-template-rows:{{ gridRows }}">
+            <sc-for list="{{ panes }}" as="p" hint-placeholder-count="2">
+              <div style="min-width:0;display:flex;flex-direction:column;border-radius:10px;overflow:hidden;background:#0f1019;box-shadow:{{ p.ring }}">
+                <div style="height:32px;flex:none;display:flex;align-items:center;gap:8px;padding:0 8px;background:#15172a">
+                  <svg width="10" height="12" viewBox="0 0 10 12" style="color:rgba(233,233,237,.3)"><circle cx="2.5" cy="2.5" r="1" fill="currentColor"/><circle cx="7.5" cy="2.5" r="1" fill="currentColor"/><circle cx="2.5" cy="6" r="1" fill="currentColor"/><circle cx="7.5" cy="6" r="1" fill="currentColor"/><circle cx="2.5" cy="9.5" r="1" fill="currentColor"/><circle cx="7.5" cy="9.5" r="1" fill="currentColor"/></svg>
+                  <span style="width:6px;height:6px;border-radius:50%;background:{{ p.hue }}"></span>
+                  <div style="font-family:var(--font-heading);font-size:12px;flex:none;white-space:nowrap">{{ p.name }}</div>
+                  <div style="font-size:11px;color:rgba(233,233,237,.35);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ p.host }}</div>
+                  <div style="flex:1"></div>
+                  <div style="display:flex;gap:1px;color:rgba(233,233,237,.5)">
+                    <div onClick="{{ p.openMenu }}" style="width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:6px;cursor:pointer" style-hover="background:rgba(233,233,237,.1);color:var(--color-accent)"><svg width="12" height="12" viewBox="0 0 16 16"><circle cx="8" cy="3" r="1.2" fill="currentColor"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/><circle cx="8" cy="13" r="1.2" fill="currentColor"/></svg></div>
+                    <div style="width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:6px;cursor:pointer" style-hover="background:rgba(233,233,237,.1);color:var(--color-accent)"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M13 8a5 5 0 11-1.6-3.7M13 2.6V5h-2.4" stroke="currentColor" stroke-width="1.4"/></svg></div>
+                    <div style="width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:6px;cursor:pointer" style-hover="background:rgba(233,233,237,.1);color:var(--color-accent)"><svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M6 2.5H2.5V6M10 13.5h3.5V10" stroke="currentColor" stroke-width="1.3"/></svg></div>
+                    <div style="width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:6px;cursor:pointer" style-hover="background:#8c3a48;color:#fff"><svg width="11" height="11" viewBox="0 0 11 11"><path d="M2 2l7 7M9 2l-7 7" stroke="currentColor" stroke-width="1.2"/></svg></div>
+                  </div>
+                </div>
+                <div style="flex:1;min-height:0;position:relative;display:flex;align-items:center;justify-content:center;background:#1b1c26;overflow:hidden">
+                  <div style="position:absolute;inset:0;background-color:#20222e;background-image:linear-gradient(rgba(233,233,237,.045) 1px,transparent 1px),linear-gradient(90deg,rgba(233,233,237,.045) 1px,transparent 1px),radial-gradient(70% 55% at 50% 8%,rgba(145,132,217,.16),transparent 75%);background-size:32px 32px,32px 32px,100% 100%"></div>
+                  <div style="position:absolute;left:8%;top:14%;width:26%;height:22%;border-radius:3px;background:rgba(89,93,108,.22);box-shadow:inset 0 0 0 1px rgba(233,233,237,.05)"></div>
+                  <div style="position:absolute;right:9%;bottom:16%;width:22%;height:26%;border-radius:3px;background:rgba(89,93,108,.18);box-shadow:inset 0 0 0 1px rgba(233,233,237,.05)"></div>
+                  <div style="position:absolute;left:6%;bottom:8%;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:rgba(233,233,237,.22)">game canvas placeholder</div>
+                  <div style="position:absolute;right:10px;top:8px;display:flex;border-radius:6px;overflow:hidden;font-size:10px;box-shadow:inset 0 0 0 1px rgba(233,233,237,.12)">
+                    <div style="padding:3px 8px;background:rgba(145,132,217,.2);color:var(--color-accent-200)">English</div>
+                    <div style="padding:3px 8px;color:rgba(233,233,237,.5)">Português</div>
+                  </div>
+                  <div style="position:relative;width:{{ p.cardWidth }};max-width:86%;transform:{{ p.cardScale }};transform-origin:center;padding:24px;border-radius:12px;background:rgba(20,22,35,.94);border:1px solid var(--color-accent-800);box-shadow:0 0 40px rgba(145,132,217,.14)">
+                    <div style="display:flex;flex-direction:column;align-items:center;gap:7px">
+                      <div style="width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;border:1px solid var(--color-accent-700);box-shadow:0 0 18px rgba(145,132,217,.3)">
+                        <svg width="15" height="15" viewBox="0 0 16 16"><path d="M8 1.6l2.4 3.9L8 14.4 5.6 5.5z" fill="var(--color-accent)"/><path d="M2.4 5.5h11.2" stroke="var(--color-accent-600)" stroke-width="1.1"/></svg>
+                      </div>
+                      <div style="font-family:var(--font-heading);font-weight:500;font-size:{{ p.titleSize }};letter-spacing:.02em;white-space:nowrap;color:var(--color-accent-200);text-shadow:0 0 22px rgba(145,132,217,.45)">IdleGame</div>
+                    </div>
+                    <div style="font-family:var(--font-heading);font-size:17px;margin-top:16px">Create your account</div>
+                    <p style="font-size:12px;color:rgba(233,233,237,.55);margin:4px 0 0;text-wrap:pretty">Name a character and start playing — free, in your browser.</p>
+                    <div style="display:flex;flex-direction:column;gap:9px;margin-top:14px">
+                      <div>
+                        <div style="font-size:11.5px;color:rgba(233,233,237,.7);margin-bottom:4px">Email</div>
+                        <div style="display:flex;align-items:center;height:32px;padding:0 10px;border-radius:8px;background:#101120;border:1px solid rgba(233,233,237,.1);font-size:12px;color:rgba(233,233,237,.5)">{{ p.email }}</div>
+                      </div>
+                      <div>
+                        <div style="font-size:11.5px;color:rgba(233,233,237,.7);margin-bottom:4px">Password</div>
+                        <div style="display:flex;align-items:center;height:32px;padding:0 10px;border-radius:8px;background:#101120;border:1px solid rgba(233,233,237,.1);font-size:13px;letter-spacing:.2em;color:rgba(233,233,237,.5)">{{ p.pass }}</div>
+                      </div>
+                      <div style="font-size:11px;color:rgba(233,233,237,.38)">Use at least 8 characters.</div>
+                      <div style="height:36px;display:flex;align-items:center;justify-content:center;border-radius:8px;border:1px solid var(--color-accent);color:var(--color-accent);background:rgba(145,132,217,.1);font-size:13px;font-family:var(--font-heading);cursor:pointer" style-hover="background:rgba(145,132,217,.2)">Create account</div>
+                      <div style="display:flex;align-items:center;gap:10px;font-size:10px;letter-spacing:.12em;color:rgba(233,233,237,.35)">
+                        <div style="flex:1;height:1px;background:linear-gradient(to right,transparent,rgba(233,233,237,.16))"></div>OR<div style="flex:1;height:1px;background:linear-gradient(to left,transparent,rgba(233,233,237,.16))"></div>
+                      </div>
+                      <div style="height:34px;display:flex;align-items:center;justify-content:center;gap:9px;border-radius:8px;border:1px solid rgba(233,233,237,.14);font-size:12.5px;color:rgba(233,233,237,.85);cursor:pointer" style-hover="background:rgba(233,233,237,.06)">
+                        <span style="width:16px;height:16px;border-radius:50%;background:rgba(233,233,237,.12);display:flex;align-items:center;justify-content:center;font-size:9px;color:rgba(233,233,237,.7)">G</span>
+                        Continue with Google
+                      </div>
+                    </div>
+                    <div style="margin-top:13px;text-align:center;font-size:11.5px;color:rgba(233,233,237,.55)">Already play? <a href="#" style="color:var(--color-accent-300)">Sign in</a></div>
+                    <div style="margin-top:5px;text-align:center;font-size:11px"><a href="#" style="color:rgba(233,233,237,.42)">About the game</a></div>
+                  </div>
+                  <sc-if value="{{ p.autofilled }}" hint-placeholder-val="{{ false }}">
+                    <div style="position:absolute;left:10px;bottom:10px;display:flex;align-items:center;gap:7px;padding:5px 10px;border-radius:999px;background:rgba(18,19,32,.9);border:1px solid var(--color-accent-800);font-size:11px;color:var(--color-accent-200)">
+                      <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8.4l3.2 3L13 4.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                      Credentials autofilled by profile
+                    </div>
+                  </sc-if>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isMonitor }}" hint-placeholder-val="{{ false }}">
+        <div style="height:100%;overflow:hidden;padding:20px 24px;display:flex;flex-direction:column;gap:16px">
+          <div>
+            <div style="font-family:var(--font-heading);font-size:20px">Resource monitor</div>
+            <div style="font-size:12.5px;color:rgba(233,233,237,.5)">Per-profile renderer processes · sampled every 2s</div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+            <sc-for list="{{ statCards }}" as="s" hint-placeholder-count="4">
+              <div style="padding:14px;border-radius:10px;background:var(--color-surface);box-shadow:var(--shadow-sm)">
+                <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-accent)">{{ s.label }}</div>
+                <div style="font-family:var(--font-heading);font-size:26px;margin-top:6px">{{ s.value }}</div>
+                <div style="font-size:11.5px;color:rgba(233,233,237,.45)">{{ s.note }}</div>
+                <div style="margin-top:10px;height:4px;border-radius:2px;background:rgba(233,233,237,.08);overflow:hidden">
+                  <div style="height:100%;width:{{ s.pct }};background:var(--color-accent);box-shadow:0 0 10px var(--color-accent)"></div>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="flex:1;min-height:0;display:grid;grid-template-columns:1.35fr 1fr;gap:12px">
+            <div style="padding:14px;border-radius:10px;background:var(--color-surface);box-shadow:var(--shadow-sm);display:flex;flex-direction:column">
+              <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(233,233,237,.5)">CPU per profile · last 60s</div>
+              <div style="flex:1;min-height:0;display:flex;align-items:flex-end;gap:3px;margin-top:14px">
+                <sc-for list="{{ bars }}" as="b" hint-placeholder-count="30">
+                  <div style="flex:1;height:{{ b.h }};border-radius:2px 2px 0 0;background:linear-gradient(180deg,var(--color-accent-400),var(--color-accent-800))"></div>
+                </sc-for>
+              </div>
+              <div style="display:flex;justify-content:space-between;font-size:10.5px;color:rgba(233,233,237,.35);margin-top:8px"><span>-60s</span><span>-30s</span><span>now</span></div>
+            </div>
+            <div style="padding:0;border-radius:10px;background:var(--color-surface);box-shadow:var(--shadow-sm);overflow:hidden;display:flex;flex-direction:column">
+              <div style="padding:12px 14px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(233,233,237,.5)">Processes</div>
+              <div style="flex:1;min-height:0;padding:0 6px 8px">
+                <sc-for list="{{ procs }}" as="pr" hint-placeholder-count="6">
+                  <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-top:1px solid rgba(233,233,237,.06)">
+                    <span style="width:6px;height:6px;border-radius:50%;background:{{ pr.hue }}"></span>
+                    <div style="flex:1;font-size:12.5px">{{ pr.name }}</div>
+                    <div style="width:52px;text-align:right;font-size:12px;color:rgba(233,233,237,.6)">{{ pr.cpu }}</div>
+                    <div style="width:64px;text-align:right;font-size:12px;color:rgba(233,233,237,.6)">{{ pr.ram }}</div>
+                    <div style="font-size:11px;color:var(--color-accent-300);cursor:pointer">kill</div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isAutomation }}" hint-placeholder-val="{{ false }}">
+        <div style="height:100%;overflow:hidden;display:grid;grid-template-columns:280px 1fr">
+          <div style="border-right:1px solid rgba(233,233,237,.07);display:flex;flex-direction:column">
+            <div style="padding:16px 16px 10px">
+              <div style="font-family:var(--font-heading);font-size:16px">Scripts</div>
+              <div style="font-size:11.5px;color:rgba(233,233,237,.45)">Run per profile or across a workspace</div>
+            </div>
+            <div style="flex:1;padding:0 10px;display:flex;flex-direction:column;gap:6px">
+              <sc-for list="{{ scripts }}" as="s" hint-placeholder-count="4">
+                <div onClick="{{ s.select }}" style="padding:10px;border-radius:8px;cursor:pointer;background:{{ s.bg }};box-shadow:{{ s.ring }}" style-hover="background:rgba(233,233,237,.05)">
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <div style="flex:1;font-family:var(--font-heading);font-size:13px">{{ s.name }}</div>
+                    <div style="font-size:10px;padding:2px 6px;border-radius:5px;color:{{ s.badgeColor }};background:{{ s.badgeBg }}">{{ s.state }}</div>
+                  </div>
+                  <div style="font-size:11.5px;color:rgba(233,233,237,.42);margin-top:3px">{{ s.trigger }}</div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="padding:10px"><button class="btn btn-secondary btn-block" style="font-size:12.5px">New script</button></div>
+          </div>
+          <div style="display:flex;flex-direction:column;min-width:0">
+            <div style="height:44px;flex:none;display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid rgba(233,233,237,.07)">
+              <div style="font-family:var(--font-heading);font-size:13.5px;flex:1">{{ activeScript }}</div>
+              <button onClick="{{ toggleScript }}" class="btn btn-primary" style="font-size:12px">{{ scriptAction }}</button>
+              <button class="btn btn-secondary" style="font-size:12px">Dry run</button>
+            </div>
+            <div style="flex:1;min-height:0;display:grid;grid-template-rows:1fr 200px">
+              <div style="padding:14px 16px;overflow:hidden;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;line-height:1.85;color:rgba(233,233,237,.8)">
+                <sc-for list="{{ codeLines }}" as="l" hint-placeholder-count="12">
+                  <div style="display:flex;gap:14px"><span style="width:18px;text-align:right;color:rgba(233,233,237,.25)">{{ l.n }}</span><span style="color:{{ l.color }};white-space:pre">{{ l.t }}</span></div>
+                </sc-for>
+              </div>
+              <div style="border-top:1px solid rgba(233,233,237,.07);background:#101120;padding:10px 16px;overflow:hidden">
+                <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(233,233,237,.4);margin-bottom:8px">Run log</div>
+                <sc-for list="{{ logLines }}" as="l" hint-placeholder-count="5">
+                  <div style="display:flex;gap:10px;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;line-height:1.9"><span style="color:rgba(233,233,237,.3)">{{ l.time }}</span><span style="color:{{ l.color }}">{{ l.tag }}</span><span style="color:rgba(233,233,237,.72)">{{ l.msg }}</span></div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isDownloads }}" hint-placeholder-val="{{ false }}">
+        <div style="height:100%;overflow:hidden;padding:20px 24px;display:flex;flex-direction:column;gap:14px">
+          <div style="display:flex;align-items:flex-end;gap:14px">
+            <div style="flex:1">
+              <div style="font-family:var(--font-heading);font-size:20px">Downloads &amp; history</div>
+              <div style="font-size:12.5px;color:rgba(233,233,237,.5)">Scoped per profile — nothing is shared between accounts</div>
+            </div>
+            <div class="seg">
+              <label class="seg-opt"><input type="radio" name="dl" checked="checked">Downloads</label>
+              <label class="seg-opt"><input type="radio" name="dl">History</label>
+            </div>
+          </div>
+          <div style="border-radius:10px;background:var(--color-surface);box-shadow:var(--shadow-sm);overflow:hidden">
+            <sc-for list="{{ downloads }}" as="d" hint-placeholder-count="4">
+              <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-top:1px solid rgba(233,233,237,.06)">
+                <div style="width:30px;height:30px;flex:none;border-radius:7px;border:1px solid var(--color-accent-800);display:flex;align-items:center;justify-content:center;color:var(--color-accent)"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 2.6v7M5.2 7l2.8 2.8L10.8 7M3 13h10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></div>
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:13px">{{ d.file }}</div>
+                  <div style="font-size:11.5px;color:rgba(233,233,237,.42)">{{ d.meta }}</div>
+                  <sc-if value="{{ d.active }}" hint-placeholder-val="{{ false }}">
+                    <div style="margin-top:6px;height:3px;border-radius:2px;background:rgba(233,233,237,.1);overflow:hidden"><div style="height:100%;width:{{ d.pct }};background:var(--color-accent)"></div></div>
+                  </sc-if>
+                </div>
+                <div style="font-size:11px;padding:3px 8px;border-radius:6px;color:var(--color-accent-200);background:var(--color-accent-900)">{{ d.profile }}</div>
+                <div style="font-size:11.5px;color:rgba(233,233,237,.4);width:74px;text-align:right">{{ d.state }}</div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="border-radius:10px;background:var(--color-surface);box-shadow:var(--shadow-sm);overflow:hidden">
+            <div style="padding:12px 14px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(233,233,237,.45)">Recent history · Conta 1</div>
+            <sc-for list="{{ history }}" as="h" hint-placeholder-count="4">
+              <div style="display:flex;align-items:center;gap:12px;padding:9px 14px;border-top:1px solid rgba(233,233,237,.06)">
+                <span style="width:5px;height:5px;border-radius:50%;background:var(--color-accent-600)"></span>
+                <div style="flex:1;font-size:12.5px">{{ h.title }}</div>
+                <div style="font-size:11.5px;color:rgba(233,233,237,.4)">{{ h.url }}</div>
+                <div style="font-size:11.5px;color:rgba(233,233,237,.3);width:56px;text-align:right">{{ h.time }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isSettings }}" hint-placeholder-val="{{ false }}">
+        <div style="height:100%;overflow:hidden;display:grid;grid-template-columns:200px 1fr">
+          <div style="border-right:1px solid rgba(233,233,237,.07);padding:16px 10px;display:flex;flex-direction:column;gap:2px">
+            <div style="padding:0 8px 10px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:rgba(233,233,237,.4)">Settings</div>
+            <sc-for list="{{ settingsNav }}" as="s" hint-placeholder-count="5">
+              <div onClick="{{ s.select }}" style="padding:7px 9px;border-radius:7px;font-size:12.5px;cursor:pointer;color:{{ s.color }};background:{{ s.bg }}" style-hover="background:rgba(233,233,237,.05)">{{ s.name }}</div>
+            </sc-for>
+          </div>
+          <div style="padding:20px 24px;overflow:hidden;display:flex;flex-direction:column;gap:18px">
+            <div>
+              <div style="font-family:var(--font-heading);font-size:19px">{{ settingsTitle }}</div>
+              <div style="font-size:12.5px;color:rgba(233,233,237,.5)">{{ settingsSub }}</div>
+            </div>
+            <sc-if value="{{ isLangSection }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:10px;background:var(--color-surface);box-shadow:var(--shadow-sm)">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="color:var(--color-accent)"><circle cx="8" cy="8" r="5.6" stroke="currentColor" stroke-width="1.3"/><path d="M2.4 8h11.2M8 2.4c1.7 1.7 1.7 9.5 0 11.2M8 2.4C6.3 4.1 6.3 11.9 8 13.6" stroke="currentColor" stroke-width="1.1"/></svg>
+                <div style="flex:1;font-size:12.5px;color:rgba(233,233,237,.7)">Interface language — applied instantly, no restart</div>
+                <div style="display:flex;border:1px solid rgba(233,233,237,.12);border-radius:8px;overflow:hidden">
+                  <div onClick="{{ setEn }}" style="padding:6px 12px;font-size:12.5px;cursor:pointer;color:{{ enColor }};box-shadow:{{ enRing }}">English (US)</div>
+                  <div onClick="{{ setPt }}" style="padding:6px 12px;font-size:12.5px;cursor:pointer;border-left:1px solid rgba(233,233,237,.12);color:{{ ptColor }};box-shadow:{{ ptRing }}">Português (BR)</div>
+                </div>
+              </div>
+            </sc-if>
+            <sc-for list="{{ settingsRows }}" as="r" hint-placeholder-count="4">
+              <div style="display:grid;grid-template-columns:260px 1fr;gap:20px;padding-bottom:16px;border-bottom:1px solid rgba(233,233,237,.06)">
+                <div>
+                  <div style="font-family:var(--font-heading);font-size:13.5px">{{ r.label }}</div>
+                  <div style="font-size:11.5px;color:rgba(233,233,237,.45);margin-top:2px">{{ r.help }}</div>
+                </div>
+                <div>{{ r.control }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isOnboarding }}" hint-placeholder-val="{{ false }}">
+        <div style="height:100%;display:flex;align-items:center;justify-content:center;padding:40px">
+          <div style="width:560px;text-align:center">
+            <svg width="64" height="64" viewBox="0 0 48 48" fill="none" style="margin:0 auto 20px;filter:drop-shadow(0 0 30px rgba(145,132,217,.35))">
+              <rect x="6.5" y="6.5" width="35" height="35" rx="9" stroke="var(--color-neutral-700)" stroke-width="1.6"/>
+              <path d="M15 34V15l18 19V15" stroke="var(--color-accent)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M15 34l18-19" stroke="var(--color-accent-800)" stroke-width="1.4"/>
+            </svg>
+            <div style="font-family:var(--font-heading);font-size:28px;letter-spacing:-.02em">No profiles yet</div>
+            <p style="font-size:13.5px;color:rgba(233,233,237,.55);margin:8px 0 0;text-wrap:pretty">Each profile is an isolated browser session — its own cookies, storage and optional proxy. Add one per game account, then tile them and drive all of them from a single toolbar.</p>
+            <div style="display:flex;gap:8px;justify-content:center;margin-top:22px">
+              <button onClick="{{ openAdd }}" class="btn btn-primary" style="font-size:13px">Create first profile</button>
+              <button class="btn btn-secondary" style="font-size:13px">Import from Chrome</button>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:34px;text-align:left">
+              <sc-for list="{{ onboardSteps }}" as="o" hint-placeholder-count="3">
+                <div style="padding:12px;border-radius:9px;background:var(--color-surface);box-shadow:var(--shadow-sm)">
+                  <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-accent)">{{ o.step }}</div>
+                  <div style="font-family:var(--font-heading);font-size:13.5px;margin-top:5px">{{ o.title }}</div>
+                  <div style="font-size:11.5px;color:rgba(233,233,237,.45);margin-top:3px">{{ o.body }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+    </div>
+  </div>
+
+  <div style="height:30px;flex:none;display:flex;align-items:center;gap:14px;padding:0 12px;background:#12131f;border-top:1px solid rgba(233,233,237,.07);font-size:11.5px;color:rgba(233,233,237,.5)">
+    <div style="display:flex;align-items:center;gap:6px;color:var(--color-accent-300)">
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 6.2a8 8 0 0112 0M4.4 8.8a5 5 0 017.2 0" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><circle cx="8" cy="12" r="1.1" fill="currentColor"/></svg>
+      Online
+    </div>
+    <div>{{ workspaceName }} · {{ tilingLabel }}</div>
+    <div style="color:rgba(233,233,237,.75)">{{ activeLabel }}</div>
+    <div style="flex:1"></div>
+    <sc-for list="{{ statusMetrics }}" as="m" hint-placeholder-count="4">
+      <div style="display:flex;align-items:center;gap:5px"><span style="color:rgba(233,233,237,.32)">{{ m.k }}</span>{{ m.v }}</div>
+    </sc-for>
+    <div style="color:rgba(233,233,237,.32)">v1.1.6</div>
+  </div>
+</div>
+
+<sc-if value="{{ menuOpen }}" hint-placeholder-val="{{ false }}">
+  <div onClick="{{ closeAll }}" style="position:fixed;inset:0;z-index:40"></div>
+</sc-if>
+<sc-if value="{{ menuOpen }}" hint-placeholder-val="{{ false }}">
+  <div style="position:fixed;left:{{ menuX }};top:{{ menuY }};z-index:50;width:222px;padding:5px;border-radius:10px;background:#1a1c2b;box-shadow:var(--shadow-md)">
+    <sc-for list="{{ menuItems }}" as="mi" hint-placeholder-count="6">
+      <div style="display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:7px;font-size:12.5px;cursor:pointer;color:{{ mi.color }}" style-hover="background:rgba(145,132,217,.14)">
+        <span style="flex:1">{{ mi.label }}</span><span style="font-size:11px;color:rgba(233,233,237,.3)">{{ mi.key }}</span>
+      </div>
+    </sc-for>
+  </div>
+</sc-if>
+
+<sc-if value="{{ addOpen }}" hint-placeholder-val="{{ false }}">
+  <div onClick="{{ closeAll }}" style="position:fixed;inset:0;z-index:60;background:rgba(8,9,15,.72);display:flex;align-items:center;justify-content:center">
+    <div onClick="{{ stop }}" style="width:520px;padding:22px;border-radius:14px;background:#1a1c2b;box-shadow:var(--shadow-lg)">
+      <div style="font-family:var(--font-heading);font-size:19px">Add profile</div>
+      <div style="font-size:12.5px;color:rgba(233,233,237,.5);margin-bottom:16px">Isolated session · saved to the “{{ workspaceName }}” workspace</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="field"><label>Display name</label><input class="input" value="Conta 9"></div>
+        <div class="field"><label>Start URL</label><input class="input" value="https://idlegame.com/"></div>
+        <div class="field"><label>Account email</label><input class="input" placeholder="autofill login"></div>
+        <div class="field"><label>Password</label><input class="input" type="password" value="passphrase"></div>
+      </div>
+      <div class="field" style="margin-top:12px"><label>Proxy</label>
+        <div class="seg" style="width:100%">
+          <label class="seg-opt" style="flex:1;justify-content:center"><input type="radio" name="px" checked="checked">None</label>
+          <label class="seg-opt" style="flex:1;justify-content:center"><input type="radio" name="px">Shared pool</label>
+          <label class="seg-opt" style="flex:1;justify-content:center"><input type="radio" name="px">Custom host</label>
+        </div>
+      </div>
+      <div style="display:flex;gap:14px;margin-top:14px;font-size:12.5px;color:rgba(233,233,237,.7)">
+        <label class="radio"><input type="radio" name="lp" checked="checked"><span class="dot"></span>Launch on app start</label>
+        <label class="radio"><input type="radio" name="lp"><span class="dot"></span>Manual launch</label>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:20px">
+        <button onClick="{{ closeAll }}" class="btn btn-secondary" style="font-size:13px">Cancel</button>
+        <button onClick="{{ closeAll }}" class="btn btn-primary" style="font-size:13px">Create &amp; launch</button>
+      </div>
+    </div>
+  </div>
+</sc-if>
+
+<sc-if value="{{ releaseOpen }}" hint-placeholder-val="{{ false }}">
+  <div onClick="{{ closeAll }}" style="position:fixed;inset:0;z-index:60;background:rgba(8,9,15,.72);display:flex;align-items:center;justify-content:center">
+    <div onClick="{{ stop }}" style="width:520px;border-radius:14px;overflow:hidden;background:#1a1c2b;box-shadow:var(--shadow-lg)">
+      <div style="padding:22px 22px 16px;background:linear-gradient(180deg,#262a60,#1a1c2b)">
+        <div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--color-accent-200)">Update ready</div>
+        <div style="font-family:var(--font-heading);font-size:24px;margin-top:5px">Nimble 1.2.0</div>
+        <div style="font-size:12.5px;color:rgba(233,233,237,.6)">Downloaded · restarts in place, sessions are restored</div>
+      </div>
+      <div style="padding:16px 22px 20px">
+        <sc-for list="{{ releaseNotes }}" as="n" hint-placeholder-count="4">
+          <div style="display:flex;gap:10px;padding:7px 0">
+            <span style="font-size:10px;padding:2px 6px;border-radius:5px;height:18px;color:var(--color-accent-200);background:var(--color-accent-900)">{{ n.tag }}</span>
+            <div style="flex:1;font-size:12.5px;color:rgba(233,233,237,.82)">{{ n.text }}</div>
+          </div>
+        </sc-for>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+          <button onClick="{{ closeAll }}" class="btn btn-secondary" style="font-size:13px">Later</button>
+          <button onClick="{{ closeAll }}" class="btn btn-primary" style="font-size:13px">Restart now</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;toolbarShape&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;pill&quot;,&quot;square&quot;],&quot;default&quot;:&quot;pill&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Chrome&quot;},&quot;statusDetail&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;full&quot;,&quot;minimal&quot;],&quot;default&quot;:&quot;full&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Chrome&quot;}}">
+const ACC = [
+  {name:'Conta 1', hue:'#e0c168', status:'Online', up:'9s', cpu:'0.1%', ram:'125 MB', live:true, host:'idlegame.com', email:'player01@mail.com'},
+  {name:'Conta 2', hue:'#7fb2f0', status:'Closed', up:'—', cpu:'—', ram:'—', live:false, host:'www.idlegame.com', email:'player02@mail.com'},
+  {name:'Account 5', hue:'#b5abfc', status:'Closed', up:'—', cpu:'—', ram:'—', live:false, host:'idlegame.com', email:'player05@mail.com'},
+  {name:'Account 6', hue:'#e08a5a', status:'Reconnecting', up:'2m', cpu:'0.4%', ram:'96 MB', live:false, host:'idlegame.com', email:''},
+  {name:'Conta 7', hue:'#7fe0c1', status:'Online', up:'9s', cpu:'0.1%', ram:'128 MB', live:true, host:'idlegame.com', email:'player07@mail.com'},
+  {name:'Conta 8', hue:'#7fb2f0', status:'Closed', up:'—', cpu:'—', ram:'—', live:false, host:'idlegame.com', email:''}
+];
+const WS = [
+  {name:'Principal', initial:'P', count:6},
+  {name:'Farm squad', initial:'F', count:4},
+  {name:'Trades', initial:'T', count:2},
+  {name:'Testing', initial:'Q', count:1}
+];
+const SETTINGS = {
+  Network: {sub:'Proxy assignment and connection isolation', rows:[
+    {label:'Proxy mode', help:'Applied per profile at launch', control:'Shared pool · 12 endpoints healthy'},
+    {label:'Per-profile DNS', help:'Resolve through the profile proxy', control:'Enabled'},
+    {label:'WebRTC leak guard', help:'Blocks host candidates', control:'Strict'},
+    {label:'Retry policy', help:'When a pane drops its socket', control:'3 attempts · 5s backoff'}
+  ]},
+  Performance: {sub:'How many renderers run and how hard they run', rows:[
+    {label:'Max live panes', help:'Beyond this, panes suspend', control:'6'},
+    {label:'Background throttling', help:'Idle panes drop to 5 FPS', control:'On, after 30s'},
+    {label:'Hardware acceleration', help:'GPU rasterization for game canvases', control:'On'},
+    {label:'Frame cap', help:'Per pane', control:'50 FPS'}
+  ]},
+  Privacy: {sub:'Storage isolation and what survives a restart', rows:[
+    {label:'Session isolation', help:'Cookies, storage and cache per profile', control:'Full'},
+    {label:'Clear on close', help:'Applies to non-pinned profiles', control:'Cache only'},
+    {label:'Credential vault', help:'Autofill for game logins', control:'Encrypted · OS keychain'},
+    {label:'Telemetry', help:'Crash traces only, no page content', control:'Off'}
+  ]},
+  Automation: {sub:'Defaults for scripts and input sync', rows:[
+    {label:'Input sync scope', help:'Mirror clicks and typing across panes', control:'Active workspace'},
+    {label:'Script sandbox', help:'Isolated worker per run', control:'On'},
+    {label:'Failure handling', help:'When a step throws', control:'Pause workspace'},
+    {label:'Schedule engine', help:'Cron triggers while minimized', control:'Enabled'}
+  ]},
+  Language: {sub:'Interface language and what each profile requests from the site', rows:[
+    {label:'Interface language', help:'Applies to menus, dialogs and the status bar', control:'English (US) · switch to Português (BR)'},
+    {label:'Per-profile site language', help:'Sent as Accept-Language when a pane loads', control:'Follow interface'},
+    {label:'Fallback language', help:'When a string is missing from the active locale', control:'English (US)'},
+    {label:'Date, time and numbers', help:'Formatting inside Nimble, not in the game', control:'Regional default'}
+  ]},
+  Appearance: {sub:'Chrome density and pane presentation', rows:[
+    {label:'Theme', help:'Follows Nocturne tokens', control:'Nocturne dark'},
+    {label:'Account card density', help:'Rows in the profile list', control:'Comfortable'},
+    {label:'Toolbar', help:'Address bar shape', control:'Rounded pill'},
+    {label:'Status bar detail', help:'Telemetry in the footer', control:'Full'}
+  ]}
+};
+const CODE = [
+  ['async function run(pane) {', '#d2cefd'],
+  ['  await pane.goto(profile.startUrl);', 'rgba(233,233,237,.8)'],
+  ['  await pane.fill("#trainer", profile.login);', 'rgba(233,233,237,.8)'],
+  ['  await pane.fill("#password", vault.get(profile.id));', 'rgba(233,233,237,.8)'],
+  ['  await pane.click("button[type=submit]");', 'rgba(233,233,237,.8)'],
+  ['', 'rgba(233,233,237,.8)'],
+  ['  // keep the session warm', '#8d90a6'],
+  ['  every("4m", () => pane.click(".claim-idle"));', 'rgba(233,233,237,.8)'],
+  ['  on("disconnect", () => pane.reload());', 'rgba(233,233,237,.8)'],
+  ['}', '#d2cefd'],
+  ['', ''],
+  ['export default { run, scope: "workspace" };', '#b5abfc']
+];
+class Component extends DCLogic {
+  state = {
+    view: 'grid', grid: 2, active: 0, dense: false, listOpen: true,
+    sync: true, menu: null, modal: null, section: 'Network', script: 0, running: true, lang: 'en'
+  };
+  set = (o) => this.setState(o);
+  renderVals() {
+    const s = this.state;
+    const accentBg = 'rgba(145,132,217,.14)', ring = 'inset 0 0 0 1px var(--color-accent-700)';
+    const tab = (v) => ({
+      c: s.view === v ? 'var(--color-accent-200)' : 'rgba(233,233,237,.6)',
+      b: s.view === v ? accentBg : 'transparent'
+    });
+    const t = {g: tab('grid'), m: tab('monitor'), a: tab('automation'), d: tab('downloads'), s: tab('settings')};
+    const gcol = {1:'1fr', 2:'1fr 1fr', 4:'1fr 1fr', 6:'1fr 1fr 1fr'}[s.grid];
+    const grow = {1:'1fr', 2:'1fr', 4:'1fr 1fr', 6:'1fr 1fr'}[s.grid];
+    const gsel = (n) => ({
+      c: s.grid === n ? 'var(--color-accent)' : 'rgba(233,233,237,.6)',
+      r: s.grid === n ? 'inset 0 0 0 1px var(--color-accent)' : 'none'
+    });
+    const g = {1:gsel(1), 2:gsel(2), 4:gsel(4), 6:gsel(6)};
+    const panes = ACC.slice(0, s.grid).map((a, i) => ({
+      name: a.name, host: a.host, hue: a.hue, autofilled: i === 0,
+      email: a.email || 'you@example.com', pass: a.email ? '••••••••••' : '',
+      cardWidth: s.grid === 1 ? '420px' : s.grid === 6 ? '340px' : '360px',
+      cardScale: s.grid === 4 ? 'scale(0.7)' : s.grid === 6 ? 'scale(0.6)' : 'none',
+      titleSize: s.grid === 1 ? '30px' : s.grid === 2 ? '26px' : '22px',
+      ring: i === s.active ? '0 0 0 1px var(--color-accent-600), 0 0 22px rgba(145,132,217,.18)' : '0 0 0 1px rgba(233,233,237,.08)',
+      openMenu: (e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); this.set({menu: {x: Math.round(r.left - 190), y: Math.round(r.bottom + 6)}}); }
+    }));
+    const sec = SETTINGS[s.section];
+    const scripts = [
+      {name:'Auto login', state:'active', trigger:'On profile launch'},
+      {name:'Claim idle rewards', state:'active', trigger:'Every 4 minutes'},
+      {name:'Reconnect watchdog', state:'paused', trigger:'On socket drop'},
+      {name:'Nightly report', state:'idle', trigger:'Cron 03:00'}
+    ].map((x, i) => ({
+      ...x, select: () => this.set({script: i}),
+      bg: i === s.script ? accentBg : 'transparent', ring: i === s.script ? ring : 'none',
+      badgeColor: x.state === 'active' ? '#8fe0b8' : x.state === 'paused' ? '#e0c168' : 'rgba(233,233,237,.5)',
+      badgeBg: x.state === 'active' ? 'rgba(143,224,184,.12)' : x.state === 'paused' ? 'rgba(224,193,104,.12)' : 'rgba(233,233,237,.07)'
+    }));
+    return {
+      goGrid: () => this.set({view:'grid'}), goMonitor: () => this.set({view:'monitor'}),
+      goAutomation: () => this.set({view:'automation'}), goDownloads: () => this.set({view:'downloads'}),
+      goSettings: () => this.set({view:'settings'}), goOnboarding: () => this.set({view:'onboarding'}),
+      tabGridColor:t.g.c, tabGridBg:t.g.b, tabMonColor:t.m.c, tabMonBg:t.m.b,
+      tabAutoColor:t.a.c, tabAutoBg:t.a.b, tabDownColor:t.d.c, tabDownBg:t.d.b,
+      tabSetColor:t.s.c, tabSetBg:t.s.b,
+      isGrid: s.view === 'grid', isMonitor: s.view === 'monitor', isAutomation: s.view === 'automation',
+      isDownloads: s.view === 'downloads', isSettings: s.view === 'settings', isOnboarding: s.view === 'onboarding',
+      urlRadius: this.props.toolbarShape === 'square' ? '8px' : '999px',
+      listWidth: s.listOpen ? '244px' : '68px',
+      cardPad: s.dense ? '6px 8px' : '9px 10px',
+      toggleDensity: () => this.set({dense: !s.dense}),
+      toggleList: () => this.set({listOpen: !s.listOpen}),
+      reloadAll: () => this.set({view:'grid'}),
+      toggleMute: () => {},
+      launchAll: () => this.set({grid: 6}),
+      workspaces: WS.map((w, i) => ({
+        ...w, select: () => this.set({active: 0}),
+        color: i === 0 ? 'var(--color-accent-200)' : 'rgba(233,233,237,.55)',
+        bg: i === 0 ? accentBg : 'transparent',
+        ring: i === 0 ? 'inset 0 0 0 1px var(--color-accent-600)' : 'none'
+      })),
+      workspaceName: WS[0].name,
+      accounts: ACC.map((a, i) => ({
+        name: a.name, hue: a.hue, status: a.status, uptime: a.up, cpu: a.cpu, ram: a.ram,
+        showMetrics: !s.dense && a.status !== 'Closed',
+        statusColor: a.status === 'Online' ? '#8fe0b8' : a.status === 'Closed' ? 'rgba(233,233,237,.4)' : '#e0c168',
+        liveDot: a.live ? '#8fe0b8' : 'rgba(233,233,237,.18)',
+        bg: i === s.active ? accentBg : 'transparent',
+        ring: i === s.active ? ring : 'none',
+        select: () => this.set({active: i, view: 'grid'})
+      })),
+      set1: () => this.set({grid:1}), set2: () => this.set({grid:2}), set4: () => this.set({grid:4}), set6: () => this.set({grid:6}),
+      g1c:g[1].c, g1r:g[1].r, g2c:g[2].c, g2r:g[2].r, g4c:g[4].c, g4r:g[4].r, g6c:g[6].c, g6r:g[6].r,
+      gridCols: gcol, gridRows: grow, panes,
+      tilingLabel: 'Auto grid · ' + s.grid,
+      activeLabel: ACC[s.active].name + ' active',
+      toggleSync: () => this.set({sync: !s.sync}),
+      syncState: s.sync ? 'on' : 'off',
+      syncColor: s.sync ? 'var(--color-accent)' : 'rgba(233,233,237,.55)',
+      syncRing: s.sync ? 'inset 0 0 0 1px var(--color-accent)' : 'inset 0 0 0 1px rgba(233,233,237,.12)',
+      statusMetrics: this.props.statusDetail === 'minimal'
+        ? [{k:'RAM', v:'745 MB'}]
+        : [{k:'CPU', v:'2.3%'}, {k:'RAM', v:'745 MB'}, {k:'FPS', v:'50'}, {k:'Uptime', v:'10s'}],
+      statCards: [
+        {label:'Live panes', value:'3 / 6', note:'2 suspended, 1 reconnecting', pct:'50%'},
+        {label:'CPU', value:'2.3%', note:'peak 11% · 4 renderers', pct:'23%'},
+        {label:'Memory', value:'745 MB', note:'124 MB avg per profile', pct:'42%'},
+        {label:'Frames', value:'50 FPS', note:'capped in settings', pct:'83%'}
+      ],
+      bars: [22,31,18,44,52,38,29,61,48,35,27,55,42,33,58,70,49,36,28,44,63,51,39,30,47,66,54,41,32,57]
+        .map(v => ({h: v + '%'})),
+      procs: ACC.map(a => ({name: a.name, hue: a.hue, cpu: a.cpu, ram: a.ram})),
+      scripts, activeScript: scripts[s.script].name,
+      scriptAction: s.running ? 'Pause' : 'Run',
+      toggleScript: () => this.set({running: !s.running}),
+      codeLines: CODE.map((c, i) => ({n: i + 1, t: c[0], color: c[1] || 'rgba(233,233,237,.8)'})),
+      logLines: [
+        {time:'20:14:02', tag:'launch', color:'#b5abfc', msg:'Conta 1 · renderer 4812 ready'},
+        {time:'20:14:03', tag:'fill  ', color:'#8fe0b8', msg:'#trainer, #password from vault'},
+        {time:'20:14:05', tag:'ok    ', color:'#8fe0b8', msg:'session established in 1.8s'},
+        {time:'20:18:05', tag:'claim ', color:'#b5abfc', msg:'idle rewards ×3 collected'},
+        {time:'20:19:41', tag:'warn  ', color:'#e0c168', msg:'Account 6 socket dropped — retrying'}
+      ],
+      downloads: [
+        {file:'idlegame-client-patch-1.9.4.zip', meta:'184 MB of 320 MB · 6.2 MB/s', profile:'Conta 1', state:'Downloading', active:true, pct:'57%'},
+        {file:'trade-log-2026-08-21.csv', meta:'48 KB · complete', profile:'Trades', state:'Done', active:false, pct:'100%'},
+        {file:'idle-report.pdf', meta:'1.2 MB · complete', profile:'Conta 7', state:'Done', active:false, pct:'100%'},
+        {file:'proxy-pool.json', meta:'blocked by privacy rule', profile:'Testing', state:'Blocked', active:false, pct:'0%'}
+      ],
+      history: [
+        {title:'IdleGame — create account', url:'idlegame.com/', time:'20:14'},
+        {title:'Market · offers', url:'idlegame.com/market', time:'20:09'},
+        {title:'Guild ledger', url:'idlegame.com/guild', time:'19:52'},
+        {title:'Patch notes 1.9.4', url:'idlegame.com/news', time:'19:40'}
+      ],
+      settingsNav: Object.keys(SETTINGS).map(k => ({
+        name: k, select: () => this.set({section: k}),
+        color: k === s.section ? 'var(--color-accent-200)' : 'rgba(233,233,237,.62)',
+        bg: k === s.section ? accentBg : 'transparent'
+      })),
+      settingsTitle: s.section, settingsSub: sec.sub,
+      settingsRows: s.section === 'Language'
+        ? sec.rows.map((r, i) => i === 0
+            ? {...r, control: s.lang === 'pt' ? 'Português (BR) · alterar para English (US)' : 'English (US) · switch to Português (BR)'}
+            : r)
+        : sec.rows,
+      isLangSection: s.section === 'Language',
+      setEn: () => this.set({lang:'en'}), setPt: () => this.set({lang:'pt'}),
+      enColor: s.lang === 'pt' ? 'rgba(233,233,237,.6)' : 'var(--color-accent)',
+      enRing: s.lang === 'pt' ? 'none' : 'inset 0 0 0 1px var(--color-accent)',
+      ptColor: s.lang === 'pt' ? 'var(--color-accent)' : 'rgba(233,233,237,.6)',
+      ptRing: s.lang === 'pt' ? 'inset 0 0 0 1px var(--color-accent)' : 'none',
+      onboardSteps: [
+        {step:'01', title:'Create profiles', body:'One isolated session per account.'},
+        {step:'02', title:'Tile them', body:'1, 2, 4 or 6 panes with input sync.'},
+        {step:'03', title:'Automate', body:'Login and claim scripts per workspace.'}
+      ],
+      menuOpen: !!s.menu, menuX: s.menu ? s.menu.x + 'px' : '0px', menuY: s.menu ? s.menu.y + 'px' : '0px',
+      menuItems: [
+        {label:'Reload pane', key:'⌘R', color:'rgba(233,233,237,.85)'},
+        {label:'Duplicate profile', key:'⌘D', color:'rgba(233,233,237,.85)'},
+        {label:'Run auto login', key:'⌘L', color:'var(--color-accent-200)'},
+        {label:'Mute audio', key:'⌘M', color:'rgba(233,233,237,.85)'},
+        {label:'Move to workspace…', key:'', color:'rgba(233,233,237,.85)'},
+        {label:'Open dev tools', key:'⌥⌘I', color:'rgba(233,233,237,.85)'},
+        {label:'Close pane', key:'⌘W', color:'#e08a9a'}
+      ],
+      addOpen: s.modal === 'add', releaseOpen: s.modal === 'release',
+      openAdd: () => this.set({modal:'add', menu:null}),
+      openRelease: () => this.set({modal:'release', menu:null}),
+      closeAll: () => this.set({modal:null, menu:null}),
+      stop: (e) => e.stopPropagation(),
+      releaseNotes: [
+        {tag:'new', text:'Workspace-level input sync — type once, drive every pane.'},
+        {tag:'new', text:'Proxy health checks with automatic endpoint rotation.'},
+        {tag:'fix', text:'Suspended panes no longer leak GPU memory after 6h.'},
+        {tag:'fix', text:'Credential vault unlocks with the OS keychain on Linux.'}
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

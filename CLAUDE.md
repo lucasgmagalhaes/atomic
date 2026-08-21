@@ -32,8 +32,9 @@ Two prior conflicts (proxy support, 5 vs 6 simultaneous accounts) were resolved 
 ## Implementation status
 
 - **Phase 1 (done)**: Cargo workspace scaffold at repo root (`apps/shell`, `xtask`, `crates/*`). Every crate is an empty compiling stub except `crates/dom`, which has a real arena-based DOM tree (generation-tagged `NodeId`, tested: create/append, reparent, remove + generation invalidation, subtree removal).
-- **Phase 2 (in progress)**: QuickJS embedded via FFI + minimal DOM↔JS bindings, per the spec's crate table (`js-runtime`, `js-runtime/quickjs-sys`).
-- Validate with `cargo build --workspace` and `cargo test -p dom` after any change.
+- **Phase 2 (in progress)**: `quickjs-sys` vendors QuickJS-ng v0.16.2 as a git submodule (`crates/js-runtime/quickjs-sys/vendor/quickjs-ng`) and compiles it via a `cc` build script; hand-written FFI bindings cover runtime/context lifecycle and `JS_Eval`. `js-runtime` wraps it in a safe `Runtime`/`Context` with `eval() -> Result<String, EvalError>`, tested. DOM↔JS bindings are not started yet — `dom` has no attribute/CSSOM API worth exposing to JS until phase 3.
+- Validate with `cargo build --workspace` and `cargo test --workspace` after any change.
+- **Windows build requirement**: `quickjs-sys`'s C compilation needs a Developer Command Prompt / `vcvars64.bat` environment — on this machine cc-rs's own MSVC autodetection does not locate the toolchain/SDK on its own (VS install and Windows SDK are on different drives). Also needs `/std:c11` (set in `build.rs`) for quickjs.c's C11 atomics; plain `/experimental:c11atomics` alone is not enough. If `cargo build` fails with a missing `stdlib.h` or a `C atomics require C11` error, that's this — run from `vcvars64.bat`, not a bug in the crate.
 
 ## Conventions
 

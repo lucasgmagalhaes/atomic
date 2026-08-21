@@ -162,6 +162,66 @@ impl Dom {
     pub fn root(&self) -> NodeId {
         self.root
     }
+
+    pub fn set_attribute(&mut self, id: NodeId, name: &str, value: &str) {
+        if let Some(Node {
+            data: NodeData::Element { attributes, .. },
+            ..
+        }) = self.get_mut(id)
+        {
+            attributes.insert(name.to_string(), value.to_string());
+        }
+    }
+
+    /// Depth-first search for the first element whose `id` attribute matches.
+    /// Mirrors `document.getElementById`, minus JS-facing identity — the
+    /// caller gets a `NodeId`, not a JS object (that needs a DOM node JS
+    /// class, which doesn't exist yet).
+    pub fn find_by_id(&self, id: &str) -> Option<NodeId> {
+        fn walk(dom: &Dom, node: NodeId, id: &str) -> Option<NodeId> {
+            let n = dom.get(node)?;
+            if let NodeData::Element { attributes, .. } = &n.data {
+                if attributes.get("id").map(|v| v.as_str()) == Some(id) {
+                    return Some(node);
+                }
+            }
+            for &child in &n.children {
+                if let Some(found) = walk(dom, child, id) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        walk(self, self.root, id)
+    }
+
+    /// Concatenation of every Text descendant, in document order — mirrors
+    /// `Node.textContent`'s read side.
+    pub fn text_content(&self, id: NodeId) -> String {
+        fn walk(dom: &Dom, node: NodeId, out: &mut String) {
+            let Some(n) = dom.get(node) else { return };
+            if let NodeData::Text(text) = &n.data {
+                out.push_str(text);
+            }
+            for &child in &n.children {
+                walk(dom, child, out);
+            }
+        }
+        let mut out = String::new();
+        walk(self, id, &mut out);
+        out
+    }
+
+    /// Replaces every child of `id` with a single Text node — mirrors
+    /// `Node.textContent`'s write side (`el.textContent = "..."`).
+    pub fn set_text_content(&mut self, id: NodeId, text: &str) {
+        let children = self.get(id).map(|n| n.children.clone()).unwrap_or_default();
+        for child in children {
+            self.remove(child);
+        }
+        let text_node = self.create_text(text);
+        self.append_child(id, text_node);
+    }
 }
 
 #[cfg(test)]
@@ -230,5 +290,51 @@ mod tests {
         assert!(dom.get(child1).is_none());
         assert!(dom.get(child2).is_none());
         assert!(dom.get(root).unwrap().children.is_empty());
+    }
+
+    #[test]
+    fn find_by_id_locates_nested_element() {
+        let mut dom = Dom::new();
+        let root = dom.root();
+        let wrapper = dom.create_element("div");
+        let target = dom.create_element("span");
+        dom.append_child(root, wrapper);
+        dom.append_child(wrapper, target);
+        dom.set_attribute(target, "id", "target");
+
+        assert_eq!(dom.find_by_id("target"), Some(target));
+        assert_eq!(dom.find_by_id("missing"), None);
+    }
+
+    #[test]
+    fn text_content_concatenates_descendant_text_nodes() {
+        let mut dom = Dom::new();
+        let root = dom.root();
+        let p = dom.create_element("p");
+        let t1 = dom.create_text("hello ");
+        let span = dom.create_element("span");
+        let t2 = dom.create_text("world");
+        dom.append_child(root, p);
+        dom.append_child(p, t1);
+        dom.append_child(p, span);
+        dom.append_child(span, t2);
+
+        assert_eq!(dom.text_content(p), "hello world");
+    }
+
+    #[test]
+    fn set_text_content_replaces_all_children() {
+        let mut dom = Dom::new();
+        let root = dom.root();
+        let p = dom.create_element("p");
+        let old_child = dom.create_element("span");
+        dom.append_child(root, p);
+        dom.append_child(p, old_child);
+
+        dom.set_text_content(p, "replaced");
+
+        assert!(dom.get(old_child).is_none());
+        assert_eq!(dom.text_content(p), "replaced");
+        assert_eq!(dom.get(p).unwrap().children.len(), 1);
     }
 }

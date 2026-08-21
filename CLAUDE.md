@@ -41,6 +41,7 @@ Two prior conflicts (proxy support, 5 vs 6 simultaneous accounts) were resolved 
 - Commits: Conventional Commits, one crate/domain per commit (`feat(dom): ...`, `chore(scaffold): ...`, `docs: ...`).
 - All code, docs, and commit messages: English.
 - Never commit `graphify-out/` (gitignored — contains absolute local filesystem paths).
+- Tests are integration-style, not inline `#[cfg(test)] mod tests` in `src/`: put them under `crate/tests/<file>_test.rs` (e.g. `crates/dom/tests/dom_test.rs`). Only works cleanly when the tests exercise the crate's public API — if a test needs a private item, that's a signal to reconsider what's private, not to fall back to an inline module.
 
 ## Knowledge graph
 

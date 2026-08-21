@@ -8,6 +8,7 @@ use std::marker::PhantomData;
 use quickjs_sys as sys;
 
 mod dom_bindings;
+mod performance;
 
 #[derive(Debug)]
 pub struct EvalError(pub String);
@@ -64,6 +65,7 @@ impl<'rt> Context<'rt> {
     pub fn new(runtime: &'rt Runtime) -> Self {
         let ptr = unsafe { sys::JS_NewContext(runtime.ptr) };
         assert!(!ptr.is_null(), "JS_NewContext returned null");
+        unsafe { performance::register(ptr) };
         Context {
             ptr,
             _runtime: PhantomData,
@@ -186,5 +188,23 @@ mod tests {
 
         let read_again = ctx.eval("__dom_get_text_by_id('greeting')", "<test>").unwrap();
         assert_eq!(read_again, "bye");
+    }
+
+    #[test]
+    fn performance_now_is_a_nonnegative_number() {
+        let rt = Runtime::new();
+        let ctx = Context::new(&rt);
+        let result = ctx.eval("typeof performance.now()", "<test>").unwrap();
+        assert_eq!(result, "number");
+    }
+
+    #[test]
+    fn performance_now_advances() {
+        let rt = Runtime::new();
+        let ctx = Context::new(&rt);
+        let first: f64 = ctx.eval("performance.now()", "<test>").unwrap().parse().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let second: f64 = ctx.eval("performance.now()", "<test>").unwrap().parse().unwrap();
+        assert!(second > first);
     }
 }

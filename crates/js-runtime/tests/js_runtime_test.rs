@@ -25,7 +25,7 @@ fn reports_exception_as_err() {
 }
 
 #[test]
-fn dom_bindings_read_and_write_text_by_id() {
+fn get_element_by_id_returns_a_node_with_text_content() {
     let mut d = dom::Dom::new();
     let root = d.root();
     let p = d.create_element("p");
@@ -36,19 +36,50 @@ fn dom_bindings_read_and_write_text_by_id() {
     let rt = Runtime::new();
     let ctx = Context::with_dom(&rt, d);
 
-    let read = ctx.eval("__dom_get_text_by_id('greeting')", "<test>").unwrap();
+    let read = ctx
+        .eval("document.getElementById('greeting').textContent", "<test>")
+        .unwrap();
     assert_eq!(read, "hello");
 
-    let missing = ctx.eval("__dom_get_text_by_id('nope')", "<test>").unwrap();
+    let missing = ctx.eval("document.getElementById('nope')", "<test>").unwrap();
     assert_eq!(missing, "null");
 
     let wrote = ctx
-        .eval("__dom_set_text_by_id('greeting', 'bye')", "<test>")
+        .eval(
+            "(() => { \
+                const el = document.getElementById('greeting'); \
+                el.textContent = 'bye'; \
+                return el.textContent; \
+            })()",
+            "<test>",
+        )
         .unwrap();
-    assert_eq!(wrote, "true");
+    assert_eq!(wrote, "bye");
+}
 
-    let read_again = ctx.eval("__dom_get_text_by_id('greeting')", "<test>").unwrap();
-    assert_eq!(read_again, "bye");
+#[test]
+fn get_element_by_id_returns_distinct_node_objects_for_the_same_element() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let p = d.create_element("p");
+    d.append_child(root, p);
+    d.set_attribute(p, "id", "greeting");
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+
+    let same_underlying_node = ctx
+        .eval(
+            "(() => { \
+                const a = document.getElementById('greeting'); \
+                const b = document.getElementById('greeting'); \
+                a.textContent = 'via a'; \
+                return b.textContent; \
+            })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(same_underlying_node, "via a");
 }
 
 #[test]

@@ -56,6 +56,44 @@ pub type JSCFunction = unsafe extern "C" fn(
     argv: *mut JSValue,
 ) -> JSValue;
 
+/// `JSCFunctionEnum::JS_CFUNC_getter` — quickjs.c's `js_call_c_function`
+/// dispatches this cproto to a 2-arg `(ctx, this_val) -> JSValue` call
+/// through a `JSCFunctionType` union member, not the 4-arg `JSCFunction`
+/// shape. Callers register a function with this narrower signature and
+/// hand it to `JS_NewCFunction2` via `mem::transmute` to `JSCFunction` —
+/// mirroring the same union punning quickjs.h itself does internally.
+pub const JS_CFUNC_GETTER: c_int = 8;
+/// `JSCFunctionEnum::JS_CFUNC_setter` — see [`JS_CFUNC_GETTER`]; dispatches
+/// to `(ctx, this_val, value) -> JSValue`.
+pub const JS_CFUNC_SETTER: c_int = 9;
+
+pub const JS_PROP_CONFIGURABLE: c_int = 1 << 0;
+pub const JS_PROP_ENUMERABLE: c_int = 1 << 2;
+pub const JS_PROP_HAS_GET: c_int = 1 << 11;
+pub const JS_PROP_HAS_SET: c_int = 1 << 12;
+
+pub type JSClassID = u32;
+pub type JSAtom = u32;
+
+/// Matches `JSClassFinalizer` from quickjs.h: called when the GC collects
+/// an object of a custom class, so it can free the native data stashed via
+/// `JS_SetOpaque`.
+pub type JSClassFinalizer = unsafe extern "C" fn(rt: *mut JSRuntime, val: JSValue);
+
+/// Mirrors `JSClassDef` from quickjs.h. `gc_mark`/`call`/`exotic` are
+/// nullable function-pointer-shaped fields this workspace has no use for
+/// yet (no cycles to mark, not a callable object, no exotic property
+/// hooks) — kept as `*mut c_void` rather than typed callbacks since they're
+/// always null here.
+#[repr(C)]
+pub struct JSClassDef {
+    pub class_name: *const c_char,
+    pub finalizer: Option<JSClassFinalizer>,
+    pub gc_mark: *mut c_void,
+    pub call: *mut c_void,
+    pub exotic: *mut c_void,
+}
+
 #[repr(C)]
 pub struct JSRuntime {
     _private: [u8; 0],
@@ -115,6 +153,45 @@ extern "C" {
     pub fn JS_GetContextOpaque(ctx: *mut JSContext) -> *mut c_void;
 
     pub fn JS_DupValue(ctx: *mut JSContext, v: JSValue) -> JSValue;
+
+    pub fn JS_GetRuntime(ctx: *mut JSContext) -> *mut JSRuntime;
+
+    /// Allocates a class ID the first time `*pclass_id == 0` (writing it
+    /// back), otherwise returns the existing value unchanged — safe to call
+    /// repeatedly with the same backing storage across multiple runtimes.
+    pub fn JS_NewClassID(rt: *mut JSRuntime, pclass_id: *mut JSClassID) -> JSClassID;
+    /// Registers `class_def` under `class_id` on `rt`. Returns `< 0` if
+    /// `class_id` is already registered on this particular runtime (e.g. a
+    /// second `Context` sharing the same `Runtime`) — the class definition
+    /// from the first call still stands, so callers can ignore the error.
+    pub fn JS_NewClass(rt: *mut JSRuntime, class_id: JSClassID, class_def: *const JSClassDef) -> c_int;
+    /// Creates an instance of `class_id` using the prototype most recently
+    /// set via `JS_SetClassProto` for this context.
+    pub fn JS_NewObjectClass(ctx: *mut JSContext, class_id: JSClassID) -> JSValue;
+    /// Sets the per-context prototype used by `JS_NewObjectClass` for
+    /// `class_id`. Takes ownership of `obj`.
+    pub fn JS_SetClassProto(ctx: *mut JSContext, class_id: JSClassID, obj: JSValue);
+
+    /// Only supported for custom classes (`class_id >= JS_CLASS_INIT_COUNT`,
+    /// true for every ID `JS_NewClassID` hands out). Returns `< 0` if `obj`
+    /// isn't an object of a registered custom class.
+    pub fn JS_SetOpaque(obj: JSValue, opaque: *mut c_void) -> c_int;
+    /// Returns null if `obj` isn't an object of exactly `class_id`.
+    pub fn JS_GetOpaque(obj: JSValue, class_id: JSClassID) -> *mut c_void;
+
+    pub fn JS_NewAtom(ctx: *mut JSContext, str1: *const c_char) -> JSAtom;
+    pub fn JS_FreeAtom(ctx: *mut JSContext, v: JSAtom);
+
+    /// Defines an accessor property. Takes ownership of both `getter` and
+    /// `setter`.
+    pub fn JS_DefinePropertyGetSet(
+        ctx: *mut JSContext,
+        this_obj: JSValue,
+        prop: JSAtom,
+        getter: JSValue,
+        setter: JSValue,
+        flags: c_int,
+    ) -> c_int;
 
     /// Returns a pointer into `obj`'s backing buffer (borrowed - do not
     /// free) and its byte length via `psize`. Null if `obj` isn't a

@@ -2,8 +2,9 @@
 
 ## Requisitos
 - Plataformas: Windows, Linux, macOS
-- Escala: até 5 contas/abas simultâneas
-- Isolamento: sessão/cookies separados por conta (sem fingerprint/IP spoofing, sem proxy)
+- Escala: até 6 contas/abas simultâneas (tiling 1/2/4/6)
+- Isolamento: sessão/cookies separados por conta (sem fingerprint spoofing)
+- Proxy: opcional por perfil — nenhum / pool compartilhado / host customizado (config em `net`, sem spoofing de fingerprint associado)
 
 ## Decisões de arquitetura
 
@@ -55,7 +56,7 @@ members = [
 | Crate | Dependências principais | Responsabilidade | Fase de implementação |
 |---|---|---|---|
 | apps/shell | egui, eframe | UI chrome, tiling BSP, orquestração | 1 = stub · 4 = completo |
-| net | hyper, rustls, tokio, tokio-tungstenite | HTTP/TLS/WebSocket | 1 |
+| net | hyper, rustls, tokio, tokio-tungstenite | HTTP/TLS/WebSocket + proxy por perfil (none/shared pool/custom host) e health check de endpoint | 1 = HTTP/TLS/WebSocket · 4 = proxy |
 | html | html5ever | parser HTML | 1 |
 | dom | — | árvore DOM, eventos | **1 = implementar agora** |
 | layout-engine | — | box tree, flex, positioning | 1 = stub · 3 = completo |
@@ -240,6 +241,37 @@ Como: gerar a partir das seções "Requisitos", "Decisões de arquitetura" e "Ro
 ## Fora de escopo nesta sessão
 
 Não implementar: QuickJS FFI real, parsing HTML/CSS real, renderer wgpu real, IPC real, tiling BSP real. Só estrutura + `dom` funcional.
+
+## Features do mockup (UI) — mapeamento pra spec
+
+Levantamento de `mockup/Nimble Browser.dc.html` (nome do produto no mockup: **Nimble**, spec usa **IdleBrowser** — alinhar nome). Cada feature mapeada pra crate/fase responsável.
+
+| Feature no mockup | Crate/fase responsável | Status na spec |
+|---|---|---|
+| Grid de panes 1/2/4/6 com tiling | apps/shell, layout BSP (fase 1 stub → 4 completo) | coberto (layout BSP) |
+| Input sync entre panes (toggle "Input sync on/off") | ipc (fase 4) | **gap** — spec de ipc só cobre frame+input+comandos ponto-a-ponto shell↔profile; sync de input entre múltiplos profiles simultâneos não está especificado |
+| Workspaces nomeados (Principal/Farm squad/Trades/Testing), múltiplas contas por workspace | apps/shell/workspace (fase 4) | **gap** — diretório `workspace/` existe no scaffold mas sem spec funcional |
+| Resource monitor (CPU/RAM/FPS por profile, gráfico 60s, kill process) | platform-apis + profile (fase 4) | **gap** — spec não menciona telemetria de processo nem UI de monitor |
+| Automation scripts (login automático, claim idle, watchdog reconexão, cron, editor+run log) | novo crate ausente — mais próximo de `workers`/`js-runtime` (fase 2/4) | **gap** — nenhum crate cobre scripting de automação do usuário; scripts do mockup rodam JS arbitrário (`pane.goto`, `pane.fill`, `pane.click`, `every()`, `on()`) — precisa de API própria, não é Web API padrão |
+| Downloads & history por profile | storage (fase 4, File/Blob) + net | **gap parcial** — storage cobre persistência, mas UI/list de downloads e histórico de navegação não está especificada |
+| Settings: Network (proxy mode, DNS, WebRTC leak guard) | net, security | **conflito** — ver abaixo |
+| Settings: Performance (max live panes, background throttling, GPU, frame cap) | profile, render | **gap** — spec não define limites/throttling configuráveis |
+| Settings: Privacy (isolamento de sessão, clear on close, credential vault, telemetria) | storage, security | parcialmente coberto — "Credential vault · Encrypted · OS keychain" no mockup não tem equivalente na spec (fase 5 só cita "criptografia de sessão em disco") |
+| Settings: Automation (input sync scope, script sandbox, failure handling, schedule engine/cron) | ipc, novo crate de scripting | **gap** — mesmo gap de automation scripts acima |
+| Interface language switch (EN/PT, aplicado sem restart) | apps/shell | **gap** — i18n não mencionado em nenhuma fase |
+| Onboarding ("No profiles yet", criar 1º perfil, import from Chrome) | apps/shell | **gap** — "Import from Chrome" implica ler perfis/cookies do Chrome, não especificado e foge do escopo "sem fingerprint" declarado |
+| Add profile modal (nome, start URL, email/senha autofill, proxy, launch on start) | profile, storage (credential vault) | ver conflito de proxy abaixo |
+| Credential autofill visual ("Credentials autofilled by profile") | storage (fase 4) | coberto conceitualmente por storage/security, sem detalhe de autofill de formulário |
+| Update/release modal (v1.2.0, restart in place, sessões restauradas) | novo — updater assinado já citado na fase 5 | parcialmente coberto ("updater assinado" na fase 5), mas "restart in place com sessões restauradas" exige serialização de estado de profile não especificada |
+| Context menu por pane (reload, duplicate profile, run auto login, mute audio, move to workspace, dev tools, close pane) | apps/shell + automation crate | **gap** — "dev tools" implica um inspector completo, não mencionado em nenhuma fase |
+
+### Resolvido: proxy
+
+Spec ajustada pros Requisitos: proxy é feature suportada (none/shared pool/custom host), fica em `net`, fase 4. Isolamento continua exigindo ausência de fingerprint spoofing — proxy só troca o caminho de rede, não simula device/browser diferente.
+
+### Resolvido: escala
+
+Requisitos ajustados pra "até 6 contas/abas simultâneas", alinhado ao tiling 1/2/4/6 do mockup.
 
 ## Roadmap — fases seguintes
 

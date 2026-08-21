@@ -7,6 +7,7 @@ use std::marker::PhantomData;
 
 use quickjs_sys as sys;
 
+mod crypto;
 mod dom_bindings;
 mod performance;
 
@@ -65,7 +66,10 @@ impl<'rt> Context<'rt> {
     pub fn new(runtime: &'rt Runtime) -> Self {
         let ptr = unsafe { sys::JS_NewContext(runtime.ptr) };
         assert!(!ptr.is_null(), "JS_NewContext returned null");
-        unsafe { performance::register(ptr) };
+        unsafe {
+            performance::register(ptr);
+            crypto::register(ptr);
+        };
         Context {
             ptr,
             _runtime: PhantomData,

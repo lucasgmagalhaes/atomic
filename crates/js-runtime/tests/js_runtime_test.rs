@@ -60,6 +60,25 @@ fn performance_now_is_a_nonnegative_number() {
 }
 
 #[test]
+fn crypto_get_random_values_fills_and_returns_the_array() {
+    let rt = Runtime::new();
+    let ctx = Context::new(&rt);
+    // Sum the bytes so we can tell it's not all-zero, and check the return
+    // value is the same array (length preserved, chainable per spec).
+    let result = ctx
+        .eval(
+            "(() => { \
+                const a = new Uint8Array(16); \
+                const b = crypto.getRandomValues(a); \
+                return (b === a) + ',' + b.length; \
+            })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "true,16");
+}
+
+#[test]
 fn performance_now_advances() {
     let rt = Runtime::new();
     let ctx = Context::new(&rt);

@@ -34,9 +34,11 @@ pub struct JSValue {
     pub tag: i64,
 }
 
+pub const JS_TAG_BOOL: i64 = 1;
 pub const JS_TAG_NULL: i64 = 2;
 pub const JS_TAG_UNDEFINED: i64 = 3;
 pub const JS_TAG_EXCEPTION: i64 = 6;
+pub const JS_TAG_FLOAT64: i64 = 8;
 
 pub const JS_EVAL_TYPE_GLOBAL: c_int = 0;
 
@@ -100,6 +102,7 @@ extern "C" {
         magic: c_int,
     ) -> JSValue;
 
+    pub fn JS_NewObject(ctx: *mut JSContext) -> JSValue;
     pub fn JS_GetGlobalObject(ctx: *mut JSContext) -> JSValue;
     pub fn JS_SetPropertyStr(
         ctx: *mut JSContext,
@@ -125,6 +128,27 @@ pub const fn js_undefined() -> JSValue {
     JSValue {
         u: JSValueUnion { int32: 0 },
         tag: JS_TAG_UNDEFINED,
+    }
+}
+
+/// Mirrors the `JS_NewBool` static inline from quickjs.h (`JS_MKVAL(JS_TAG_BOOL, val)`).
+/// Doesn't need a `JSContext` — the C signature only takes one for API
+/// consistency with the rest of `JS_New*`, the tag/value encoding itself
+/// doesn't touch the runtime.
+pub const fn js_bool(val: bool) -> JSValue {
+    JSValue {
+        u: JSValueUnion { int32: val as i32 },
+        tag: JS_TAG_BOOL,
+    }
+}
+
+/// Mirrors the non-NAN-boxed `__JS_NewFloat64` from quickjs.h: a plain
+/// `{tag: JS_TAG_FLOAT64, u.float64: d}` value, no normalization needed
+/// outside the NAN-boxed 32-bit encoding this binding doesn't support.
+pub const fn js_float64(d: f64) -> JSValue {
+    JSValue {
+        u: JSValueUnion { float64: d },
+        tag: JS_TAG_FLOAT64,
     }
 }
 

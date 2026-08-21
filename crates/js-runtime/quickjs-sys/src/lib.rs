@@ -113,6 +113,14 @@ extern "C" {
 
     pub fn JS_SetContextOpaque(ctx: *mut JSContext, opaque: *mut c_void);
     pub fn JS_GetContextOpaque(ctx: *mut JSContext) -> *mut c_void;
+
+    pub fn JS_DupValue(ctx: *mut JSContext, v: JSValue) -> JSValue;
+
+    /// Returns a pointer into `obj`'s backing buffer (borrowed - do not
+    /// free) and its byte length via `psize`. Null if `obj` isn't a
+    /// Uint8Array (may also raise a JS exception on the context; not
+    /// checked by this binding, see `js-runtime`'s crypto module).
+    pub fn JS_GetUint8Array(ctx: *mut JSContext, psize: *mut usize, obj: JSValue) -> *mut u8;
 }
 
 /// `JS_NULL` — the `JS_MKVAL(JS_TAG_NULL, 0)` constant from quickjs.h.

@@ -34,9 +34,25 @@ pub struct JSValue {
     pub tag: i64,
 }
 
+pub const JS_TAG_NULL: i64 = 2;
+pub const JS_TAG_UNDEFINED: i64 = 3;
 pub const JS_TAG_EXCEPTION: i64 = 6;
 
 pub const JS_EVAL_TYPE_GLOBAL: c_int = 0;
+
+/// `JSCFunctionEnum::JS_CFUNC_generic` — the calling convention for a plain
+/// `(ctx, this_val, argc, argv) -> JSValue` native function, as opposed to
+/// the magic/data/constructor variants quickjs.h also defines.
+pub const JS_CFUNC_GENERIC: c_int = 0;
+
+/// Matches `JSCFunction` from quickjs.h: the signature every function
+/// registered via `JS_NewCFunction2` with `JS_CFUNC_GENERIC` must have.
+pub type JSCFunction = unsafe extern "C" fn(
+    ctx: *mut JSContext,
+    this_val: JSValue,
+    argc: c_int,
+    argv: *mut JSValue,
+) -> JSValue;
 
 #[repr(C)]
 pub struct JSRuntime {
@@ -72,6 +88,44 @@ extern "C" {
         cesu8: bool,
     ) -> *const c_char;
     pub fn JS_FreeCString(ctx: *mut JSContext, ptr: *const c_char);
+
+    pub fn JS_NewStringLen(ctx: *mut JSContext, str1: *const c_char, len1: usize) -> JSValue;
+
+    pub fn JS_NewCFunction2(
+        ctx: *mut JSContext,
+        func: JSCFunction,
+        name: *const c_char,
+        length: c_int,
+        cproto: c_int,
+        magic: c_int,
+    ) -> JSValue;
+
+    pub fn JS_GetGlobalObject(ctx: *mut JSContext) -> JSValue;
+    pub fn JS_SetPropertyStr(
+        ctx: *mut JSContext,
+        this_obj: JSValue,
+        prop: *const c_char,
+        val: JSValue,
+    ) -> c_int;
+
+    pub fn JS_SetContextOpaque(ctx: *mut JSContext, opaque: *mut c_void);
+    pub fn JS_GetContextOpaque(ctx: *mut JSContext) -> *mut c_void;
+}
+
+/// `JS_NULL` — the `JS_MKVAL(JS_TAG_NULL, 0)` constant from quickjs.h.
+pub const fn js_null() -> JSValue {
+    JSValue {
+        u: JSValueUnion { int32: 0 },
+        tag: JS_TAG_NULL,
+    }
+}
+
+/// `JS_UNDEFINED` — the `JS_MKVAL(JS_TAG_UNDEFINED, 0)` constant from quickjs.h.
+pub const fn js_undefined() -> JSValue {
+    JSValue {
+        u: JSValueUnion { int32: 0 },
+        tag: JS_TAG_UNDEFINED,
+    }
 }
 
 /// Safe-ish helper mirroring the `JS_IsException` static inline from

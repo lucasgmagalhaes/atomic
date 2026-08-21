@@ -1,0 +1,5 @@
+# Vendored third-party source (QuickJS-ng) — not our code, skews the graph.
+crates/js-runtime/quickjs-sys/vendor/
+
+# Build output
+target/

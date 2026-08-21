@@ -7,6 +7,8 @@ use std::marker::PhantomData;
 
 use quickjs_sys as sys;
 
+mod dom_bindings;
+
 #[derive(Debug)]
 pub struct EvalError(pub String);
 
@@ -51,6 +53,11 @@ impl Drop for Runtime {
 pub struct Context<'rt> {
     ptr: *mut sys::JSContext,
     _runtime: PhantomData<&'rt Runtime>,
+    // Kept alive here (not just handed to JS_SetContextOpaque) so it's freed
+    // on Context::drop instead of leaking. Moving the Box moves this struct's
+    // pointer field, not the heap allocation, so the raw pointer registered
+    // with QuickJS via register() stays valid regardless.
+    _dom: Option<Box<dom::Dom>>,
 }
 
 impl<'rt> Context<'rt> {
@@ -60,7 +67,22 @@ impl<'rt> Context<'rt> {
         Context {
             ptr,
             _runtime: PhantomData,
+            _dom: None,
         }
+    }
+
+    /// Same as [`Context::new`], but also registers the minimal DOM
+    /// bindings (see `dom_bindings`) backed by `dom`.
+    pub fn with_dom(runtime: &'rt Runtime, dom: dom::Dom) -> Self {
+        let mut ctx = Self::new(runtime);
+        let mut dom_box = Box::new(dom);
+        let raw = dom_box.as_mut() as *mut dom::Dom as *mut std::os::raw::c_void;
+        unsafe {
+            sys::JS_SetContextOpaque(ctx.ptr, raw);
+            dom_bindings::register(ctx.ptr);
+        }
+        ctx._dom = Some(dom_box);
+        ctx
     }
 
     /// Evaluates `code` as global script and returns the result coerced to
@@ -137,5 +159,32 @@ mod tests {
         let ctx = Context::new(&rt);
         let result = ctx.eval("throw new Error('boom')", "<test>");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn dom_bindings_read_and_write_text_by_id() {
+        let mut d = dom::Dom::new();
+        let root = d.root();
+        let p = d.create_element("p");
+        d.append_child(root, p);
+        d.set_attribute(p, "id", "greeting");
+        d.set_text_content(p, "hello");
+
+        let rt = Runtime::new();
+        let ctx = Context::with_dom(&rt, d);
+
+        let read = ctx.eval("__dom_get_text_by_id('greeting')", "<test>").unwrap();
+        assert_eq!(read, "hello");
+
+        let missing = ctx.eval("__dom_get_text_by_id('nope')", "<test>").unwrap();
+        assert_eq!(missing, "null");
+
+        let wrote = ctx
+            .eval("__dom_set_text_by_id('greeting', 'bye')", "<test>")
+            .unwrap();
+        assert_eq!(wrote, "true");
+
+        let read_again = ctx.eval("__dom_get_text_by_id('greeting')", "<test>").unwrap();
+        assert_eq!(read_again, "bye");
     }
 }

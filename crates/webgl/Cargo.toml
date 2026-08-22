@@ -4,3 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+wgpu = { version = "0.20", features = ["naga-ir"] }
+naga = { version = "0.20", features = ["glsl-in"] }
+bytemuck = { version = "1", features = ["derive"] }
+pollster = "0.3"

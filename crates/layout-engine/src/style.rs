@@ -2,11 +2,12 @@
 //! `display` (block/inline/flex/none), `width`/`height`, `margin`/
 //! `padding` (shorthands + longhands), and the flex properties
 //! `flex-direction`/`justify-content`/`align-items`/`flex-grow`/
-//! `flex-shrink`/`flex-basis`, and `background-color` (also accepted as
-//! `background`, but only the solid-color form — no gradients/images).
-//! No inheritance yet (every property resolves independently of the
-//! parent's computed style) and no `flex` shorthand (only the longhands)
-//! or positioning properties.
+//! `flex-shrink`/`flex-basis`, `background-color` (also accepted as
+//! `background`, but only the solid-color form — no gradients/images),
+//! `font-size` (px only), and `color`. `font-size` and `color` are the
+//! only properties this crate inherits — every other property resolves
+//! independently of the parent's computed style. No `flex` shorthand
+//! (only the longhands) and no positioning properties.
 use css::{Declaration, MatchedDeclarations, Token};
 
 /// Straight (non-premultiplied) sRGB + alpha, each channel `0..=255`.
@@ -135,6 +136,14 @@ pub struct ComputedStyle {
     pub flex_shrink: f64,
     pub flex_basis: Length,
     pub background_color: Color,
+    /// The two *inherited* properties this crate models (`resolve_style`
+    /// takes the parent's resolved values as the starting point instead of
+    /// the fixed initial values, per CSS inheritance rules) - every other
+    /// property resolves independently of the parent.
+    /// `px` only, no `em`/`rem`/keyword sizes.
+    pub font_size: f64,
+    /// Text color - initial value is black, matching the real spec.
+    pub color: Color,
 }
 
 impl ComputedStyle {
@@ -153,6 +162,8 @@ impl ComputedStyle {
             flex_shrink: 1.0,
             flex_basis: Length::Auto,
             background_color: Color::TRANSPARENT,
+            font_size: 16.0,
+            color: Color { r: 0, g: 0, b: 0, a: 255 },
         }
     }
 }
@@ -274,6 +285,26 @@ fn apply_declaration(style: &mut ComputedStyle, decl: &Declaration) {
                 style.background_color = c;
             }
         }
+        "font-size" => {
+            // Only absolute px, matching parse_length's own scope - no
+            // em/rem (which would need the inherited value mid-parse) or
+            // keyword sizes (medium/large/...).
+            if let Some(Token::Dimension(n, unit)) = decl.value.first() {
+                if unit == "px" {
+                    style.font_size = *n;
+                }
+            }
+        }
+        "color" => {
+            let color = match decl.value.first() {
+                Some(Token::Ident(name)) => Color::named(name),
+                Some(Token::Hash(hex)) => Color::from_hex(hex),
+                _ => None,
+            };
+            if let Some(c) = color {
+                style.color = c;
+            }
+        }
         "width" => {
             if let Some(l) = decl.value.first().and_then(parse_length) {
                 style.width = l;
@@ -340,8 +371,17 @@ fn apply_declaration(style: &mut ComputedStyle, decl: &Declaration) {
 
 /// Applies `matched` (already cascade-ordered lowest to highest priority,
 /// see `css::matching_declarations`) on top of the initial values.
-pub fn resolve_style(matched: &[MatchedDeclarations]) -> ComputedStyle {
+/// `parent_font_size` seeds the one inherited property this crate models
+/// — pass `ComputedStyle::initial().font_size` for the document root,
+/// which has no parent to inherit from.
+pub fn resolve_style(
+    matched: &[MatchedDeclarations],
+    parent_font_size: f64,
+    parent_color: Color,
+) -> ComputedStyle {
     let mut style = ComputedStyle::initial();
+    style.font_size = parent_font_size;
+    style.color = parent_color;
     for m in matched {
         for decl in m.declarations {
             apply_declaration(&mut style, decl);

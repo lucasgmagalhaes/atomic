@@ -83,6 +83,80 @@ fn get_element_by_id_returns_distinct_node_objects_for_the_same_element() {
 }
 
 #[test]
+fn add_event_listener_and_dispatch_event_calls_the_listener() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let p = d.create_element("p");
+    d.append_child(root, p);
+    d.set_attribute(p, "id", "greeting");
+    d.set_text_content(p, "before");
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+
+    let result = ctx
+        .eval(
+            "(() => { \
+                const el = document.getElementById('greeting'); \
+                el.addEventListener('click', () => { el.textContent = 'clicked'; }); \
+                const dispatched = el.dispatchEvent('click'); \
+                return dispatched + ',' + el.textContent; \
+            })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "true,clicked");
+}
+
+#[test]
+fn dispatch_event_with_no_listener_returns_false() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let p = d.create_element("p");
+    d.append_child(root, p);
+    d.set_attribute(p, "id", "greeting");
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+
+    let result = ctx
+        .eval(
+            "document.getElementById('greeting').dispatchEvent('click')",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "false");
+}
+
+#[test]
+fn remove_event_listener_stops_future_dispatch() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let p = d.create_element("p");
+    d.append_child(root, p);
+    d.set_attribute(p, "id", "greeting");
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+
+    let result = ctx
+        .eval(
+            "(() => { \
+                const el = document.getElementById('greeting'); \
+                let calls = 0; \
+                const handler = () => { calls++; }; \
+                el.addEventListener('click', handler); \
+                el.removeEventListener('click'); \
+                el.dispatchEvent('click'); \
+                return calls; \
+            })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "0");
+}
+
+#[test]
 fn performance_now_is_a_nonnegative_number() {
     let rt = Runtime::new();
     let ctx = Context::new(&rt);

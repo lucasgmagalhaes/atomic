@@ -10,6 +10,7 @@ use quickjs_sys as sys;
 mod crypto;
 mod document;
 mod dom_bindings;
+mod events;
 mod page_visibility;
 mod performance;
 

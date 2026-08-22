@@ -135,6 +135,7 @@ unsafe fn ensure_node_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
 
     let proto = sys::JS_NewObject(ctx);
     define_text_content(ctx, proto);
+    crate::events::define_event_target(ctx, proto);
     sys::JS_SetClassProto(ctx, class_id, proto);
 
     class_id

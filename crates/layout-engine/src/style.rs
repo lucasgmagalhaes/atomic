@@ -1,8 +1,10 @@
 //! Cascaded declarations → typed computed style. Scoped property set:
-//! `display` (block/inline/none), `width`/`height`, and the `margin`/
-//! `padding` shorthands + longhands. No inheritance yet (every property
+//! `display` (block/inline/flex/none), `width`/`height`, `margin`/
+//! `padding` (shorthands + longhands), and the flex properties
+//! `flex-direction`/`justify-content`/`align-items`/`flex-grow`/
+//! `flex-shrink`/`flex-basis`. No inheritance yet (every property
 //! resolves independently of the parent's computed style) and no
-//! `flex`/positioning properties — those land with the flex layout pass.
+//! `flex` shorthand (only the longhands) or positioning properties.
 use css::{Declaration, MatchedDeclarations, Token};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -16,7 +18,31 @@ pub enum Length {
 pub enum Display {
     Block,
     Inline,
+    Flex,
     None,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlexDirection {
+    Row,
+    Column,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JustifyContent {
+    Start,
+    End,
+    Center,
+    SpaceBetween,
+    SpaceAround,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlignItems {
+    Start,
+    End,
+    Center,
+    Stretch,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -45,6 +71,16 @@ pub struct ComputedStyle {
     pub height: Length,
     pub margin: EdgeSizes,
     pub padding: EdgeSizes,
+    /// Only meaningful when this box's own `display` is `Flex` - controls
+    /// how *its* children are arranged.
+    pub flex_direction: FlexDirection,
+    pub justify_content: JustifyContent,
+    pub align_items: AlignItems,
+    /// The following three are only meaningful when this box is itself a
+    /// flex *item* (i.e. its parent is `display: flex`).
+    pub flex_grow: f64,
+    pub flex_shrink: f64,
+    pub flex_basis: Length,
 }
 
 impl ComputedStyle {
@@ -56,6 +92,12 @@ impl ComputedStyle {
             height: Length::Auto,
             margin: EdgeSizes::zero(),
             padding: EdgeSizes::zero(),
+            flex_direction: FlexDirection::Row,
+            justify_content: JustifyContent::Start,
+            align_items: AlignItems::Stretch,
+            flex_grow: 0.0,
+            flex_shrink: 1.0,
+            flex_basis: Length::Auto,
         }
     }
 }
@@ -114,9 +156,57 @@ fn apply_declaration(style: &mut ComputedStyle, decl: &Declaration) {
                 style.display = match v.as_str() {
                     "block" => Display::Block,
                     "inline" => Display::Inline,
+                    "flex" => Display::Flex,
                     "none" => Display::None,
                     _ => return,
                 };
+            }
+        }
+        "flex-direction" => {
+            if let Some(Token::Ident(v)) = decl.value.first() {
+                style.flex_direction = match v.as_str() {
+                    "row" => FlexDirection::Row,
+                    "column" => FlexDirection::Column,
+                    _ => return,
+                };
+            }
+        }
+        "justify-content" => {
+            if let Some(Token::Ident(v)) = decl.value.first() {
+                style.justify_content = match v.as_str() {
+                    "flex-start" => JustifyContent::Start,
+                    "flex-end" => JustifyContent::End,
+                    "center" => JustifyContent::Center,
+                    "space-between" => JustifyContent::SpaceBetween,
+                    "space-around" => JustifyContent::SpaceAround,
+                    _ => return,
+                };
+            }
+        }
+        "align-items" => {
+            if let Some(Token::Ident(v)) = decl.value.first() {
+                style.align_items = match v.as_str() {
+                    "flex-start" => AlignItems::Start,
+                    "flex-end" => AlignItems::End,
+                    "center" => AlignItems::Center,
+                    "stretch" => AlignItems::Stretch,
+                    _ => return,
+                };
+            }
+        }
+        "flex-grow" => {
+            if let Some(Token::Number(n)) = decl.value.first() {
+                style.flex_grow = *n;
+            }
+        }
+        "flex-shrink" => {
+            if let Some(Token::Number(n)) = decl.value.first() {
+                style.flex_shrink = *n;
+            }
+        }
+        "flex-basis" => {
+            if let Some(l) = decl.value.first().and_then(parse_length) {
+                style.flex_basis = l;
             }
         }
         "width" => {

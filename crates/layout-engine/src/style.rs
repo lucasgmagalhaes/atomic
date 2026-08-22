@@ -2,10 +2,63 @@
 //! `display` (block/inline/flex/none), `width`/`height`, `margin`/
 //! `padding` (shorthands + longhands), and the flex properties
 //! `flex-direction`/`justify-content`/`align-items`/`flex-grow`/
-//! `flex-shrink`/`flex-basis`. No inheritance yet (every property
-//! resolves independently of the parent's computed style) and no
-//! `flex` shorthand (only the longhands) or positioning properties.
+//! `flex-shrink`/`flex-basis`, and `background-color` (also accepted as
+//! `background`, but only the solid-color form — no gradients/images).
+//! No inheritance yet (every property resolves independently of the
+//! parent's computed style) and no `flex` shorthand (only the longhands)
+//! or positioning properties.
 use css::{Declaration, MatchedDeclarations, Token};
+
+/// Straight (non-premultiplied) sRGB + alpha, each channel `0..=255`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Color {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub a: u8,
+}
+
+impl Color {
+    pub const TRANSPARENT: Color = Color { r: 0, g: 0, b: 0, a: 0 };
+
+    fn named(name: &str) -> Option<Color> {
+        Some(match name {
+            "transparent" => Color::TRANSPARENT,
+            "black" => Color { r: 0, g: 0, b: 0, a: 255 },
+            "white" => Color { r: 255, g: 255, b: 255, a: 255 },
+            "red" => Color { r: 255, g: 0, b: 0, a: 255 },
+            "green" => Color { r: 0, g: 128, b: 0, a: 255 },
+            "blue" => Color { r: 0, g: 0, b: 255, a: 255 },
+            _ => return None,
+        })
+    }
+
+    /// `#rgb` or `#rrggbb` (no alpha channel form yet - `#rgba`/`#rrggbbaa`).
+    fn from_hex(hex: &str) -> Option<Color> {
+        let expand = |c: char| c.to_digit(16).map(|d| (d as u8) * 17); // 0xF -> 0xFF
+        match hex.len() {
+            3 => {
+                let mut chars = hex.chars();
+                Some(Color {
+                    r: expand(chars.next()?)?,
+                    g: expand(chars.next()?)?,
+                    b: expand(chars.next()?)?,
+                    a: 255,
+                })
+            }
+            6 => {
+                let byte = |s: &str| u8::from_str_radix(s, 16).ok();
+                Some(Color {
+                    r: byte(&hex[0..2])?,
+                    g: byte(&hex[2..4])?,
+                    b: byte(&hex[4..6])?,
+                    a: 255,
+                })
+            }
+            _ => None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Length {
@@ -81,6 +134,7 @@ pub struct ComputedStyle {
     pub flex_grow: f64,
     pub flex_shrink: f64,
     pub flex_basis: Length,
+    pub background_color: Color,
 }
 
 impl ComputedStyle {
@@ -98,6 +152,7 @@ impl ComputedStyle {
             flex_grow: 0.0,
             flex_shrink: 1.0,
             flex_basis: Length::Auto,
+            background_color: Color::TRANSPARENT,
         }
     }
 }
@@ -207,6 +262,16 @@ fn apply_declaration(style: &mut ComputedStyle, decl: &Declaration) {
         "flex-basis" => {
             if let Some(l) = decl.value.first().and_then(parse_length) {
                 style.flex_basis = l;
+            }
+        }
+        "background-color" | "background" => {
+            let color = match decl.value.first() {
+                Some(Token::Ident(name)) => Color::named(name),
+                Some(Token::Hash(hex)) => Color::from_hex(hex),
+                _ => None,
+            };
+            if let Some(c) = color {
+                style.background_color = c;
             }
         }
         "width" => {

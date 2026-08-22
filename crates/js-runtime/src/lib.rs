@@ -9,6 +9,7 @@ use quickjs_sys as sys;
 
 mod crypto;
 mod dom_bindings;
+mod page_visibility;
 mod performance;
 
 #[derive(Debug)]
@@ -69,6 +70,7 @@ impl<'rt> Context<'rt> {
         unsafe {
             performance::register(ptr);
             crypto::register(ptr);
+            page_visibility::register(ptr);
         };
         Context {
             ptr,

@@ -110,6 +110,19 @@ fn crypto_get_random_values_fills_and_returns_the_array() {
 }
 
 #[test]
+fn page_visibility_reports_visible() {
+    let rt = Runtime::new();
+    let ctx = Context::new(&rt);
+    let result = ctx
+        .eval(
+            "document.visibilityState + ',' + document.hidden",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "visible,false");
+}
+
+#[test]
 fn performance_now_advances() {
     let rt = Runtime::new();
     let ctx = Context::new(&rt);

@@ -154,6 +154,11 @@ extern "C" {
 
     pub fn JS_DupValue(ctx: *mut JSContext, v: JSValue) -> JSValue;
 
+    /// Returns an owned reference (per the usual `JSValue`-return
+    /// convention — caller must `JS_FreeValue` it), `JS_UNDEFINED` if the
+    /// property doesn't exist.
+    pub fn JS_GetPropertyStr(ctx: *mut JSContext, this_obj: JSValue, prop: *const c_char) -> JSValue;
+
     pub fn JS_GetRuntime(ctx: *mut JSContext) -> *mut JSRuntime;
 
     /// Allocates a class ID the first time `*pclass_id == 0` (writing it

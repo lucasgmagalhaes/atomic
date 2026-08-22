@@ -10,15 +10,12 @@ use std::ffi::CString;
 
 use quickjs_sys as sys;
 
-/// Registers `document.visibilityState` and `document.hidden` on `ctx`.
-/// Creates its own `document` global object — `dom_bindings::register`
-/// only adds bare `__dom_*` globals, it doesn't create one, so there's
-/// nothing to share yet. Once DOM bindings grow a real `document` object
-/// (needed anyway for the eventual `getElementById`), these two properties
-/// move onto it instead of each owning a separate `document`.
+/// Registers `document.visibilityState` and `document.hidden` on `ctx`,
+/// reusing the shared `document` global (see `crate::document`) so this
+/// doesn't clobber whatever `dom_bindings::register` already put there
+/// (or vice versa, depending on registration order).
 pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
-    let global = sys::JS_GetGlobalObject(ctx);
-    let document = sys::JS_NewObject(ctx);
+    let document = crate::document::get_or_create(ctx);
 
     let visibility_name = CString::new("visibilityState").unwrap();
     let visibility_value = sys::JS_NewStringLen(
@@ -31,8 +28,5 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     let hidden_name = CString::new("hidden").unwrap();
     sys::JS_SetPropertyStr(ctx, document, hidden_name.as_ptr(), sys::js_bool(false));
 
-    let document_name = CString::new("document").unwrap();
-    sys::JS_SetPropertyStr(ctx, global, document_name.as_ptr(), document);
-
-    sys::JS_FreeValue(ctx, global);
+    sys::JS_FreeValue(ctx, document);
 }

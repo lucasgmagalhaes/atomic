@@ -8,6 +8,7 @@ use std::marker::PhantomData;
 use quickjs_sys as sys;
 
 mod crypto;
+mod document;
 mod dom_bindings;
 mod page_visibility;
 mod performance;

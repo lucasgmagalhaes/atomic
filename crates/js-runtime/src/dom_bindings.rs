@@ -178,8 +178,7 @@ unsafe extern "C" fn document_get_element_by_id(
 pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     ensure_node_class(ctx);
 
-    let global = sys::JS_GetGlobalObject(ctx);
-    let document = sys::JS_NewObject(ctx);
+    let document = crate::document::get_or_create(ctx);
 
     let name = CString::new("getElementById").unwrap();
     let get_by_id = sys::JS_NewCFunction2(
@@ -192,8 +191,5 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     );
     sys::JS_SetPropertyStr(ctx, document, name.as_ptr(), get_by_id);
 
-    let document_name = CString::new("document").unwrap();
-    sys::JS_SetPropertyStr(ctx, global, document_name.as_ptr(), document);
-
-    sys::JS_FreeValue(ctx, global);
+    sys::JS_FreeValue(ctx, document);
 }

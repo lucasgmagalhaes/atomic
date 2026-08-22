@@ -110,6 +110,36 @@ fn crypto_get_random_values_fills_and_returns_the_array() {
 }
 
 #[test]
+fn page_visibility_and_dom_bindings_coexist_on_shared_document() {
+    // Regression: dom_bindings and page_visibility both used to create
+    // their own `document` object, so with_dom() silently dropped
+    // whichever one registered first (visibilityState/hidden, since
+    // Context::new runs before with_dom's dom_bindings::register).
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let p = d.create_element("p");
+    d.append_child(root, p);
+    d.set_attribute(p, "id", "greeting");
+    d.set_text_content(p, "hello");
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+
+    let visibility = ctx
+        .eval(
+            "document.visibilityState + ',' + document.hidden",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(visibility, "visible,false");
+
+    let text = ctx
+        .eval("document.getElementById('greeting').textContent", "<test>")
+        .unwrap();
+    assert_eq!(text, "hello");
+}
+
+#[test]
 fn page_visibility_reports_visible() {
     let rt = Runtime::new();
     let ctx = Context::new(&rt);

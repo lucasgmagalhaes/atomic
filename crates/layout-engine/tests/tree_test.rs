@@ -34,11 +34,28 @@ fn builds_nested_boxes_for_element_children() {
 }
 
 #[test]
-fn text_nodes_produce_no_box() {
+fn text_nodes_produce_a_leaf_box_carrying_their_string() {
     let mut d = Dom::new();
     let root = d.root();
     let p = d.create_element("p");
     let text = d.create_text("hello");
+    d.append_child(root, p);
+    d.append_child(p, text);
+
+    let sheet = parse_stylesheet("");
+    let tree = build_box_tree(&d, p, &sheet).unwrap();
+
+    assert_eq!(tree.children.len(), 1);
+    assert_eq!(tree.children[0].text.as_deref(), Some("hello"));
+    assert!(tree.children[0].children.is_empty());
+}
+
+#[test]
+fn whitespace_only_text_nodes_produce_no_box() {
+    let mut d = Dom::new();
+    let root = d.root();
+    let p = d.create_element("p");
+    let text = d.create_text("   \n  ");
     d.append_child(root, p);
     d.append_child(p, text);
 

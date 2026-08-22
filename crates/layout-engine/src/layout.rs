@@ -10,7 +10,27 @@
 //! border isn't modeled) — the box a renderer would actually paint.
 use crate::flex::layout_flex_children;
 use crate::style::{Display, Length};
+use crate::text::layout_text;
 use crate::tree::LayoutBox;
+
+/// Lays out a text leaf box: measures/wraps it against `containing_width`
+/// via `cosmic-text` and sets its dimensions/glyphs directly, bypassing
+/// the normal box-model resolution entirely (a text box has no margin/
+/// padding/explicit width/height to resolve from style - its size comes
+/// purely from its shaped content). Returns the vertical space consumed,
+/// same convention as `layout_block`.
+fn layout_text_box(box_: &mut LayoutBox, containing_width: f64, x: f64, y: f64) -> f64 {
+    let text = box_.text.as_deref().unwrap_or("");
+    let result = layout_text(text, box_.style.font_size as f32, Some(containing_width as f32), box_.style.color);
+
+    box_.dimensions.x = x;
+    box_.dimensions.y = y;
+    box_.dimensions.width = result.width as f64;
+    box_.dimensions.height = result.height as f64;
+    box_.glyphs = result.glyphs;
+
+    box_.dimensions.height
+}
 
 pub(crate) fn resolve_edge(length: Length, containing_width: f64) -> f64 {
     match length {
@@ -33,6 +53,10 @@ pub(crate) fn resolve_edge(length: Length, containing_width: f64) -> f64 {
 /// which calls `layout_children` directly once the item's own outer box
 /// is already fixed by the flex algorithm.
 pub fn layout_block(box_: &mut LayoutBox, containing_width: f64, x: f64, y: f64) -> f64 {
+    if box_.text.is_some() {
+        return layout_text_box(box_, containing_width, x, y);
+    }
+
     let margin_top = resolve_edge(box_.style.margin.top, containing_width);
     let margin_right = resolve_edge(box_.style.margin.right, containing_width);
     let margin_bottom = resolve_edge(box_.style.margin.bottom, containing_width);

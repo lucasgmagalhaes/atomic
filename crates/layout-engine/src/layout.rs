@@ -1,17 +1,18 @@
-//! Block layout: walks a [`crate::tree::LayoutBox`] tree and fills in
-//! [`crate::tree::Dimensions`]. Block formatting context only — children
-//! stack vertically, no inline flow, no flex, no floats, no positioning
-//! (`position`/`top`/`left`/... aren't modeled at all yet). `auto` margins
-//! resolve to `0.0`, not CSS's actual auto-margin centering behavior.
-//! No margin collapsing: adjacent margins both take full effect instead
-//! of collapsing to the larger one.
+//! Layout orchestration: box-model resolution shared by every display type,
+//! dispatching to block-stacking or flex for how children get arranged.
+//! Block formatting context: children stack vertically, no inline flow, no
+//! floats, no positioning (`position`/`top`/`left`/... aren't modeled at
+//! all). `auto` margins resolve to `0.0`, not CSS's actual auto-margin
+//! centering. No margin collapsing: adjacent margins both take full effect
+//! instead of collapsing to the larger one.
 //!
 //! `Dimensions` stores the padding box (content + padding, no border since
 //! border isn't modeled) — the box a renderer would actually paint.
-use crate::style::Length;
+use crate::flex::layout_flex_children;
+use crate::style::{Display, Length};
 use crate::tree::LayoutBox;
 
-fn resolve_edge(length: Length, containing_width: f64) -> f64 {
+pub(crate) fn resolve_edge(length: Length, containing_width: f64) -> f64 {
     match length {
         Length::Px(px) => px,
         Length::Percent(pct) => containing_width * pct / 100.0,
@@ -27,7 +28,10 @@ fn resolve_edge(length: Length, containing_width: f64) -> f64 {
 /// available width and `(x, y)` as the top-left corner of its margin box.
 /// Returns the total vertical space this box (including its own margins)
 /// occupies in its parent's block flow, so the caller can advance its
-/// cursor by that amount for the next sibling.
+/// cursor by that amount for the next sibling. Used for block children;
+/// flex items are positioned by `flex::layout_flex_children` instead,
+/// which calls `layout_children` directly once the item's own outer box
+/// is already fixed by the flex algorithm.
 pub fn layout_block(box_: &mut LayoutBox, containing_width: f64, x: f64, y: f64) -> f64 {
     let margin_top = resolve_edge(box_.style.margin.top, containing_width);
     let margin_right = resolve_edge(box_.style.margin.right, containing_width);
@@ -54,13 +58,10 @@ pub fn layout_block(box_: &mut LayoutBox, containing_width: f64, x: f64, y: f64)
     box_.dimensions.width = content_width + padding_left + padding_right;
 
     let content_x = box_.dimensions.x + padding_left;
-    let mut cursor_y = box_.dimensions.y + padding_top;
+    let content_y = box_.dimensions.y + padding_top;
 
-    for child in &mut box_.children {
-        cursor_y += layout_block(child, content_width, content_x, cursor_y);
-    }
+    let content_height = layout_children(box_, content_width, content_x, content_y);
 
-    let content_height = cursor_y - (box_.dimensions.y + padding_top);
     let resolved_content_height = match box_.style.height {
         Length::Px(px) => px,
         // Percent height against an auto-sized container is genuinely
@@ -74,4 +75,38 @@ pub fn layout_block(box_: &mut LayoutBox, containing_width: f64, x: f64, y: f64)
     box_.dimensions.height = resolved_content_height + padding_top + padding_bottom;
 
     margin_top + box_.dimensions.height + margin_bottom
+}
+
+/// Arranges `box_`'s direct children within its content box
+/// (`content_width` × unbounded height, starting at `(content_x,
+/// content_y)`) and returns the resulting content height - the space the
+/// children actually occupy, before padding is added back on by the
+/// caller. Dispatches on `box_.style.display`: `Flex` arranges children
+/// via `flex::layout_flex_children`, everything else stacks them as block
+/// boxes via `layout_block`.
+pub(crate) fn layout_children(box_: &mut LayoutBox, content_width: f64, content_x: f64, content_y: f64) -> f64 {
+    if box_.style.display == Display::Flex {
+        let explicit_height = match box_.style.height {
+            Length::Px(px) => Some(px),
+            _ => None,
+        };
+        let is_row = box_.style.flex_direction == crate::style::FlexDirection::Row;
+        let (main_known, cross_known) = if is_row {
+            (Some(content_width), explicit_height)
+        } else {
+            (explicit_height, Some(content_width))
+        };
+        let result = layout_flex_children(box_, main_known, cross_known, content_x, content_y);
+        if is_row {
+            result.cross_size
+        } else {
+            result.main_size
+        }
+    } else {
+        let mut cursor_y = content_y;
+        for child in &mut box_.children {
+            cursor_y += layout_block(child, content_width, content_x, cursor_y);
+        }
+        cursor_y - content_y
+    }
 }

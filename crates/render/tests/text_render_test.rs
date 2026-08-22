@@ -1,0 +1,71 @@
+use css::parse_stylesheet;
+use dom::Dom;
+use layout_engine::{build_box_tree, layout_block};
+use render::{build_glyph_list, composite_glyphs};
+
+#[test]
+fn rendering_text_paints_non_background_pixels() {
+    let mut d = Dom::new();
+    let root = d.root();
+    let p = d.create_element("p");
+    let text = d.create_text("A");
+    d.append_child(root, p);
+    d.append_child(p, text);
+
+    let sheet = parse_stylesheet("p { color: #ff0000; font-size: 64px; }");
+    let mut tree = build_box_tree(&d, p, &sheet).unwrap();
+    layout_block(&mut tree, 800.0, 0.0, 0.0);
+
+    let glyphs = build_glyph_list(&tree);
+    assert!(!glyphs.is_empty());
+
+    let width = 200u32;
+    let height = 100u32;
+    let mut pixels = vec![0u8; (width * height * 4) as usize]; // transparent black
+    composite_glyphs(&mut pixels, width, height, &glyphs);
+
+    // At least one pixel should now be a shade of red with some alpha -
+    // exact glyph shape isn't asserted (font hinting/AA make that
+    // fragile), just that *something* got painted and it's red-ish, not
+    // still fully transparent.
+    let painted_red = pixels.chunks_exact(4).any(|px| px[0] > 0 && px[3] > 0 && px[1] == 0 && px[2] == 0);
+    assert!(painted_red, "expected at least one red, non-transparent pixel from rendering 'A'");
+}
+
+#[test]
+fn empty_text_paints_nothing() {
+    let mut d = Dom::new();
+    let root = d.root();
+    let p = d.create_element("p");
+    d.append_child(root, p);
+
+    let sheet = parse_stylesheet("");
+    let mut tree = build_box_tree(&d, p, &sheet).unwrap();
+    layout_block(&mut tree, 800.0, 0.0, 0.0);
+
+    let glyphs = build_glyph_list(&tree);
+    assert!(glyphs.is_empty());
+
+    let mut pixels = vec![0u8; 4 * 4 * 4];
+    composite_glyphs(&mut pixels, 4, 4, &glyphs);
+    assert!(pixels.iter().all(|&b| b == 0));
+}
+
+#[test]
+fn glyphs_outside_the_buffer_are_clipped_without_panicking() {
+    let mut d = Dom::new();
+    let root = d.root();
+    let p = d.create_element("p");
+    let text = d.create_text("hello");
+    d.append_child(root, p);
+    d.append_child(p, text);
+
+    let sheet = parse_stylesheet("p { font-size: 200px; }"); // huge, likely overflows a tiny buffer
+    let mut tree = build_box_tree(&d, p, &sheet).unwrap();
+    layout_block(&mut tree, 2000.0, 0.0, 0.0);
+
+    let glyphs = build_glyph_list(&tree);
+    let mut pixels = vec![0u8; 4 * 4 * 4];
+    // Must not panic on out-of-bounds writes.
+    composite_glyphs(&mut pixels, 4, 4, &glyphs);
+}

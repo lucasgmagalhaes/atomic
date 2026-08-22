@@ -2,8 +2,9 @@
 //! "display list" in browser-engine terminology, decoupled from any GPU
 //! API so it's testable without a device/adapter. Scoped to solid-color
 //! rectangles (a box's padding box, filled with its `background_color`)
-//! — no borders, no images, no text, no shadows, no clipping/scrolling.
-use layout_engine::{Color, LayoutBox};
+//! plus glyph instances (positioned, not yet rasterized) — no borders,
+//! no images, no shadows, no clipping/scrolling.
+use layout_engine::{Color, LayoutBox, PositionedGlyph};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Rect {
@@ -37,5 +38,29 @@ fn collect(box_: &LayoutBox, out: &mut Vec<Rect>) {
     }
     for child in &box_.children {
         collect(child, out);
+    }
+}
+
+/// Same paint-order walk as [`build_display_list`], but collects glyphs
+/// instead of rects. `PositionedGlyph::x`/`y` are relative to the text
+/// box's own top-left (see `layout_engine::text`'s docs) - this shifts
+/// them to absolute page coordinates by adding the box's `Dimensions`, so
+/// callers don't need to track box offsets themselves.
+pub fn build_glyph_list(box_: &LayoutBox) -> Vec<PositionedGlyph> {
+    let mut list = Vec::new();
+    collect_glyphs(box_, &mut list);
+    list
+}
+
+fn collect_glyphs(box_: &LayoutBox, out: &mut Vec<PositionedGlyph>) {
+    let ox = box_.dimensions.x as i32;
+    let oy = box_.dimensions.y as i32;
+    out.extend(box_.glyphs.iter().map(|g| PositionedGlyph {
+        x: g.x + ox,
+        y: g.y + oy,
+        ..*g
+    }));
+    for child in &box_.children {
+        collect_glyphs(child, out);
     }
 }

@@ -159,6 +159,15 @@ extern "C" {
     /// property doesn't exist.
     pub fn JS_GetPropertyStr(ctx: *mut JSContext, this_obj: JSValue, prop: *const c_char) -> JSValue;
 
+    /// `argv` may be null when `argc == 0`.
+    pub fn JS_Call(
+        ctx: *mut JSContext,
+        func_obj: JSValue,
+        this_obj: JSValue,
+        argc: c_int,
+        argv: *mut JSValue,
+    ) -> JSValue;
+
     pub fn JS_GetRuntime(ctx: *mut JSContext) -> *mut JSRuntime;
 
     /// Allocates a class ID the first time `*pclass_id == 0` (writing it

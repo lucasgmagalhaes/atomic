@@ -1,0 +1,113 @@
+use css::parse_stylesheet;
+use dom::Dom;
+use layout_engine::{build_box_tree, Display, Length};
+
+#[test]
+fn builds_box_for_matching_element() {
+    let mut d = Dom::new();
+    let root = d.root();
+    let div = d.create_element("div");
+    d.append_child(root, div);
+
+    let sheet = parse_stylesheet("div { width: 100px; }");
+    let tree = build_box_tree(&d, div, &sheet).unwrap();
+
+    assert_eq!(tree.node, div);
+    assert_eq!(tree.style.width, Length::Px(100.0));
+}
+
+#[test]
+fn builds_nested_boxes_for_element_children() {
+    let mut d = Dom::new();
+    let root = d.root();
+    let outer = d.create_element("div");
+    let inner = d.create_element("span");
+    d.append_child(root, outer);
+    d.append_child(outer, inner);
+
+    let sheet = parse_stylesheet("span { width: 50px; }");
+    let tree = build_box_tree(&d, outer, &sheet).unwrap();
+
+    assert_eq!(tree.children.len(), 1);
+    assert_eq!(tree.children[0].node, inner);
+    assert_eq!(tree.children[0].style.width, Length::Px(50.0));
+}
+
+#[test]
+fn text_nodes_produce_no_box() {
+    let mut d = Dom::new();
+    let root = d.root();
+    let p = d.create_element("p");
+    let text = d.create_text("hello");
+    d.append_child(root, p);
+    d.append_child(p, text);
+
+    let sheet = parse_stylesheet("");
+    let tree = build_box_tree(&d, p, &sheet).unwrap();
+
+    assert!(tree.children.is_empty());
+}
+
+#[test]
+fn display_none_prunes_element_and_its_subtree() {
+    let mut d = Dom::new();
+    let root = d.root();
+    let outer = d.create_element("div");
+    let hidden = d.create_element("span");
+    let grandchild = d.create_element("em");
+    d.append_child(root, outer);
+    d.append_child(outer, hidden);
+    d.append_child(hidden, grandchild);
+
+    let sheet = parse_stylesheet("span { display: none; }");
+    let tree = build_box_tree(&d, outer, &sheet).unwrap();
+
+    assert!(tree.children.is_empty());
+}
+
+#[test]
+fn id_and_class_selectors_apply_through_the_tree() {
+    let mut d = Dom::new();
+    let root = d.root();
+    let div = d.create_element("div");
+    d.append_child(root, div);
+    d.set_attribute(div, "id", "main");
+    d.set_attribute(div, "class", "box highlighted");
+
+    let sheet = parse_stylesheet("#main { width: 10px; } .highlighted { height: 20px; }");
+    let tree = build_box_tree(&d, div, &sheet).unwrap();
+
+    assert_eq!(tree.style.width, Length::Px(10.0));
+    assert_eq!(tree.style.height, Length::Px(20.0));
+}
+
+#[test]
+fn descendant_selector_matches_through_dom_ancestry() {
+    let mut d = Dom::new();
+    let root = d.root();
+    let outer = d.create_element("div");
+    let inner = d.create_element("span");
+    d.append_child(root, outer);
+    d.append_child(outer, inner);
+    d.set_attribute(outer, "id", "container");
+
+    let sheet = parse_stylesheet("#container span { width: 33px; }");
+    let tree = build_box_tree(&d, outer, &sheet).unwrap();
+
+    assert_eq!(tree.children[0].style.width, Length::Px(33.0));
+}
+
+#[test]
+fn dimensions_default_to_zero_before_layout_runs() {
+    let mut d = Dom::new();
+    let root = d.root();
+    let div = d.create_element("div");
+    d.append_child(root, div);
+
+    let sheet = parse_stylesheet("");
+    let tree = build_box_tree(&d, div, &sheet).unwrap();
+
+    assert_eq!(tree.dimensions.width, 0.0);
+    assert_eq!(tree.dimensions.height, 0.0);
+    assert_eq!(tree.style.display, Display::Block);
+}

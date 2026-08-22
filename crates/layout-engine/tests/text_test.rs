@@ -1,4 +1,4 @@
-use layout_engine::{layout_text, Color};
+use layout_engine::{layout_text, rasterize_glyph, Color};
 
 const BLACK: Color = Color { r: 0, g: 0, b: 0, a: 255 };
 
@@ -50,6 +50,31 @@ fn glyphs_are_positioned_left_to_right() {
     let layout = layout_text("ab", 16.0, None, BLACK);
     assert_eq!(layout.glyphs.len(), 2);
     assert!(layout.glyphs[1].x > layout.glyphs[0].x);
+}
+
+#[test]
+fn rasterizes_a_visible_glyph_with_some_ink() {
+    let layout = layout_text("A", 32.0, None, BLACK);
+    let bitmap = rasterize_glyph(&layout.glyphs[0]).expect("'A' at 32px should rasterize to a visible bitmap");
+
+    assert!(bitmap.width > 0);
+    assert!(bitmap.height > 0);
+    assert_eq!(bitmap.coverage.len(), (bitmap.width * bitmap.height) as usize);
+    assert!(
+        bitmap.coverage.iter().any(|&a| a > 0),
+        "a capital A should have at least one covered (non-zero alpha) pixel"
+    );
+}
+
+#[test]
+fn rasterizing_a_space_yields_no_visible_bitmap() {
+    let layout = layout_text(" ", 16.0, None, BLACK);
+    // A space still shapes to one glyph (with advance width) but has no
+    // ink - rasterize_glyph should say so rather than return an empty-but-
+    // technically-present bitmap.
+    if let Some(glyph) = layout.glyphs.first() {
+        assert!(rasterize_glyph(glyph).is_none());
+    }
 }
 
 #[test]

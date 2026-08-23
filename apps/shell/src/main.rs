@@ -124,6 +124,85 @@ impl NimbleApp {
         let panes = self.panes.iter_mut().map(|p| (p.id.as_str(), &mut p.browser));
         self.automation_result = Some(automation_bridge::run_script(&self.workspace, panes, &self.automation_script));
     }
+
+    /// The context menu's "Run auto login" stand-in: runs
+    /// `self.automation_script` scoped to *only* `self.panes[index]` (via a
+    /// one-element pane list, so `pane("pane-N")` for any other id throws
+    /// "no pane named" instead of silently reaching a different pane).
+    /// The mockup's actual "auto login" implies a script saved *per
+    /// profile* and run automatically - there's no such storage yet (see
+    /// the spec's still-open "Settings: Automation ... editor+run log"
+    /// gap), so this reuses the one shared script box scoped to one pane
+    /// rather than pretending a per-profile script exists.
+    fn run_automation_script_for_pane(&mut self, index: usize) {
+        let pane = &mut self.panes[index];
+        let panes = std::iter::once((pane.id.as_str(), &mut pane.browser));
+        self.automation_result = Some(automation_bridge::run_script(&self.workspace, panes, &self.automation_script));
+    }
+
+    /// Removes exactly `self.panes[index]` (not just the trailing pane -
+    /// unlike [`set_pane_count`](Self::set_pane_count)'s grow/shrink,
+    /// which only ever pops the end). Force-kills that pane's process the
+    /// same way any other pane removal does (`Pane`'s `BrowserView` ->
+    /// `profile::Profile`'s own real `Drop`). Refuses to remove the last
+    /// remaining pane - a shell with zero panes has nothing to show and no
+    /// way to add one back without a "new pane" control this pass doesn't
+    /// add (mirrors `WorkspaceManager::remove`'s own "never zero" refusal).
+    fn close_pane(&mut self, index: usize) {
+        if self.panes.len() <= 1 {
+            return;
+        }
+        let pane = self.panes.remove(index);
+        let active = self.workspace.active_index();
+        self.workspace.remove_profile(active, &pane.id);
+        if self.selected >= self.panes.len() {
+            self.selected = self.panes.len() - 1;
+        } else if self.selected > index {
+            self.selected -= 1;
+        }
+    }
+
+    /// Spawns a fresh pane and navigates it to `self.panes[index]`'s
+    /// current URL - "duplicate" in the sense of "another pane on the same
+    /// page", not a real session clone: each profile gets its own
+    /// `storage_root` keyed by a fresh shmem name (see `profile-worker`'s
+    /// own doc), so cookies/`localStorage`/login state are NOT copied.
+    /// Real account cloning would need to duplicate that storage
+    /// directory, which this doesn't do - documented here rather than
+    /// silently producing a pane that looks duplicated but isn't logged
+    /// in.
+    fn duplicate_pane(&mut self, index: usize) {
+        let url = self.panes[index].browser.current_url().to_string();
+        let new_index = self.panes.len();
+        let mut pane = spawn_pane(&mut self.workspace, new_index);
+        if !url.is_empty() {
+            pane.browser.navigate(&url);
+        }
+        self.panes.push(pane);
+    }
+
+    /// Moves `self.panes[index]`'s id to the workspace at `workspace_index`
+    /// via the real, already-tested `WorkspaceManager::move_profile`. The
+    /// pane keeps running exactly as before - only which workspace lists
+    /// its id changes, which in turn changes whether an automation script
+    /// targeting the *other* workspace can still address it (see
+    /// `automation_bridge::run_script`'s "only what the active workspace
+    /// lists" scoping).
+    fn move_pane_to_workspace(&mut self, index: usize, workspace_index: usize) {
+        self.workspace.move_profile(&self.panes[index].id, workspace_index);
+    }
+
+    /// Creates a new workspace (named positionally, "Workspace 2", "Workspace
+    /// 3", ...) and moves `self.panes[index]` into it in one step - the
+    /// context menu's "Move to workspace... > New workspace" action. No
+    /// text-input prompt for a custom name in this pass (egui has no
+    /// blocking dialog primitive here) - renaming a workspace after
+    /// creation isn't wired into this GUI at all yet.
+    fn move_pane_to_new_workspace(&mut self, index: usize) {
+        let name = format!("Workspace {}", self.workspace.workspaces().len() + 1);
+        let new_index = self.workspace.create(name);
+        self.move_pane_to_workspace(index, new_index);
+    }
 }
 
 impl eframe::App for NimbleApp {
@@ -207,7 +286,15 @@ impl eframe::App for NimbleApp {
             let container = tiling::Rect { x: available.min.x, y: available.min.y, width: available.width(), height: available.height() };
             let cells = tiling::grid_layout(container, self.panes.len());
 
-            for (index, (pane, cell)) in self.panes.iter_mut().zip(cells).enumerate() {
+            // Deliberately not a `for (pane, cell) in self.panes.iter_mut()...`
+            // loop: the context menu below needs `&self.workspace` (to list
+            // move-to-workspace targets) at the same time other branches
+            // need `&mut self` (close/duplicate/move a pane) - an
+            // `iter_mut()` borrow spanning the whole loop body would
+            // conflict with those `self.method(...)` calls. Indexing
+            // `self.panes[index]` fresh each time avoids holding a borrow
+            // across them.
+            for (index, cell) in cells.into_iter().enumerate() {
                 let cell_rect = egui::Rect::from_min_size(egui::pos2(cell.x, cell.y), egui::vec2(cell.width, cell.height));
                 let mut cell_ui = ui.child_ui(cell_rect, egui::Layout::top_down(egui::Align::Center), None);
 
@@ -216,6 +303,83 @@ impl eframe::App for NimbleApp {
                     self.selected = index;
                 }
 
+                let mut close_clicked = false;
+                let mut duplicate_clicked = false;
+                let mut reload_clicked = false;
+                let mut run_here_clicked = false;
+                let mut move_to: Option<usize> = None;
+                let mut move_to_new = false;
+                let workspaces = self.workspace.workspaces();
+                response.context_menu(|ui| {
+                    if ui.button("Reload").clicked() {
+                        reload_clicked = true;
+                        ui.close_menu();
+                    }
+                    if ui.button("Duplicate profile").clicked() {
+                        duplicate_clicked = true;
+                        ui.close_menu();
+                    }
+                    if ui.button("Run auto login (shared script)").clicked() {
+                        run_here_clicked = true;
+                        ui.close_menu();
+                    }
+                    // No audio pipeline exists anywhere in this engine (no
+                    // `<audio>`/`<video>`/Web Audio - see the phase notes
+                    // in CLAUDE.md) - disabled rather than faking a mute
+                    // toggle that would have nothing to actually mute.
+                    ui.add_enabled(false, egui::Button::new("Mute audio")).on_disabled_hover_text("not implemented - this engine has no audio pipeline yet");
+                    ui.menu_button("Move to workspace", |ui| {
+                        for (workspace_index, workspace) in workspaces.iter().enumerate() {
+                            if ui.button(&workspace.name).clicked() {
+                                move_to = Some(workspace_index);
+                                ui.close_menu();
+                            }
+                        }
+                        ui.separator();
+                        if ui.button("New workspace...").clicked() {
+                            move_to_new = true;
+                            ui.close_menu();
+                        }
+                    });
+                    // Real inspector doesn't exist in any phase of this
+                    // engine yet - the spec itself flags "dev tools" as an
+                    // open gap (CLAUDE.md), not something to fake here.
+                    ui.add_enabled(false, egui::Button::new("Dev tools")).on_disabled_hover_text("not implemented - no inspector exists in this engine yet");
+                    ui.separator();
+                    if ui.button("Close pane").clicked() {
+                        close_clicked = true;
+                        ui.close_menu();
+                    }
+                });
+
+                if reload_clicked {
+                    self.panes[index].browser.reload();
+                }
+                if run_here_clicked {
+                    self.run_automation_script_for_pane(index);
+                }
+                if let Some(workspace_index) = move_to {
+                    self.move_pane_to_workspace(index, workspace_index);
+                }
+                if move_to_new {
+                    self.move_pane_to_new_workspace(index);
+                }
+                // Structural changes (pane count changes) invalidate
+                // `cells`, which was computed for the pane count at the
+                // top of this closure - stop drawing the rest of this
+                // frame's grid rather than index a now-stale layout. Only
+                // costs one frame; the next repaint (16ms later, see the
+                // `request_repaint_after` above) re-lays-out from scratch.
+                if duplicate_clicked {
+                    self.duplicate_pane(index);
+                    break;
+                }
+                if close_clicked {
+                    self.close_pane(index);
+                    break;
+                }
+
+                let pane = &mut self.panes[index];
                 if let Some(texture) = pane.browser.poll_texture(ctx) {
                     let image_size = texture.size_vec2();
                     let scale = (cell_rect.width() / image_size.x).min(cell_rect.height() / image_size.y).min(1.0);

@@ -131,6 +131,29 @@ impl Profile {
         Ok(())
     }
 
+    /// Asks the worker to fetch `url` (a real HTTP/HTTPS request via
+    /// `net::get`, blocking the worker's render loop for the duration —
+    /// see `profile-worker`'s doc on why that's an acceptable simplicity
+    /// trade at this scope) and render the result, replacing the current
+    /// page. `Ok(Ok(()))` means the page loaded; `Ok(Err(message))` means
+    /// the worker is still alive and responsive but the fetch/parse
+    /// itself failed (bad URL, network error, ...) — the worker renders
+    /// a real in-page error message in that case rather than crashing or
+    /// leaving the previous page up silently. The outer `io::Result`
+    /// only covers the stdin/stdout protocol itself failing (a dead
+    /// worker, a broken pipe).
+    pub fn navigate(&mut self, url: &str) -> std::io::Result<Result<(), String>> {
+        writeln!(self.stdin, "NAVIGATE {url}")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        let line = line.trim();
+        match line.strip_prefix("ERROR ") {
+            Some(message) => Ok(Err(message.to_string())),
+            None => Ok(Ok(())),
+        }
+    }
+
     /// The most recently published frame's raw RGBA8 pixels, or `None` if
     /// the worker hasn't published one yet.
     pub fn latest_frame(&self) -> Option<Vec<u8>> {

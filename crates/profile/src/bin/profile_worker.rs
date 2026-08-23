@@ -9,27 +9,42 @@
 //! caller to become more than a manually-pumped test fixture) and
 //! re-renders from whatever the DOM looks like now, so a `setInterval`
 //! callback mutating `textContent` is visibly reflected in the next
-//! published frame. Still not a working browser tab: the HTML source is a
-//! fixed demo string (not fetched from a URL — `net` isn't wired in here),
-//! there's no `<style>`/`<link>` extraction (the stylesheet is applied
-//! separately), and the demo script that drives the counter is a hardcoded
-//! Rust string `eval`'d after parsing, not read out of a `<script>` tag
-//! (html5ever parses `<script>` content as plain DOM text — nothing
-//! executes it).
+//! published frame.
+//!
+//! `NAVIGATE <url>` now does a real fetch (`net::get`) and renders the
+//! actual response — this is no longer just a fixed demo string. Still
+//! cut down from a working browser tab: no `<style>`/`<link>` extraction
+//! (a real fetched page's own stylesheets are never applied — only the
+//! one hardcoded demo stylesheet exists, which won't match a real page's
+//! markup at all, so navigated pages render unstyled: real layout against
+//! a real parsed DOM, just with every element at its CSS initial values),
+//! no redirect following (`net::get`'s own scope), and the fetch blocks
+//! this process's render loop for its duration (a real browser fetches
+//! off the render thread and shows a loading state in the meantime; this
+//! one just misses a few frame ticks - acceptable at this scope since
+//! there's nothing animating during a fetch anyway, but a real regression
+//! if that ever changes).
 //!
 //! Command protocol over stdin (newline-delimited, one command per line),
-//! now read on a dedicated thread and drained non-blockingly by the render
+//! read on a dedicated thread and drained non-blockingly by the render
 //! loop each tick (so a slow/absent command stream never stalls
 //! rendering, and a burst of frames never stalls a command response by
 //! more than one tick, ~16ms):
 //! - `PING` -> replies `PONG` on stdout (liveness check)
-//! - `RELOAD` -> re-parses the page, creates a fresh JS context (resetting
-//!   any JS state - matches a real navigation), re-evaluates the demo
-//!   script, and lets the loop's next tick publish the new frame; replies
-//!   `RELOADED` once that's done
+//! - `RELOAD` -> re-fetches/re-renders whatever page is currently loaded
+//!   (the built-in demo page, or the last `NAVIGATE`d URL — including
+//!   retrying one that previously failed), creates a fresh JS context
+//!   (resetting any JS state - matches a real navigation); replies
+//!   `RELOADED` once that's done, or `ERROR <message>` if the (re-)fetch
+//!   failed, same as `NAVIGATE`
+//! - `NAVIGATE <url>` -> fetches `url` and renders it as the new page;
+//!   replies `NAVIGATED` on success or `ERROR <message>` on failure (bad
+//!   URL, network error, ...) — either way an in-page error message is
+//!   rendered too, not just reported over the protocol, so the frame
+//!   itself never silently goes stale
 //! - `QUIT` -> exits cleanly
 //! - anything else -> ignored (unrecognized commands are not an error;
-//!   real input/navigation commands aren't implemented yet)
+//!   real input commands beyond navigation aren't implemented yet)
 use std::io::{self, BufRead, Write};
 use std::sync::mpsc;
 use std::thread;
@@ -52,11 +67,12 @@ const DEMO_HTML: &str = r#"
 </div>
 "#;
 
-/// Runs once per (re)load: increments a counter and writes it into
-/// `#counter`'s text every 50ms via `setInterval`, and separately bumps a
-/// `requestAnimationFrame`-driven counter every tick to prove both timer
-/// kinds are actually being pumped by the host loop, not just accepted
-/// and ignored.
+/// Runs only against the built-in demo page (never a real navigated
+/// page, which has no `#counter` element for it to find): increments a
+/// counter and writes it into `#counter`'s text every 50ms via
+/// `setInterval`, and separately bumps a `requestAnimationFrame`-driven
+/// counter every tick, proving both timer kinds are actually pumped by
+/// the host loop rather than just accepted and ignored.
 const DEMO_SCRIPT: &str = r#"
 var tickCount = 0;
 var rafCount = 0;
@@ -73,19 +89,56 @@ setTimeout(onTick, 50);
 requestAnimationFrame(onFrame);
 "#;
 
+/// What the currently loaded page came from - re-resolved on `RELOAD`.
+enum PageSource {
+    Demo,
+    Url(String),
+}
+
+fn escape_html_text(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
+fn error_page_html(url: &str, message: &str) -> String {
+    format!(
+        r#"<div id="container"><p>Failed to load {}</p><p>{}</p></div>"#,
+        escape_html_text(url),
+        escape_html_text(message)
+    )
+}
+
+/// Resolves `source` to real HTML: the built-in demo string, or a real
+/// `net::get` response body decoded as UTF-8 (lossily - this doesn't
+/// attempt charset detection from `Content-Type`/`<meta charset>`, real
+/// HTML often isn't UTF-8 but plenty is, and this crate doesn't have a
+/// non-UTF-8 text decoder yet).
+fn resolve_html(source: &PageSource) -> Result<String, String> {
+    match source {
+        PageSource::Demo => Ok(DEMO_HTML.to_string()),
+        PageSource::Url(url) => net::get(url)
+            .map(|response| String::from_utf8_lossy(&response.body).into_owned())
+            .map_err(|e| e.to_string()),
+    }
+}
+
 /// One (re)loadable "page": the parsed DOM's root `<html>` element plus
-/// the JS context mutating it. Rebuilt from scratch on every `RELOAD`,
-/// same as a real navigation resetting a page's JS state.
+/// the JS context mutating it. Rebuilt from scratch on every navigation/
+/// reload, same as a real navigation resetting a page's JS state.
 struct Page<'rt> {
     ctx: Context<'rt>,
     html_el: NodeId,
 }
 
 impl<'rt> Page<'rt> {
-    fn load(runtime: &'rt Runtime) -> Self {
-        let (dom, html_el) = html::parse_to_html_element(DEMO_HTML);
+    /// Builds a page from `html`. `run_demo_script` should only be `true`
+    /// for the built-in demo page - a real fetched page has no
+    /// `#counter` element for `DEMO_SCRIPT` to find.
+    fn load(runtime: &'rt Runtime, html: &str, run_demo_script: bool) -> Self {
+        let (dom, html_el) = html::parse_to_html_element(html);
         let ctx = Context::with_dom(runtime, dom);
-        let _ = ctx.eval(DEMO_SCRIPT, "<profile-worker demo>");
+        if run_demo_script {
+            let _ = ctx.eval(DEMO_SCRIPT, "<profile-worker demo>");
+        }
         Page { ctx, html_el }
     }
 
@@ -109,6 +162,26 @@ impl<'rt> Page<'rt> {
     }
 }
 
+/// Loads `source`, returning the built page and `Some(error)` if the
+/// underlying fetch failed (the returned page is then the rendered error
+/// page, not a panic/empty page - callers still get something to publish
+/// either way).
+fn load_source<'rt>(runtime: &'rt Runtime, source: &PageSource) -> (Page<'rt>, Option<String>) {
+    match resolve_html(source) {
+        Ok(html) => {
+            let run_demo_script = matches!(source, PageSource::Demo);
+            (Page::load(runtime, &html, run_demo_script), None)
+        }
+        Err(message) => {
+            let url = match source {
+                PageSource::Demo => "the demo page",
+                PageSource::Url(url) => url,
+            };
+            (Page::load(runtime, &error_page_html(url, &message), false), Some(message))
+        }
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() != 4 {
@@ -125,7 +198,8 @@ fn main() {
     );
 
     let runtime = Runtime::new();
-    let mut page = Page::load(&runtime);
+    let mut current_source = PageSource::Demo;
+    let (mut page, _) = load_source(&runtime, &current_source);
     let renderer = GpuRenderer::new();
 
     let mut writer = ipc::FrameWriter::new(shmem_name, width, height).expect("failed to create/open shared memory");
@@ -150,19 +224,39 @@ fn main() {
 
     'render_loop: loop {
         while let Ok(line) = cmd_rx.try_recv() {
-            match line.trim() {
-                "PING" => {
-                    let _ = writeln!(stdout, "PONG");
-                    let _ = stdout.flush();
+            let line = line.trim();
+            if line == "PING" {
+                let _ = writeln!(stdout, "PONG");
+                let _ = stdout.flush();
+            } else if line == "RELOAD" {
+                let (loaded, error) = load_source(&runtime, &current_source);
+                page = loaded;
+                writer.publish(&page.render(&sheet, &renderer, width, height));
+                match error {
+                    Some(message) => {
+                        let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
+                    }
+                    None => {
+                        let _ = writeln!(stdout, "RELOADED");
+                    }
                 }
-                "RELOAD" => {
-                    page = Page::load(&runtime);
-                    writer.publish(&page.render(&sheet, &renderer, width, height));
-                    let _ = writeln!(stdout, "RELOADED");
-                    let _ = stdout.flush();
+                let _ = stdout.flush();
+            } else if let Some(url) = line.strip_prefix("NAVIGATE ") {
+                current_source = PageSource::Url(url.trim().to_string());
+                let (loaded, error) = load_source(&runtime, &current_source);
+                page = loaded;
+                writer.publish(&page.render(&sheet, &renderer, width, height));
+                match error {
+                    Some(message) => {
+                        let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
+                    }
+                    None => {
+                        let _ = writeln!(stdout, "NAVIGATED");
+                    }
                 }
-                "QUIT" => break 'render_loop,
-                _ => {}
+                let _ = stdout.flush();
+            } else if line == "QUIT" {
+                break 'render_loop;
             }
         }
 

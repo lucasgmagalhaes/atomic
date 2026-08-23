@@ -12,6 +12,7 @@ layout-engine = { path = "../layout-engine" }
 render = { path = "../render" }
 security = { path = "../security" }
 js-runtime = { path = "../js-runtime" }
+net = { path = "../net" }
 
 [[bin]]
 name = "profile-worker"

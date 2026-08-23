@@ -79,6 +79,55 @@ fn quit_makes_the_child_process_exit() {
     profile.quit();
 }
 
+#[test]
+fn navigate_fetches_a_real_page_and_renders_its_content() {
+    let name = unique_shmem_name("navigate");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let frame_before = profile.latest_frame().unwrap();
+    let result = profile.navigate("https://example.com/").expect("protocol should not fail");
+    assert!(result.is_ok(), "navigate should succeed against a real URL: {result:?}");
+
+    // A real page (all-white-ish background, real body text) looks
+    // nothing like the dark demo page - pixels should visibly differ.
+    let frame_after = profile.latest_frame().unwrap();
+    assert_ne!(frame_before, frame_after);
+
+    profile.quit();
+}
+
+#[test]
+fn navigate_to_a_bad_url_reports_an_error_and_renders_one() {
+    let name = unique_shmem_name("navigate-error");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let result = profile.navigate("not a url").expect("protocol should not fail");
+    assert!(result.is_err(), "navigating to garbage should report an error, not silently succeed");
+
+    // The worker should still be alive and responsive afterward - a
+    // failed navigation isn't fatal.
+    assert!(profile.ping().unwrap());
+
+    profile.quit();
+}
+
+#[test]
+fn reload_retries_the_last_navigated_url() {
+    let name = unique_shmem_name("navigate-reload");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    profile.navigate("https://example.com/").unwrap().unwrap();
+    let gen_after_navigate = profile.frame_generation();
+
+    profile.reload().unwrap();
+    assert!(profile.frame_generation() > gen_after_navigate);
+
+    profile.quit();
+}
+
 fn wait_for_a_frame(profile: &Profile) -> Vec<u8> {
     for _ in 0..100 {
         if let Some(f) = profile.latest_frame() {

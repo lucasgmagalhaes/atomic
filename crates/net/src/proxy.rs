@@ -132,7 +132,7 @@ async fn open_connect_tunnel(proxy: &ProxyConfig, target_host: &str, target_port
     Ok(reader.into_inner())
 }
 
-async fn wrap_tls(stream: TcpStream, target_host: &str) -> Result<tokio_rustls::client::TlsStream<TcpStream>, Error> {
+pub(crate) async fn wrap_tls(stream: TcpStream, target_host: &str) -> Result<tokio_rustls::client::TlsStream<TcpStream>, Error> {
     let mut root_store = rustls::RootCertStore::empty();
     let loaded = rustls_native_certs::load_native_certs();
     for cert in loaded.certs {
@@ -149,7 +149,7 @@ async fn wrap_tls(stream: TcpStream, target_host: &str) -> Result<tokio_rustls::
 /// for `https://`) via `hyper`'s low-level `client::conn::http1` — the
 /// tunnel is only good for one connection, so there's no `hyper_util`
 /// pooling `Client` to hand it to.
-async fn send_one_request<S>(stream: S, uri: &hyper::Uri, target_host: &str, extra_headers: &[(&str, &str)]) -> Result<Response, Error>
+pub(crate) async fn send_one_request<S>(stream: S, uri: &hyper::Uri, target_host: &str, extra_headers: &[(&str, &str)]) -> Result<Response, Error>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {

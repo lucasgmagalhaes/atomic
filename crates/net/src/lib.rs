@@ -33,7 +33,9 @@ use hyper::header::{HeaderName, HeaderValue};
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
 
+mod dns;
 mod proxy;
+pub use dns::{get_via_dns, resolve_a};
 pub use proxy::{get_via_proxy, ProxyConfig};
 
 #[derive(Debug)]

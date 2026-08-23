@@ -49,6 +49,13 @@ pub const JS_EVAL_TYPE_GLOBAL: c_int = 0;
 /// `(ctx, this_val, argc, argv) -> JSValue` native function, as opposed to
 /// the magic/data/constructor variants quickjs.h also defines.
 pub const JS_CFUNC_GENERIC: c_int = 0;
+/// `JSCFunctionEnum::JS_CFUNC_generic_magic` — same calling shape as
+/// `JS_CFUNC_GENERIC` plus a trailing `magic: c_int` (the value passed as
+/// `JS_NewCFunction2`'s own `magic` argument), letting one native function
+/// implementation serve several JS-visible functions that only differ by
+/// which of several targets they act on (e.g. `localStorage` vs
+/// `sessionStorage` sharing one `getItem`).
+pub const JS_CFUNC_GENERIC_MAGIC: c_int = 1;
 
 /// Matches `JSCFunction` from quickjs.h: the signature every function
 /// registered via `JS_NewCFunction2` with `JS_CFUNC_GENERIC` must have.
@@ -72,6 +79,9 @@ pub type JSCFunction = unsafe extern "C" fn(
 /// doesn't pre-allocate one, unlike a real JS `class` constructor).
 pub const JS_CFUNC_CONSTRUCTOR_OR_FUNC: c_int = 4;
 pub const JS_CFUNC_GETTER: c_int = 8;
+/// `JSCFunctionEnum::JS_CFUNC_getter_magic` — a `(ctx, this_val, magic) ->
+/// JSValue` getter, same magic-sharing idea as [`JS_CFUNC_GENERIC_MAGIC`].
+pub const JS_CFUNC_GETTER_MAGIC: c_int = 10;
 /// `JSCFunctionEnum::JS_CFUNC_setter` — see [`JS_CFUNC_GETTER`]; dispatches
 /// to `(ctx, this_val, value) -> JSValue`.
 pub const JS_CFUNC_SETTER: c_int = 9;

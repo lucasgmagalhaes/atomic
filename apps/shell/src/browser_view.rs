@@ -7,14 +7,19 @@
 //! already fully rendered RGBA8 by the time they reach here; this is
 //! purely "display what the profile process already drew."
 //!
+//! Real address-bar navigation too: [`BrowserView::navigate`] sends a
+//! `NAVIGATE <url>` command to the worker (`profile::Profile::navigate`),
+//! which does a real `net::get` fetch and renders whatever comes back -
+//! see `profile-worker`'s own doc for what that does and doesn't cover
+//! (no per-page stylesheet extraction, no redirects). A failed navigation
+//! surfaces as [`BrowserView::navigation_error`] without losing the
+//! address bar's text or crashing the view.
+//!
 //! Scoped down from a real browser chrome: one profile, no tabs/
 //! workspaces UI wiring yet (`workspace::WorkspaceManager` exists and is
 //! tested as a data layer, but nothing here uses it), a fixed frame size
 //! decided at spawn time (a real implementation would re-spawn - or
-//! resize the shared-memory region - on window resize; this doesn't),
-//! and "Reload" is the only chrome control (no address bar - `net`
-//! doesn't feed a URL into `profile-worker` yet either, so there's
-//! nowhere for an address bar's input to actually go).
+//! resize the shared-memory region - on window resize; this doesn't).
 use std::path::PathBuf;
 
 /// Locates the `profile-worker` binary that should already exist next to
@@ -54,6 +59,16 @@ pub struct BrowserView {
     width: u32,
     height: u32,
     error: Option<String>,
+    /// What the address bar should show - starts empty (the built-in demo
+    /// page, not a real URL), set to whatever was last passed to
+    /// [`navigate`](Self::navigate) regardless of whether it succeeded
+    /// (matches `profile-worker`'s own "RELOAD retries the last attempted
+    /// URL, including a failed one" semantics).
+    current_url: String,
+    /// Set by a failed [`navigate`](Self::navigate) call, cleared by the
+    /// next successful one. Independent of `error` (a spawn/process-level
+    /// failure) - this is specifically "the page didn't load."
+    navigation_error: Option<String>,
 }
 
 impl BrowserView {
@@ -70,16 +85,41 @@ impl BrowserView {
             Err(e) => (None, Some(e)),
         };
 
-        BrowserView { profile, texture: None, last_generation: 0, width, height, error }
+        BrowserView { profile, texture: None, last_generation: 0, width, height, error, current_url: String::new(), navigation_error: None }
     }
 
     pub fn error(&self) -> Option<&str> {
         self.error.as_deref()
     }
 
+    pub fn navigation_error(&self) -> Option<&str> {
+        self.navigation_error.as_deref()
+    }
+
+    pub fn current_url(&self) -> &str {
+        &self.current_url
+    }
+
     pub fn reload(&mut self) {
         if let Some(profile) = &mut self.profile {
             let _ = profile.reload();
+        }
+    }
+
+    /// Sends `url` to the worker as a real navigation. Records `url` as
+    /// [`current_url`](Self::current_url) either way, and
+    /// [`navigation_error`](Self::navigation_error) if the fetch itself
+    /// failed (bad URL, network error, ...) or the worker's response to
+    /// the protocol command failed outright (a dead worker).
+    pub fn navigate(&mut self, url: &str) {
+        self.current_url = url.to_string();
+        let Some(profile) = &mut self.profile else {
+            return;
+        };
+        match profile.navigate(url) {
+            Ok(Ok(())) => self.navigation_error = None,
+            Ok(Err(message)) => self.navigation_error = Some(message),
+            Err(io_error) => self.navigation_error = Some(io_error.to_string()),
         }
     }
 

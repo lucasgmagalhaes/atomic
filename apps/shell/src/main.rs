@@ -7,11 +7,21 @@ const FRAME_HEIGHT: u32 = 640;
 
 struct NimbleApp {
     browser: BrowserView,
+    address_bar_text: String,
 }
 
 impl Default for NimbleApp {
     fn default() -> Self {
-        NimbleApp { browser: BrowserView::spawn(FRAME_WIDTH, FRAME_HEIGHT) }
+        NimbleApp { browser: BrowserView::spawn(FRAME_WIDTH, FRAME_HEIGHT), address_bar_text: String::new() }
+    }
+}
+
+impl NimbleApp {
+    fn navigate_to_address_bar(&mut self) {
+        let url = self.address_bar_text.trim().to_string();
+        if !url.is_empty() {
+            self.browser.navigate(&url);
+        }
     }
 }
 
@@ -25,14 +35,23 @@ impl eframe::App for NimbleApp {
 
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.heading("Nimble");
                 if ui.button("Reload").clicked() {
                     self.browser.reload();
                 }
-                if let Some(error) = self.browser.error() {
-                    ui.colored_label(egui::Color32::RED, error);
+
+                let address_bar = ui.add_sized(
+                    [ui.available_width() - 8.0, ui.spacing().interact_size.y],
+                    egui::TextEdit::singleline(&mut self.address_bar_text).hint_text("Enter a URL and press Enter"),
+                );
+                if address_bar.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    self.navigate_to_address_bar();
                 }
             });
+            if let Some(error) = self.browser.error() {
+                ui.colored_label(egui::Color32::RED, error);
+            } else if let Some(error) = self.browser.navigation_error() {
+                ui.colored_label(egui::Color32::RED, format!("Failed to load {}: {error}", self.browser.current_url()));
+            }
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {

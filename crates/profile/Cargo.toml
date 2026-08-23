@@ -13,6 +13,7 @@ render = { path = "../render" }
 security = { path = "../security" }
 js-runtime = { path = "../js-runtime" }
 net = { path = "../net" }
+url = "2.5.8"
 
 [[bin]]
 name = "profile-worker"

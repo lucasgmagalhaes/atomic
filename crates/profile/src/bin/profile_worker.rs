@@ -19,9 +19,11 @@
 //! fetched with a second real `net::get`), cascaded on top of the one
 //! hardcoded base stylesheet that used to be all any page ever got — a
 //! real page now actually looks like something, not just unstyled text.
-//! Scope cuts that remain: only absolute `http(s)://` `<link>` hrefs are
-//! fetched (no base-URL-relative resolution — this workspace has no URL
-//! join/parse library yet), no `@import`, no media queries, and every
+//! `<link>` hrefs are resolved against the page's own URL via the real
+//! `url` crate (`resolve_stylesheet_url` — relative, root-relative, and
+//! scheme-relative hrefs all work now, not just already-absolute ones),
+//! then fetched only if the result is `http(s)://` (skips `data:` etc.).
+//! Remaining scope cuts: no `@import`, no media queries, and every
 //! stylesheet fetch is sequential and blocking (same "the fetch blocks
 //! this process's render loop for its duration" trade-off `NAVIGATE`
 //! itself already makes — a real browser fetches off the render thread
@@ -130,14 +132,36 @@ fn collect_css_sources(dom: &Dom, node: NodeId, out: &mut Vec<CssSource>) {
     }
 }
 
+/// Resolves a `<link href>` against `base_url` (the page's own URL - the
+/// second argument to `Url::join`, exactly WHATWG's URL-resolution
+/// algorithm via the real `url` crate: handles absolute hrefs,
+/// scheme-relative `//host/...`, root-relative `/path`, and ordinary
+/// relative `foo.css`/`../foo.css` alike, not just the "already absolute"
+/// case this used to be limited to). Returns `None` for a non-`http(s)`
+/// result (e.g. `data:`), a malformed href, or a relative href with no
+/// `base_url` to resolve against (the built-in demo page has no URL of
+/// its own).
+fn resolve_stylesheet_url(base_url: Option<&str>, href: &str) -> Option<String> {
+    let resolved = match base_url {
+        Some(base) => url::Url::parse(base).ok()?.join(href).ok()?,
+        None => url::Url::parse(href).ok()?,
+    };
+    if resolved.scheme() == "http" || resolved.scheme() == "https" {
+        Some(resolved.to_string())
+    } else {
+        None
+    }
+}
+
 /// Resolves every CSS source in `dom` (rooted at `root`) into one cascaded
 /// [`Stylesheet`]: [`BASE_STYLESHEET_SRC`] first, then each `<style>`/
-/// `<link>` source in document order — a `<link>` whose href isn't an
-/// absolute `http(s)://` URL is silently skipped (see the module doc's
-/// scope cut), matching `resolve_html`'s own "best-effort, never panics
-/// on a real page" stance rather than failing the whole page load over
-/// one bad stylesheet reference.
-fn build_stylesheet(dom: &Dom, root: NodeId) -> Stylesheet {
+/// `<link>` source in document order, `<link>` hrefs resolved against
+/// `base_url` via [`resolve_stylesheet_url`] — a `<link>` that doesn't
+/// resolve to a fetchable `http(s)://` URL is silently skipped, matching
+/// `resolve_html`'s own "best-effort, never panics on a real page" stance
+/// rather than failing the whole page load over one bad stylesheet
+/// reference.
+fn build_stylesheet(dom: &Dom, root: NodeId, base_url: Option<&str>) -> Stylesheet {
     let mut sources = Vec::new();
     collect_css_sources(dom, root, &mut sources);
 
@@ -145,10 +169,9 @@ fn build_stylesheet(dom: &Dom, root: NodeId) -> Stylesheet {
     for source in sources {
         let css_text = match source {
             CssSource::Inline(text) => Some(text),
-            CssSource::Link(href) if href.starts_with("http://") || href.starts_with("https://") => {
-                net::get(&href).ok().map(|response| String::from_utf8_lossy(&response.body).into_owned())
-            }
-            CssSource::Link(_) => None,
+            CssSource::Link(href) => resolve_stylesheet_url(base_url, &href)
+                .and_then(|url| net::get(&url).ok())
+                .map(|response| String::from_utf8_lossy(&response.body).into_owned()),
         };
         if let Some(css_text) = css_text {
             sheet.rules.extend(parse_stylesheet(&css_text).rules);
@@ -205,9 +228,9 @@ impl<'rt> Page<'rt> {
     /// Builds a page from `html`. `run_demo_script` should only be `true`
     /// for the built-in demo page - a real fetched page has no
     /// `#counter` element for `DEMO_SCRIPT` to find.
-    fn load(runtime: &'rt Runtime, html: &str, run_demo_script: bool) -> Self {
+    fn load(runtime: &'rt Runtime, html: &str, run_demo_script: bool, base_url: Option<&str>) -> Self {
         let (dom, html_el) = html::parse_to_html_element(html);
-        let sheet = build_stylesheet(&dom, html_el);
+        let sheet = build_stylesheet(&dom, html_el, base_url);
         let ctx = Context::with_dom(runtime, dom);
         if run_demo_script {
             let _ = ctx.eval(DEMO_SCRIPT, "<profile-worker demo>");
@@ -240,17 +263,23 @@ impl<'rt> Page<'rt> {
 /// page, not a panic/empty page - callers still get something to publish
 /// either way).
 fn load_source<'rt>(runtime: &'rt Runtime, source: &PageSource) -> (Page<'rt>, Option<String>) {
+    let base_url = match source {
+        PageSource::Demo => None,
+        PageSource::Url(url) => Some(url.as_str()),
+    };
     match resolve_html(source) {
         Ok(html) => {
             let run_demo_script = matches!(source, PageSource::Demo);
-            (Page::load(runtime, &html, run_demo_script), None)
+            (Page::load(runtime, &html, run_demo_script, base_url), None)
         }
         Err(message) => {
             let url = match source {
                 PageSource::Demo => "the demo page",
                 PageSource::Url(url) => url,
             };
-            (Page::load(runtime, &error_page_html(url, &message), false), Some(message))
+            // The synthetic error page has no `<link>`s of its own to
+            // resolve - `base_url: None` here, not the failed `url`.
+            (Page::load(runtime, &error_page_html(url, &message), false, None), Some(message))
         }
     }
 }

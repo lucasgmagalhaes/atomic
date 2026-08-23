@@ -31,6 +31,33 @@ fn serve_html_once(html: &str) -> std::net::SocketAddr {
     addr
 }
 
+/// Like [`serve_html_once`], but serves multiple exact paths (a page plus
+/// whatever it links to relatively) over as many real connections as
+/// arrive - needed to test relative-URL resolution, where the `<link>`
+/// href and the page it came from must share one real origin.
+fn serve_routes(routes: Vec<(&'static str, String)>) -> std::net::SocketAddr {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("failed to bind a loopback test server");
+    let addr = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut buf = [0u8; 4096];
+            let n = stream.read(&mut buf).unwrap_or(0);
+            let request = String::from_utf8_lossy(&buf[..n]);
+            let path = request.lines().next().and_then(|line| line.split_whitespace().nth(1)).unwrap_or("/").to_string();
+            let body = routes.iter().find(|(route, _)| *route == path).map(|(_, body)| body.clone()).unwrap_or_default();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(response.as_bytes());
+            let _ = stream.flush();
+        }
+    });
+    addr
+}
+
 fn unique_shmem_name(tag: &str) -> String {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -173,6 +200,58 @@ fn navigate_fetches_a_linked_stylesheet_and_applies_it() {
         top_left,
         &[255, 0, 255, 255],
         "the fetched <link> stylesheet's background-color should have painted the div's box magenta, got {top_left:?}"
+    );
+
+    profile.quit();
+}
+
+#[test]
+fn navigate_resolves_a_relative_link_href_against_the_page_url() {
+    let html = r#"<div id="box">hi</div><link rel="stylesheet" href="style.css">"#;
+    let css = "#box { background-color: #0000ff; width: 300px; height: 150px; }".to_string();
+    let addr = serve_routes(vec![("/", html.to_string()), ("/style.css", css)]);
+    let page_url = format!("http://{addr}/");
+
+    let name = unique_shmem_name("relative-link");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let result = profile.navigate(&page_url).expect("protocol should not fail");
+    assert!(result.is_ok(), "navigate should succeed: {result:?}");
+
+    let pixels = profile.latest_frame().unwrap();
+    let top_left = &pixels[0..4];
+    assert_eq!(
+        top_left,
+        &[0, 0, 255, 255],
+        "a relative <link href> should resolve against the page's own URL and apply, got {top_left:?}"
+    );
+
+    profile.quit();
+}
+
+#[test]
+fn navigate_resolves_a_root_relative_link_href() {
+    // Page lives at a nested path - a root-relative href must resolve
+    // against the origin (scheme+host+port), not the page's own path.
+    let html = r#"<div id="box">hi</div><link rel="stylesheet" href="/assets/style.css">"#;
+    let css = "#box { background-color: #ffff00; width: 300px; height: 150px; }".to_string();
+    let addr = serve_routes(vec![("/nested/page.html", html.to_string()), ("/assets/style.css", css)]);
+    let page_url = format!("http://{addr}/nested/page.html");
+
+    let name = unique_shmem_name("root-relative-link");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let result = profile.navigate(&page_url).expect("protocol should not fail");
+    assert!(result.is_ok(), "navigate should succeed: {result:?}");
+
+    let pixels = profile.latest_frame().unwrap();
+    let top_left = &pixels[0..4];
+    assert_eq!(
+        top_left,
+        &[255, 255, 0, 255],
+        "a root-relative <link href> (/assets/style.css) should resolve against the page's origin regardless of its own path, got {top_left:?}"
     );
 
     profile.quit();

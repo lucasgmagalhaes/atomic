@@ -56,7 +56,7 @@ members = [
 | Crate | Dependências principais | Responsabilidade | Fase de implementação |
 |---|---|---|---|
 | apps/shell | egui, eframe | UI chrome, tiling BSP, orquestração | 1 = stub · 4 = completo |
-| net | hyper, rustls, tokio, tokio-tungstenite | HTTP/TLS/WebSocket + proxy por perfil (none/shared pool/custom host) e health check de endpoint | 1 = HTTP/TLS/WebSocket · 4 = proxy |
+| net | hyper, rustls, tokio, tokio-tungstenite | HTTP/TLS/WebSocket + proxy por perfil (none/shared pool/custom host) e health check de endpoint | 1 = HTTP/TLS/WebSocket · 4 = proxy (tunelamento CONNECT real feito; escolha de proxy por perfil ainda não fiada em `profile`) |
 | html | html5ever | parser HTML | 1 |
 | dom | — | árvore DOM, eventos | **1 = implementar agora** |
 | layout-engine | — | box tree, flex, positioning | 1 = stub · 3 = completo |
@@ -254,7 +254,7 @@ Levantamento de `mockup/Nimble Browser.dc.html` (nome do produto no mockup: **Ni
 | Resource monitor (CPU/RAM/FPS por profile, gráfico 60s, kill process) | platform-apis + profile (fase 4) | **gap** — spec não menciona telemetria de processo nem UI de monitor |
 | Automation scripts (login automático, claim idle, watchdog reconexão, cron, editor+run log) | novo crate ausente — mais próximo de `workers`/`js-runtime` (fase 2/4) | **gap** — nenhum crate cobre scripting de automação do usuário; scripts do mockup rodam JS arbitrário (`pane.goto`, `pane.fill`, `pane.click`, `every()`, `on()`) — precisa de API própria, não é Web API padrão |
 | Downloads & history por profile | storage (fase 4, File/Blob) + net | **gap parcial** — storage tem cookies/localStorage/sessionStorage/IndexedDB reais e persistidos, incl. cookies agora trocados de fato via `net::get_with_headers` em toda navegação/fetch de `profile-worker` (`fetch_with_cookies`, request `Cookie` + `Set-Cookie` gravado no jar), mas UI/list de downloads e histórico de navegação continua não especificada; `net` ainda não tem download de arquivo (só GET texto/bytes pro pipeline HTML/CSS) |
-| Settings: Network (proxy mode, DNS, WebRTC leak guard) | net, security | **conflito** — ver abaixo; `net` continua sem proxy implementado (GET direto único, sem redirect/pool/proxy — ver nota de implementação) |
+| Settings: Network (proxy mode, DNS, WebRTC leak guard) | net, security | **conflito** — ver abaixo; `net` já tem tunelamento de proxy real (`ProxyConfig` + `get_via_proxy`, CONNECT real, testado contra servidores TCP locais reais), mas nada em `profile`/`profile-worker` ainda escolhe/passa um proxy por perfil — falta a UI e o fio profile→net; DNS/WebRTC leak guard continuam sem spec |
 | Settings: Performance (max live panes, background throttling, GPU, frame cap) | profile, render | **gap** — spec não define limites/throttling configuráveis |
 | Settings: Privacy (isolamento de sessão, clear on close, credential vault, telemetria) | storage, security | parcialmente coberto — "Credential vault · Encrypted · OS keychain" no mockup não tem equivalente na spec (fase 5 só cita "criptografia de sessão em disco") |
 | Settings: Automation (input sync scope, script sandbox, failure handling, schedule engine/cron) | ipc, novo crate de scripting | **gap** — mesmo gap de automation scripts acima |

@@ -8,9 +8,12 @@
 //! `js-runtime` are async, and this crate doesn't need to be either yet.
 //!
 //! Scoped to a single GET request with no redirect following, no caching,
-//! no connection pooling across calls (a fresh runtime + client per call),
-//! no proxy support yet (the spec's `net` crate row calls for per-profile
-//! proxy — not implemented here). `rustls`'s `ring` crypto backend, not
+//! no connection pooling across calls (a fresh runtime + client per call).
+//! Real per-request proxy support now lives in [`proxy`]: [`get_via_proxy`]
+//! tunnels through an upstream HTTP/HTTPS proxy via `CONNECT` before
+//! running the request — this module (`get`/`get_with_headers`) stays the
+//! no-proxy direct-connection path; a caller picks which one to call.
+//! `rustls`'s `ring` crypto backend, not
 //! `aws-lc-rs` (the crate default) — `aws-lc-rs` needs `cmake`/`nasm` to
 //! build its C code, which this dev machine doesn't have set up; `ring` is
 //! pure Rust (well, Rust + a pre-vendored C core built without extra
@@ -27,6 +30,9 @@ use http_body_util::{BodyExt, Empty};
 use hyper::header::{HeaderName, HeaderValue};
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
+
+mod proxy;
+pub use proxy::{get_via_proxy, ProxyConfig};
 
 #[derive(Debug)]
 pub struct Response {

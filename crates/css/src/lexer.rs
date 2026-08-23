@@ -1,7 +1,10 @@
 //! CSS tokenizer. A practical subset of CSS Syntax Module Level 3, not a
-//! full implementation — no `url()`, no unicode-range, no string-escape
-//! error recovery, no bad-string/bad-url tokens. Enough for the selector +
-//! declaration parser this crate needs; extend as real stylesheets need it.
+//! full implementation — no `url()` token (a quoted URL still works, it's
+//! just a plain `String` token inside `url(...)`'s parens — see the
+//! parser's `@import` handling), no unicode-range, no string-escape error
+//! recovery, no bad-string/bad-url tokens. Enough for the selector +
+//! declaration parser this crate needs, plus `@`-rules (`AtKeyword`, for
+//! `@import`/`@media`); extend as real stylesheets need it.
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
@@ -15,6 +18,10 @@ pub enum Token {
     /// A number immediately followed by an ident, e.g. `10px`, `1.5em`.
     Dimension(f64, String),
     Percentage(f64),
+    /// `@import`, `@media`, `@foo` — the name after `@`. Only recognized
+    /// when `@` is immediately followed by an identifier start; a bare
+    /// `@` with nothing ident-like after it falls through to `Delim('@')`.
+    AtKeyword(String),
     Colon,
     Semicolon,
     Comma,
@@ -113,6 +120,16 @@ impl<'a> Lexer<'a> {
             self.chars.next();
             let name = self.read_while(is_ident_char);
             return Some(Token::Hash(name));
+        }
+        if c == '@' {
+            self.chars.next();
+            let next = self.chars.peek().copied();
+            let next_starts_ident = matches!(next, Some(n) if self.starts_ident(n));
+            if next_starts_ident {
+                let name = self.read_while(is_ident_char);
+                return Some(Token::AtKeyword(name));
+            }
+            return Some(Token::Delim('@'));
         }
         if self.starts_ident(c) {
             let name = self.read_while(is_ident_char);

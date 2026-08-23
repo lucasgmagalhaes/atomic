@@ -4,6 +4,27 @@
 //! Declaration values are kept as raw [`Token`]s, not parsed into typed
 //! CSS values (lengths, colors, ...) — that's cascade/layout's job, once
 //! they exist to consume it.
+//!
+//! Also handles two `@`-rules for real: `@media` ([`MediaQuery`], attached
+//! to every [`Rule`] parsed inside its block — [`crate::matching_declarations`]
+//! filters on it) and `@import` (collected into [`Stylesheet::imports`] as
+//! [`ImportRule`]s for a caller with network access to resolve/fetch/merge,
+//! same division of labor this crate already has with `<link>` extraction
+//! living in `profile-worker`, not here). Any other `@`-rule (`@font-face`,
+//! `@keyframes`, `@charset`, ...) is recognized and skipped without
+//! corrupting the rest of the parse — its prelude and body (a `{...}`
+//! block if it has one, tracking nested-brace depth) are just consumed and
+//! discarded, not interpreted.
+//!
+//! `@media`'s own scope: features are `px`-only `min-width`/`max-width`/
+//! `width` (matches this workspace's own px-only length model), ANDed
+//! together within one query (`screen and (min-width: 600px)`); no
+//! comma-separated query lists (`OR` semantics), no nesting inside another
+//! `@media`, no features beyond the three width ones (`prefers-color-scheme`,
+//! `orientation`, `hover`, ... are parsed as a value-less/skipped feature
+//! and ignored). A media type other than `screen`/`all`/unspecified (e.g.
+//! `print`) makes the whole query never match — this engine only ever has
+//! one rendering context, and it isn't print.
 use crate::lexer::{Lexer, Token};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -52,15 +73,62 @@ pub struct Declaration {
     pub value: Vec<Token>,
 }
 
+/// One `px`-only media feature condition — see the module doc's `@media`
+/// scope note.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MediaFeature {
+    MinWidth(f64),
+    MaxWidth(f64),
+    Width(f64),
+}
+
+/// A parsed `@media` condition: an optional media-type gate plus a set of
+/// features ANDed together. See the module doc for exactly what's
+/// supported.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MediaQuery {
+    /// `false` for a named media type this engine never matches (e.g.
+    /// `print`) — short-circuits [`matches`](Self::matches) regardless of
+    /// `features`. `true` for `screen`, `all`, or no type specified.
+    pub type_matches: bool,
+    pub features: Vec<MediaFeature>,
+}
+
+impl MediaQuery {
+    pub fn matches(&self, viewport_width: f64) -> bool {
+        self.type_matches
+            && self.features.iter().all(|f| match f {
+                MediaFeature::MinWidth(w) => viewport_width >= *w,
+                MediaFeature::MaxWidth(w) => viewport_width <= *w,
+                MediaFeature::Width(w) => (viewport_width - w).abs() < 0.001,
+            })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Rule {
     pub selectors: SelectorList,
     pub declarations: Vec<Declaration>,
+    /// `None` for a rule outside any `@media` block (always eligible,
+    /// pending normal selector matching) — `Some` for one parsed inside
+    /// one, checked by [`crate::matching_declarations`] before selector
+    /// matching even runs.
+    pub media: Option<MediaQuery>,
+}
+
+/// One `@import` — `crate::parser`'s job is only to recognize and extract
+/// this, not resolve/fetch it (no network access here); see the module
+/// doc.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportRule {
+    pub url: String,
+    pub media: Option<MediaQuery>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Stylesheet {
     pub rules: Vec<Rule>,
+    pub imports: Vec<ImportRule>,
 }
 
 struct Parser<'a> {
@@ -94,17 +162,36 @@ impl<'a> Parser<'a> {
 
     fn parse_stylesheet(&mut self) -> Stylesheet {
         let mut rules = Vec::new();
+        let mut imports = Vec::new();
         self.skip_whitespace();
-        while self.tokens.peek().is_some() {
-            if let Some(rule) = self.parse_rule() {
-                rules.push(rule);
+        while let Some(tok) = self.tokens.peek().cloned() {
+            match tok {
+                Token::AtKeyword(name) if name.eq_ignore_ascii_case("import") => {
+                    self.tokens.next();
+                    if let Some(import) = self.parse_import() {
+                        imports.push(import);
+                    }
+                }
+                Token::AtKeyword(name) if name.eq_ignore_ascii_case("media") => {
+                    self.tokens.next();
+                    self.parse_media_block(&mut rules);
+                }
+                Token::AtKeyword(_) => {
+                    self.tokens.next();
+                    self.skip_at_rule_body();
+                }
+                _ => {
+                    if let Some(rule) = self.parse_rule(None) {
+                        rules.push(rule);
+                    }
+                }
             }
             self.skip_whitespace();
         }
-        Stylesheet { rules }
+        Stylesheet { rules, imports }
     }
 
-    fn parse_rule(&mut self) -> Option<Rule> {
+    fn parse_rule(&mut self, media: Option<MediaQuery>) -> Option<Rule> {
         let selectors = self.parse_selector_list()?;
         if self.tokens.next() != Some(Token::LBrace) {
             return None;
@@ -113,7 +200,194 @@ impl<'a> Parser<'a> {
         Some(Rule {
             selectors,
             declarations,
+            media,
         })
+    }
+
+    /// Consumes an unrecognized `@`-rule's prelude and body (already past
+    /// the `AtKeyword` itself): up to a terminating `;` (no body, e.g.
+    /// `@charset "utf-8";`) or a balanced `{...}` block (tracking nested
+    /// brace depth, since a block-having at-rule's body can itself contain
+    /// braces, e.g. `@keyframes`'s percentage steps).
+    fn skip_at_rule_body(&mut self) {
+        loop {
+            match self.tokens.peek() {
+                Some(Token::Semicolon) => {
+                    self.tokens.next();
+                    break;
+                }
+                Some(Token::LBrace) => {
+                    self.tokens.next();
+                    let mut depth = 1;
+                    while depth > 0 {
+                        match self.tokens.next() {
+                            Some(Token::LBrace) => depth += 1,
+                            Some(Token::RBrace) => depth -= 1,
+                            Some(_) => {}
+                            None => break,
+                        }
+                    }
+                    break;
+                }
+                Some(_) => {
+                    self.tokens.next();
+                }
+                None => break,
+            }
+        }
+    }
+
+    /// Parses `@import`'s body, already past the `AtKeyword` — either
+    /// `"url"` or `url("url")` (only the quoted form; see the lexer's own
+    /// "no `url()` token" note), then an optional trailing `@media`-shaped
+    /// condition before the terminating `;`. Any tokens between the
+    /// (optional) media query and `;` this doesn't recognize are consumed
+    /// without failing the whole import, matching this parser's general
+    /// "best-effort, don't corrupt the rest of the sheet" stance.
+    fn parse_import(&mut self) -> Option<ImportRule> {
+        self.skip_whitespace();
+        let url = match self.tokens.peek().cloned() {
+            Some(Token::String(s)) => {
+                self.tokens.next();
+                s
+            }
+            Some(Token::Ident(name)) if name.eq_ignore_ascii_case("url") => {
+                self.tokens.next();
+                self.skip_whitespace();
+                if self.tokens.next() != Some(Token::LParen) {
+                    return None;
+                }
+                self.skip_whitespace();
+                let url = match self.tokens.next()? {
+                    Token::String(s) => s,
+                    _ => return None,
+                };
+                self.skip_whitespace();
+                if self.tokens.next() != Some(Token::RParen) {
+                    return None;
+                }
+                url
+            }
+            _ => return None,
+        };
+
+        self.skip_whitespace();
+        let media = if matches!(self.tokens.peek(), Some(Token::Semicolon) | None) {
+            None
+        } else {
+            self.parse_media_query()
+        };
+
+        while !matches!(self.tokens.peek(), Some(Token::Semicolon) | None) {
+            self.tokens.next();
+        }
+        if self.tokens.peek() == Some(&Token::Semicolon) {
+            self.tokens.next();
+        }
+        Some(ImportRule { url, media })
+    }
+
+    /// Parses `@media`'s condition + `{ ... }` block, already past the
+    /// `AtKeyword`, pushing every rule inside onto `rules` with the parsed
+    /// [`MediaQuery`] attached. Bails (consuming nothing further) if the
+    /// block isn't well-formed enough to find an opening `{`.
+    fn parse_media_block(&mut self, rules: &mut Vec<Rule>) {
+        let query = self.parse_media_query();
+        self.skip_whitespace();
+        if self.tokens.next() != Some(Token::LBrace) {
+            return;
+        }
+        self.skip_whitespace();
+        while !matches!(self.tokens.peek(), Some(Token::RBrace) | None) {
+            if let Some(rule) = self.parse_rule(query.clone()) {
+                rules.push(rule);
+            }
+            self.skip_whitespace();
+        }
+        if self.tokens.peek() == Some(&Token::RBrace) {
+            self.tokens.next();
+        }
+    }
+
+    /// Parses a media query: an optional leading type ident (`screen`,
+    /// `print`, ...) optionally followed by `and`, then zero or more
+    /// `(feature: value)` conditions joined by `and`. See the module doc
+    /// for exactly which features/types are understood — an unsupported
+    /// feature is parsed (so the parser stays synchronized) but simply
+    /// contributes nothing to the resulting [`MediaQuery`].
+    fn parse_media_query(&mut self) -> Option<MediaQuery> {
+        self.skip_whitespace();
+        let mut type_matches = true;
+
+        if let Some(Token::Ident(name)) = self.tokens.peek().cloned() {
+            if !name.eq_ignore_ascii_case("and") {
+                self.tokens.next();
+                let lower = name.to_ascii_lowercase();
+                type_matches = lower == "screen" || lower == "all";
+                self.skip_whitespace();
+                if let Some(Token::Ident(and)) = self.tokens.peek().cloned() {
+                    if and.eq_ignore_ascii_case("and") {
+                        self.tokens.next();
+                    }
+                }
+            }
+        }
+
+        let mut features = Vec::new();
+        loop {
+            self.skip_whitespace();
+            if self.tokens.peek() != Some(&Token::LParen) {
+                break;
+            }
+            self.tokens.next();
+            self.skip_whitespace();
+            let Some(Token::Ident(feature_name)) = self.tokens.next() else {
+                break;
+            };
+            self.skip_whitespace();
+
+            if self.tokens.peek() == Some(&Token::Colon) {
+                self.tokens.next();
+                self.skip_whitespace();
+                let value = match self.tokens.next() {
+                    Some(Token::Dimension(n, unit)) if unit == "px" => Some(n),
+                    Some(Token::Number(n)) if n == 0.0 => Some(0.0),
+                    _ => None,
+                };
+                self.skip_whitespace();
+                if self.tokens.peek() == Some(&Token::RParen) {
+                    self.tokens.next();
+                }
+                if let Some(value) = value {
+                    match feature_name.to_ascii_lowercase().as_str() {
+                        "min-width" => features.push(MediaFeature::MinWidth(value)),
+                        "max-width" => features.push(MediaFeature::MaxWidth(value)),
+                        "width" => features.push(MediaFeature::Width(value)),
+                        _ => {}
+                    }
+                }
+            } else {
+                // Boolean feature form, e.g. `(color)` - or a value shape
+                // this parser doesn't understand; skip to the matching `)`.
+                while !matches!(self.tokens.peek(), Some(Token::RParen) | None) {
+                    self.tokens.next();
+                }
+                if self.tokens.peek() == Some(&Token::RParen) {
+                    self.tokens.next();
+                }
+            }
+
+            self.skip_whitespace();
+            if let Some(Token::Ident(and)) = self.tokens.peek().cloned() {
+                if and.eq_ignore_ascii_case("and") {
+                    self.tokens.next();
+                    continue;
+                }
+            }
+            break;
+        }
+
+        Some(MediaQuery { type_matches, features })
     }
 
     fn parse_selector_list(&mut self) -> Option<SelectorList> {

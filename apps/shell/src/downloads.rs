@@ -1,8 +1,7 @@
 //! Per-pane download list — the "downloads" half of the mockup's
 //! "Downloads & history UI per profile" spec gap. Real transfers via
 //! `net::download` (already-real HTTP/TLS GET-to-disk - see that crate),
-//! not a placeholder list. Same in-memory, per-`Pane`, not-persisted
-//! scope as `history` - see that module's doc for why.
+//! not a placeholder list.
 //!
 //! Files land under a dedicated OS temp subdirectory
 //! (`%TEMP%/nimble-downloads/<pane-id>/`), not the user's real Downloads
@@ -12,8 +11,18 @@
 //! own scratch space (rather than a well-known user folder) still needs a
 //! real per-profile UI for "open containing folder" before it'd be worth
 //! pointing at anything else - not built here.
+//!
+//! The record *list* itself is real and persisted too now: `new(dir)`
+//! transparently loads a manifest file (`dir/.downloads.manifest`, one
+//! tab-separated line per past download) if one already exists there, and
+//! `download` appends to it - since `dir` is now keyed by a pane's stable
+//! id (see `browser_view::BrowserView::spawn_with_identity`'s doc), the
+//! list survives a shell restart the same way `history` now does. A
+//! caller that always passes a fresh/unique `dir` (like this crate's own
+//! tests) sees no difference from the old in-memory-only behavior.
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub struct DownloadRecord {
     pub url: String,
@@ -23,13 +32,15 @@ pub struct DownloadRecord {
     /// not silence), same "no silent failure" convention `pane.fill`/
     /// `.click` already follow elsewhere in this workspace.
     pub result: Result<u64, String>,
-    pub at: Instant,
+    pub at: SystemTime,
 }
 
 pub struct Downloads {
     dir: PathBuf,
     entries: Vec<DownloadRecord>,
 }
+
+const MANIFEST_FILE: &str = ".downloads.manifest";
 
 /// The last non-empty path segment of `url`, percent-decoded is NOT
 /// attempted (this engine has no URL-decoding utility beyond the `url`
@@ -43,18 +54,47 @@ fn filename_from_url(url: &str) -> String {
         .unwrap_or_else(|| "download".to_string())
 }
 
+fn parse_manifest_line(line: &str) -> Option<DownloadRecord> {
+    let mut parts = line.splitn(4, '\t');
+    let secs: u64 = parts.next()?.parse().ok()?;
+    let url = parts.next()?.to_string();
+    let dest = PathBuf::from(parts.next()?);
+    let status = parts.next()?;
+    let result = match status.strip_prefix("OK:") {
+        Some(bytes) => Ok(bytes.parse().ok()?),
+        None => Err(status.strip_prefix("ERR:")?.to_string()),
+    };
+    Some(DownloadRecord { url, dest, result, at: UNIX_EPOCH + Duration::from_secs(secs) })
+}
+
+fn format_manifest_line(record: &DownloadRecord) -> String {
+    let secs = record.at.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    let status = match &record.result {
+        Ok(bytes) => format!("OK:{bytes}"),
+        Err(message) => format!("ERR:{}", message.replace(['\n', '\t'], " ")),
+    };
+    format!("{secs}\t{}\t{}\t{status}", record.url, record.dest.display())
+}
+
 impl Downloads {
     /// `dir` is created lazily on the first real download, not here - a
     /// pane that never downloads anything never touches the filesystem.
+    /// If `dir/.downloads.manifest` already exists (a real prior run under
+    /// the same stable pane id), its entries are loaded immediately - see
+    /// this module's own doc.
     pub fn new(dir: PathBuf) -> Self {
-        Downloads { dir, entries: Vec::new() }
+        let entries = std::fs::read_to_string(dir.join(MANIFEST_FILE)).map(|text| text.lines().filter_map(parse_manifest_line).collect()).unwrap_or_default();
+        Downloads { dir, entries }
     }
 
     /// Fetches `url` for real via `net::download`, writing to
     /// `self.dir/<filename derived from the URL>` (a name collision
     /// within one pane's own download dir overwrites the earlier file -
     /// no de-duplication/renaming in this pass). Always appends a record,
-    /// success or failure, and returns it.
+    /// success or failure, and returns it. Also appends the same record to
+    /// the on-disk manifest - a write failure there (permissions, full
+    /// disk) degrades to "keep the in-memory entry, don't persist it"
+    /// rather than losing the download itself or panicking.
     pub fn download(&mut self, url: &str) -> &DownloadRecord {
         let _ = std::fs::create_dir_all(&self.dir);
         let dest = self.dir.join(filename_from_url(url));
@@ -65,7 +105,11 @@ impl Downloads {
         let result = net::download(url, &dest)
             .map_err(|e| e.to_string())
             .and_then(|_| std::fs::metadata(&dest).map(|m| m.len()).map_err(|e| e.to_string()));
-        self.entries.push(DownloadRecord { url: url.to_string(), dest, result, at: Instant::now() });
+        let record = DownloadRecord { url: url.to_string(), dest, result, at: SystemTime::now() };
+        if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(self.dir.join(MANIFEST_FILE)) {
+            let _ = writeln!(file, "{}", format_manifest_line(&record));
+        }
+        self.entries.push(record);
         self.entries.last().expect("just pushed")
     }
 

@@ -40,6 +40,25 @@ fn a_failed_download_still_records_an_entry_with_the_error() {
 }
 
 #[test]
+fn a_reopen_of_the_same_dir_sees_prior_real_download_records() {
+    let dir = temp_dir("reopen");
+    let _ = std::fs::remove_dir_all(&dir);
+
+    {
+        let mut downloads = Downloads::new(dir.clone());
+        downloads.download("https://example.com/");
+    }
+
+    let reopened = Downloads::new(dir.clone());
+    assert_eq!(reopened.entries().count(), 1, "a fresh Downloads over the same dir should load the real manifest left by the previous one");
+    let record = reopened.entries().next().unwrap();
+    assert_eq!(record.url, "https://example.com/");
+    assert!(record.result.as_ref().expect("the persisted record should still show success").clone() > 0);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn filename_is_derived_from_the_urls_last_path_segment() {
     let dir = temp_dir("filename");
     let _ = std::fs::remove_dir_all(&dir);

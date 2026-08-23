@@ -135,11 +135,12 @@ fn spawn_pane(workspace: &mut WorkspaceManager, id: String) -> Pane {
     let active = workspace.active_index();
     workspace.add_profile(active, id.clone());
     let downloads_dir = std::env::temp_dir().join("nimble-downloads").join(&id);
+    let history_path = std::env::temp_dir().join("nimble-shell-history").join(format!("{id}.txt"));
     let browser = BrowserView::spawn_with_identity(&id, PANE_WIDTH, PANE_HEIGHT, None);
     Pane {
         browser,
         monitor: PaneMonitor::new(),
-        history: History::new(),
+        history: History::open(history_path),
         downloads: Downloads::new(downloads_dir),
         id,
     }

@@ -11,4 +11,4 @@ pub use style::{
     JustifyContent, Length,
 };
 pub use text::{layout_inline, layout_text, rasterize_glyph, GlyphBitmap, InlineSpan, PositionedGlyph, TextLayout};
-pub use tree::{build_box_tree, Dimensions, InlineSpanSource, LayoutBox};
+pub use tree::{build_box_tree, build_box_tree_with_viewport, Dimensions, InlineSpanSource, LayoutBox, DEFAULT_VIEWPORT_WIDTH};

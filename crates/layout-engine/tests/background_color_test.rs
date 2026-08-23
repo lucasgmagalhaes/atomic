@@ -8,7 +8,7 @@ fn style_for(css_text: &str) -> layout_engine::ComputedStyle {
         id: None,
         classes: vec![],
     }];
-    resolve_style(&matching_declarations(&sheet, &chain), 16.0, Color { r: 0, g: 0, b: 0, a: 255 })
+    resolve_style(&matching_declarations(&sheet, &chain, 1024.0), 16.0, Color { r: 0, g: 0, b: 0, a: 255 })
 }
 
 #[test]

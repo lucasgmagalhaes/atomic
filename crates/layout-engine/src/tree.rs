@@ -93,6 +93,7 @@ fn resolve_element_style(
     tag: &str,
     attributes: &std::collections::HashMap<String, String>,
     sheet: &Stylesheet,
+    viewport_width: f64,
     chain: &mut Vec<ElementSnapshot>,
     parent_font_size: f64,
     parent_color: Color,
@@ -103,7 +104,7 @@ fn resolve_element_style(
         id: attributes.get("id").cloned(),
         classes: classes_of(attributes),
     });
-    resolve_style(&matching_declarations(sheet, chain), parent_font_size, parent_color)
+    resolve_style(&matching_declarations(sheet, chain, viewport_width), parent_font_size, parent_color)
 }
 
 /// Recursively flattens `node`'s subtree into `out` as [`InlineSpanSource`]
@@ -116,6 +117,7 @@ fn collect_inline_spans(
     dom: &Dom,
     node: NodeId,
     sheet: &Stylesheet,
+    viewport_width: f64,
     chain: &mut Vec<ElementSnapshot>,
     parent_font_size: f64,
     parent_color: Color,
@@ -134,10 +136,10 @@ fn collect_inline_spans(
             }
         }
         NodeData::Element { tag, attributes } => {
-            let style = resolve_element_style(dom, node, tag, attributes, sheet, chain, parent_font_size, parent_color);
+            let style = resolve_element_style(dom, node, tag, attributes, sheet, viewport_width, chain, parent_font_size, parent_color);
             if style.display != Display::None {
                 for &child in &n.children {
-                    collect_inline_spans(dom, child, sheet, chain, style.font_size, style.color, out);
+                    collect_inline_spans(dom, child, sheet, viewport_width, chain, style.font_size, style.color, out);
                 }
             }
             chain.pop();
@@ -153,11 +155,19 @@ fn collect_inline_spans(
 /// `collect_inline_spans`) — cascade resolution is cheap enough (a handful
 /// of declaration lookups) that recomputing it once more beats threading a
 /// pre-resolved style through both call shapes.
-fn is_inline_level(dom: &Dom, node: NodeId, sheet: &Stylesheet, chain: &mut Vec<ElementSnapshot>, parent_font_size: f64, parent_color: Color) -> bool {
+fn is_inline_level(
+    dom: &Dom,
+    node: NodeId,
+    sheet: &Stylesheet,
+    viewport_width: f64,
+    chain: &mut Vec<ElementSnapshot>,
+    parent_font_size: f64,
+    parent_color: Color,
+) -> bool {
     match dom.get(node).map(|n| &n.data) {
         Some(NodeData::Text(text)) => !text.trim().is_empty(),
         Some(NodeData::Element { tag, attributes }) => {
-            let style = resolve_element_style(dom, node, tag, attributes, sheet, chain, parent_font_size, parent_color);
+            let style = resolve_element_style(dom, node, tag, attributes, sheet, viewport_width, chain, parent_font_size, parent_color);
             chain.pop();
             style.display == Display::Inline
         }
@@ -174,6 +184,7 @@ fn build_children(
     dom: &Dom,
     child_ids: &[NodeId],
     sheet: &Stylesheet,
+    viewport_width: f64,
     chain: &mut Vec<ElementSnapshot>,
     parent_font_size: f64,
     parent_color: Color,
@@ -196,7 +207,7 @@ fn build_children(
         if run.len() == 1 && matches!(dom.get(run[0]).map(|n| &n.data), Some(NodeData::Text(_))) {
             let id = run[0];
             run.clear();
-            if let Some(b) = build(dom, id, sheet, chain, parent_font_size, parent_color) {
+            if let Some(b) = build(dom, id, sheet, viewport_width, chain, parent_font_size, parent_color) {
                 result.push(b);
             }
             return;
@@ -208,7 +219,7 @@ fn build_children(
         let first_node = run[0];
         let mut spans = Vec::new();
         for &id in run.iter() {
-            collect_inline_spans(dom, id, sheet, chain, parent_font_size, parent_color, &mut spans);
+            collect_inline_spans(dom, id, sheet, viewport_width, chain, parent_font_size, parent_color, &mut spans);
         }
         run.clear();
         if !spans.is_empty() {
@@ -236,11 +247,11 @@ fn build_children(
     };
 
     for &child in child_ids {
-        if is_inline_level(dom, child, sheet, chain, parent_font_size, parent_color) {
+        if is_inline_level(dom, child, sheet, viewport_width, chain, parent_font_size, parent_color) {
             pending_inline_run.push(child);
         } else {
             flush(&mut pending_inline_run, &mut result, chain);
-            if let Some(b) = build(dom, child, sheet, chain, parent_font_size, parent_color) {
+            if let Some(b) = build(dom, child, sheet, viewport_width, chain, parent_font_size, parent_color) {
                 result.push(b);
             }
         }
@@ -254,6 +265,7 @@ fn build(
     dom: &Dom,
     node: NodeId,
     sheet: &Stylesheet,
+    viewport_width: f64,
     chain: &mut Vec<ElementSnapshot>,
     parent_font_size: f64,
     parent_color: Color,
@@ -287,12 +299,12 @@ fn build(
         id: attributes.get("id").cloned(),
         classes: classes_of(attributes),
     });
-    let style = resolve_style(&matching_declarations(sheet, chain), parent_font_size, parent_color);
+    let style = resolve_style(&matching_declarations(sheet, chain, viewport_width), parent_font_size, parent_color);
 
     let children = if style.display == Display::None {
         Vec::new()
     } else {
-        build_children(dom, &n.children, sheet, chain, style.font_size, style.color)
+        build_children(dom, &n.children, sheet, viewport_width, chain, style.font_size, style.color)
     };
     chain.pop();
 
@@ -311,14 +323,31 @@ fn build(
     })
 }
 
+/// A reasonable desktop-ish default for callers that don't care about
+/// media queries (every existing call site before this crate supported
+/// `@media` at all) — [`build_box_tree`] uses this; callers that actually
+/// know their real viewport width (`profile-worker`, primarily) should
+/// use [`build_box_tree_with_viewport`] instead so `(min-width: ...)`/
+/// `(max-width: ...)` rules evaluate against the truth instead of a guess.
+pub const DEFAULT_VIEWPORT_WIDTH: f64 = 1024.0;
+
 /// Builds the box tree rooted at `node` (typically an `<html>`-equivalent
 /// element, or any element for testing in isolation). Returns `None` if
 /// `node` doesn't exist or isn't an element/non-empty-text node (includes
 /// `display: none`, which produces no box at all per CSS box generation).
 /// `node`'s inherited `font-size` starts at the CSS initial value (16px),
-/// same as a real document root.
+/// same as a real document root. Media queries evaluate against
+/// [`DEFAULT_VIEWPORT_WIDTH`] — use [`build_box_tree_with_viewport`] to
+/// pass a real one.
 pub fn build_box_tree(dom: &Dom, node: NodeId, sheet: &Stylesheet) -> Option<LayoutBox> {
+    build_box_tree_with_viewport(dom, node, sheet, DEFAULT_VIEWPORT_WIDTH)
+}
+
+/// Same as [`build_box_tree`], but resolves any `@media (min-width: ...)`/
+/// `(max-width: ...)` conditions in `sheet` against a real `viewport_width`
+/// instead of the arbitrary default.
+pub fn build_box_tree_with_viewport(dom: &Dom, node: NodeId, sheet: &Stylesheet, viewport_width: f64) -> Option<LayoutBox> {
     let mut chain = Vec::new();
     let initial = ComputedStyle::initial();
-    build(dom, node, sheet, &mut chain, initial.font_size, initial.color)
+    build(dom, node, sheet, viewport_width, &mut chain, initial.font_size, initial.color)
 }

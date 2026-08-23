@@ -4,10 +4,29 @@
 //! header, and real file persistence (same one-mutation-one-flush pattern
 //! as [`crate::LocalStorage`]).
 //!
-//! Deviations from RFC 6265: no `SameSite` enforcement (parsed and stored
-//! but never checked — there's no concept of a "site" a request originates
-//! from yet, since nothing in this workspace tracks a requesting
-//! document's own origin), no public-suffix-list-aware domain checks (a
+//! `SameSite` (`Strict`/`Lax`/`None`) is now real: parsed from
+//! `Set-Cookie` (defaulting to `Lax`, matching modern browsers' own
+//! unspecified-`SameSite` default), stored, and enforced by
+//! [`CookieJar::matching_with_context`]/[`CookieJar::header_value_with_context`]
+//! against an explicit `request_is_same_site` flag a caller supplies — a
+//! `SameSite=None` cookie set without `Secure` is rejected outright at
+//! parse time (`parse_set_cookie` returns `None`), matching real browser
+//! behavior. The plain [`CookieJar::matching`]/[`CookieJar::header_value`]
+//! (used by every caller in this workspace today) are unchanged thin
+//! wrappers that always pass `request_is_same_site: true` — this
+//! workspace has no cross-origin embedding (no iframes exist in `dom` at
+//! all) and already partitions cookie storage per request host one
+//! directory per origin, so there is no cross-site cookie flow for the
+//! policy to meaningfully block yet; the enforcement exists and is
+//! tested at the crate level, ready for whatever caller first needs a
+//! real cross-site request context. One deliberate simplification
+//! against the full spec: `Lax` is enforced identically to `Strict` here
+//! (both require `request_is_same_site: true`) rather than additionally
+//! allowing top-level cross-site GET navigations, since nothing in this
+//! workspace distinguishes a top-level navigation from a subresource
+//! fetch yet.
+//!
+//! Other deviations from RFC 6265: no public-suffix-list-aware domain checks (a
 //! cookie for `Domain=co.uk` would wrongly match every `co.uk` subdomain —
 //! the PSL is a large, frequently-updated external dataset, out of scope
 //! here), and `Expires`' HTTP-date is parsed by a small hand-rolled parser
@@ -17,6 +36,40 @@
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SameSite {
+    Strict,
+    Lax,
+    None,
+}
+
+impl Default for SameSite {
+    /// Modern browsers treat an unspecified `SameSite` as `Lax`, not
+    /// "no restriction" — matched here rather than defaulting to `None`.
+    fn default() -> Self {
+        SameSite::Lax
+    }
+}
+
+impl SameSite {
+    fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "strict" => Some(SameSite::Strict),
+            "lax" => Some(SameSite::Lax),
+            "none" => Some(SameSite::None),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            SameSite::Strict => "strict",
+            SameSite::Lax => "lax",
+            SameSite::None => "none",
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cookie {
@@ -28,6 +81,7 @@ pub struct Cookie {
     pub expires: Option<SystemTime>,
     pub secure: bool,
     pub http_only: bool,
+    pub same_site: SameSite,
 }
 
 impl Cookie {
@@ -116,6 +170,7 @@ pub fn parse_set_cookie(header: &str, request_host: &str) -> Option<Cookie> {
         expires: None,
         secure: false,
         http_only: false,
+        same_site: SameSite::default(),
     };
 
     let mut max_age: Option<i64> = None;
@@ -129,8 +184,16 @@ pub fn parse_set_cookie(header: &str, request_host: &str) -> Option<Cookie> {
             "expires" => cookie.expires = cookie.expires.or_else(|| parse_http_date(val.trim())),
             "secure" => cookie.secure = true,
             "httponly" => cookie.http_only = true,
+            "samesite" => cookie.same_site = SameSite::parse(val).unwrap_or_default(),
             _ => {}
         }
+    }
+
+    // RFC 6265bis: a SameSite=None cookie must also be Secure, or a
+    // real browser rejects it outright rather than storing an
+    // effectively-cross-site cookie over plain HTTP.
+    if cookie.same_site == SameSite::None && !cookie.secure {
+        return None;
     }
 
     // Max-Age takes priority over Expires when both are present (RFC 6265
@@ -196,19 +259,42 @@ impl CookieJar {
 
     /// Every non-expired cookie whose domain/path/secure-ness matches a
     /// request to `host` + `path` under `secure_context` (true for
-    /// `https://`).
+    /// `https://`). Always same-site (see module docs) - equivalent to
+    /// [`matching_with_context`](Self::matching_with_context) with
+    /// `request_is_same_site: true`.
     pub fn matching(&self, host: &str, path: &str, secure_context: bool) -> Vec<&Cookie> {
+        self.matching_with_context(host, path, secure_context, true)
+    }
+
+    /// Same as [`matching`](Self::matching), plus real `SameSite`
+    /// enforcement: a `Strict`/`Lax` cookie is excluded unless
+    /// `request_is_same_site` is `true` (see module docs for why `Lax`
+    /// isn't given its usual "top-level navigation" exception here); a
+    /// `None` cookie is never excluded on this basis.
+    pub fn matching_with_context(&self, host: &str, path: &str, secure_context: bool, request_is_same_site: bool) -> Vec<&Cookie> {
         let now = SystemTime::now();
         self.cookies
             .iter()
-            .filter(|c| !c.is_expired(now) && c.domain_matches(host) && c.path_matches(path) && (!c.secure || secure_context))
+            .filter(|c| {
+                !c.is_expired(now)
+                    && c.domain_matches(host)
+                    && c.path_matches(path)
+                    && (!c.secure || secure_context)
+                    && (request_is_same_site || c.same_site == SameSite::None)
+            })
             .collect()
     }
 
     /// Builds a `Cookie` request header value (`"a=1; b=2"`) from
     /// [`matching`](Self::matching), or `None` if nothing matches.
     pub fn header_value(&self, host: &str, path: &str, secure_context: bool) -> Option<String> {
-        let matches = self.matching(host, path, secure_context);
+        self.header_value_with_context(host, path, secure_context, true)
+    }
+
+    /// Same as [`header_value`](Self::header_value), built from
+    /// [`matching_with_context`](Self::matching_with_context) instead.
+    pub fn header_value_with_context(&self, host: &str, path: &str, secure_context: bool, request_is_same_site: bool) -> Option<String> {
+        let matches = self.matching_with_context(host, path, secure_context, request_is_same_site);
         if matches.is_empty() {
             return None;
         }
@@ -249,14 +335,14 @@ impl CookieJar {
 
 /// One cookie per line, tab-separated fields (escaped via
 /// [`crate::escape`], so a literal tab/newline in a value can't break
-/// parsing): `name\tvalue\tdomain\tpath\texpires_epoch_or_dash\tsecure\thttp_only`.
+/// parsing): `name\tvalue\tdomain\tpath\texpires_epoch_or_dash\tsecure\thttp_only\tsame_site`.
 fn serialize_line(cookie: &Cookie) -> String {
     let expires = cookie
         .expires
         .map(|t| t.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs().to_string())
         .unwrap_or_else(|| "-".to_string());
     format!(
-        "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
         crate::escape(&cookie.name),
         crate::escape(&cookie.value),
         crate::escape(&cookie.domain),
@@ -264,12 +350,17 @@ fn serialize_line(cookie: &Cookie) -> String {
         expires,
         cookie.secure,
         cookie.http_only,
+        cookie.same_site.as_str(),
     )
 }
 
+/// Accepts both the current 8-field format and the pre-`SameSite`
+/// 7-field one (defaulting a legacy line's `same_site` to
+/// [`SameSite::default`]) so an on-disk jar written before this field
+/// existed still loads instead of silently dropping every cookie in it.
 fn deserialize_line(line: &str) -> Option<Cookie> {
     let fields: Vec<&str> = line.split('\t').collect();
-    if fields.len() != 7 {
+    if fields.len() != 7 && fields.len() != 8 {
         return None;
     }
     let expires = if fields[4] == "-" {
@@ -277,6 +368,7 @@ fn deserialize_line(line: &str) -> Option<Cookie> {
     } else {
         Some(UNIX_EPOCH + Duration::from_secs(fields[4].parse().ok()?))
     };
+    let same_site = fields.get(7).and_then(|s| SameSite::parse(s)).unwrap_or_default();
     Some(Cookie {
         name: crate::unescape(fields[0]),
         value: crate::unescape(fields[1]),
@@ -285,5 +377,6 @@ fn deserialize_line(line: &str) -> Option<Cookie> {
         expires,
         secure: fields[5].parse().ok()?,
         http_only: fields[6].parse().ok()?,
+        same_site,
     })
 }

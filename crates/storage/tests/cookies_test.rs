@@ -1,6 +1,6 @@
 use std::time::{Duration, SystemTime};
 
-use storage::cookies::{parse_set_cookie, CookieJar};
+use storage::cookies::{parse_set_cookie, CookieJar, SameSite};
 
 fn temp_path(tag: &str) -> std::path::PathBuf {
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
@@ -134,4 +134,72 @@ fn remove_deletes_a_single_cookie() {
     jar.set_from_header("a=1", "example.com").unwrap();
     jar.remove("a", "example.com", "/").unwrap();
     assert!(jar.is_empty());
+}
+
+#[test]
+fn same_site_defaults_to_lax_when_unspecified() {
+    let cookie = parse_set_cookie("a=1", "example.com").unwrap();
+    assert_eq!(cookie.same_site, SameSite::Lax);
+}
+
+#[test]
+fn same_site_attribute_is_parsed_case_insensitively() {
+    assert_eq!(parse_set_cookie("a=1; SameSite=Strict", "example.com").unwrap().same_site, SameSite::Strict);
+    assert_eq!(parse_set_cookie("a=1; samesite=lax", "example.com").unwrap().same_site, SameSite::Lax);
+    assert_eq!(parse_set_cookie("a=1; SameSite=None; Secure", "example.com").unwrap().same_site, SameSite::None);
+}
+
+#[test]
+fn same_site_none_without_secure_is_rejected() {
+    assert!(parse_set_cookie("a=1; SameSite=None", "example.com").is_none());
+}
+
+#[test]
+fn an_unrecognized_same_site_value_falls_back_to_the_default() {
+    assert_eq!(parse_set_cookie("a=1; SameSite=bogus", "example.com").unwrap().same_site, SameSite::Lax);
+}
+
+#[test]
+fn matching_with_context_excludes_strict_and_lax_cookies_from_a_cross_site_request() {
+    let path = temp_path("same-site-strict");
+    let mut jar = CookieJar::open(&path).unwrap();
+    jar.set_from_header("a=1; SameSite=Strict", "example.com").unwrap();
+    jar.set_from_header("b=2; SameSite=Lax", "example.com").unwrap();
+
+    assert!(jar.matching_with_context("example.com", "/", true, false).is_empty());
+    assert_eq!(jar.matching_with_context("example.com", "/", true, true).len(), 2);
+}
+
+#[test]
+fn matching_with_context_still_sends_same_site_none_cross_site() {
+    let path = temp_path("same-site-none");
+    let mut jar = CookieJar::open(&path).unwrap();
+    jar.set_from_header("a=1; SameSite=None; Secure", "example.com").unwrap();
+
+    let cross_site = jar.matching_with_context("example.com", "/", true, false);
+    assert_eq!(cross_site.len(), 1);
+    assert_eq!(cross_site[0].name, "a");
+}
+
+#[test]
+fn plain_matching_and_header_value_are_unaffected_by_same_site() {
+    let path = temp_path("same-site-plain-api");
+    let mut jar = CookieJar::open(&path).unwrap();
+    jar.set_from_header("a=1; SameSite=Strict", "example.com").unwrap();
+    // The plain (no-context) API always behaves as same-site, so a
+    // Strict cookie still comes back - unchanged from before SameSite
+    // enforcement existed.
+    assert_eq!(jar.header_value("example.com", "/", true).unwrap(), "a=1");
+}
+
+#[test]
+fn same_site_persists_across_separate_open_calls() {
+    let path = temp_path("same-site-persist");
+    {
+        let mut jar = CookieJar::open(&path).unwrap();
+        jar.set_from_header("a=1; SameSite=Strict", "example.com").unwrap();
+    }
+    let reopened = CookieJar::open(&path).unwrap();
+    assert!(reopened.matching_with_context("example.com", "/", true, false).is_empty());
+    assert_eq!(reopened.matching_with_context("example.com", "/", true, true).len(), 1);
 }

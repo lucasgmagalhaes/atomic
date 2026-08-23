@@ -83,6 +83,12 @@ struct NimbleApp {
     /// Set by a failed `profile::Profile::set_fps_cap` call - independent
     /// of `vault_error`, shown in the same Settings window.
     performance_error: Option<String>,
+    /// Which backing `ensure_vault_open` should use - real OS keychain
+    /// (Windows Credential Manager, via `vault_ui::open_with_keychain`) or
+    /// the plain-file-key vault (`vault_ui::open`, the default). A
+    /// distinct vault file per mode (see `vault_ui::open_with_keychain`'s
+    /// doc) - toggling this is switching vaults, not migrating one.
+    vault_use_keychain: bool,
 }
 
 const SPARKLINE_HEIGHT: f32 = 24.0;
@@ -168,6 +174,7 @@ impl Default for NimbleApp {
             vault_key_text: String::new(),
             vault_value_text: String::new(),
             performance_error: None,
+            vault_use_keychain: false,
         }
     }
 }
@@ -313,13 +320,29 @@ impl NimbleApp {
         if self.vault.is_some() {
             return;
         }
-        match vault_ui::open(&vault_ui::default_vault_dir()) {
+        let dir = vault_ui::default_vault_dir();
+        let opened = if self.vault_use_keychain { vault_ui::open_with_keychain(&dir) } else { vault_ui::open(&dir) };
+        match opened {
             Ok(vault) => {
                 self.vault = Some(vault);
                 self.vault_error = None;
             }
             Err(e) => self.vault_error = Some(e.to_string()),
         }
+    }
+
+    /// The Settings window's "Use OS keychain" checkbox: switches which
+    /// vault [`ensure_vault_open`](Self::ensure_vault_open) opens (a
+    /// distinct file per mode, not a migration - see
+    /// `vault_ui::open_with_keychain`'s doc) and opens it immediately so
+    /// the Credentials section reflects the new mode's own real entries
+    /// right away instead of showing stale ones until the next frame that
+    /// happens to need it.
+    fn switch_vault_backing(&mut self, use_keychain: bool) {
+        self.vault_use_keychain = use_keychain;
+        self.vault = None;
+        self.vault_error = None;
+        self.ensure_vault_open();
     }
 
     /// Adds `self.vault_key_text` -> `self.vault_value_text` to the real
@@ -617,7 +640,18 @@ impl eframe::App for NimbleApp {
 
                 ui.separator();
                 ui.heading("Credentials");
-                ui.label("Real AES-256-GCM encrypted vault (security::CredentialVault) - not the real OS keychain yet, see that module's doc.");
+                ui.label("Real AES-256-GCM encrypted vault (security::CredentialVault).");
+                let mut use_keychain = self.vault_use_keychain;
+                let keychain_supported = cfg!(windows);
+                ui.add_enabled_ui(keychain_supported, |ui| {
+                    if ui.checkbox(&mut use_keychain, "Use OS keychain (Windows Credential Manager) for the master key").changed() {
+                        self.switch_vault_backing(use_keychain);
+                    }
+                });
+                if !keychain_supported {
+                    ui.weak("OS keychain backing is only implemented on Windows so far - this vault uses a plain key file here.");
+                }
+                ui.label("A distinct vault per mode, not a migration - switching shows that mode's own entries, not the other mode's re-encrypted.");
                 if let Some(error) = &self.vault_error {
                     ui.colored_label(egui::Color32::RED, error);
                 }

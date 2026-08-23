@@ -31,3 +31,20 @@ pub fn default_vault_dir() -> PathBuf {
 pub fn open(dir: &std::path::Path) -> std::io::Result<CredentialVault> {
     CredentialVault::open_or_create(dir.join("vault.enc"), dir.join("vault.key"))
 }
+
+/// Same as [`open`], but the master key is sourced from the real OS
+/// credential store instead of a plaintext file next to the vault (see
+/// `CredentialVault::open_or_create_with_keychain`'s own doc) - closes the
+/// "OS keychain" deviation for real, where the platform has a backend
+/// (Windows only so far - `Err` on any other platform, no silent fallback
+/// to the file-backed vault).
+///
+/// Deliberately a *separate* file (`dir/vault-keychain.enc`, not
+/// `vault.enc`) rather than the same file with a swapped key source: the
+/// two modes use genuinely different encryption keys, so pointing them at
+/// one file would make switching modes look like data loss (a real decrypt
+/// failure against whatever key the other mode expects) instead of what it
+/// actually is - two independent vaults, not a migration between them.
+pub fn open_with_keychain(dir: &std::path::Path) -> std::io::Result<CredentialVault> {
+    CredentialVault::open_or_create_with_keychain(dir.join("vault-keychain.enc"))
+}

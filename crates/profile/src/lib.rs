@@ -16,10 +16,24 @@ use std::time::{Duration, Instant};
 
 pub use ipc::ShmemError;
 
+/// Total committed memory a single profile process may use before the OS
+/// kills it — see `security::sandbox`. 512 MiB comfortably covers a page's
+/// DOM/layout/render state at this engine's current scope; revisit once
+/// real pages (and their JS heaps) are actually being loaded.
+const PROFILE_MEMORY_LIMIT_BYTES: u64 = 512 * 1024 * 1024;
+
 #[derive(Debug)]
 pub enum SpawnError {
     Io(std::io::Error),
     Shmem(ShmemError),
+    /// Only fatal on platforms where sandboxing is implemented (currently
+    /// Windows) — a real failure to confine the process there means the
+    /// process would otherwise run unconfined, which this crate refuses to
+    /// do silently. On platforms where sandboxing isn't implemented yet
+    /// (see `security::sandbox`'s doc comment), `Sandbox(Unsupported)`
+    /// never reaches here — `spawn` treats that specific case as an
+    /// expected gap, not a failure.
+    Sandbox(security::sandbox::SandboxError),
 }
 
 impl std::fmt::Display for SpawnError {
@@ -27,6 +41,7 @@ impl std::fmt::Display for SpawnError {
         match self {
             SpawnError::Io(e) => write!(f, "failed to spawn profile-worker: {e}"),
             SpawnError::Shmem(e) => write!(f, "failed to open profile frame buffer: {e}"),
+            SpawnError::Sandbox(e) => write!(f, "failed to sandbox profile-worker: {e}"),
         }
     }
 }
@@ -39,6 +54,12 @@ pub struct Profile {
     stdout: BufReader<ChildStdout>,
     frame_reader: ipc::FrameReader,
     quit_sent: bool,
+    /// Held only to keep the confinement alive for as long as the process
+    /// runs — dropping it (which happens automatically on `Profile`'s own
+    /// drop) closes the job, force-killing anything still in it. `None` on
+    /// platforms where `security::sandbox::confine` isn't implemented yet;
+    /// the existing `Drop`-kill below is the only isolation boundary there.
+    _sandbox: Option<security::sandbox::Sandbox>,
 }
 
 impl Profile {
@@ -62,6 +83,16 @@ impl Profile {
             .spawn()
             .map_err(SpawnError::Io)?;
 
+        let sandbox = match security::sandbox::confine(&child, PROFILE_MEMORY_LIMIT_BYTES) {
+            Ok(sandbox) => Some(sandbox),
+            Err(e) if cfg!(windows) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(SpawnError::Sandbox(e));
+            }
+            Err(_unsupported) => None,
+        };
+
         let stdin = child.stdin.take().expect("piped stdin");
         let stdout = BufReader::new(child.stdout.take().expect("piped stdout"));
 
@@ -76,6 +107,7 @@ impl Profile {
             stdout,
             frame_reader,
             quit_sent: false,
+            _sandbox: sandbox,
         })
     }
 

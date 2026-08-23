@@ -10,6 +10,7 @@ html = { path = "../html" }
 css = { path = "../css" }
 layout-engine = { path = "../layout-engine" }
 render = { path = "../render" }
+security = { path = "../security" }
 
 [[bin]]
 name = "profile-worker"

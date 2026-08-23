@@ -36,7 +36,16 @@ unsafe fn node_opaque(this_val: sys::JSValue) -> *mut dom::NodeId {
 }
 
 unsafe fn dom_opaque(ctx: *mut sys::JSContext) -> *mut dom::Dom {
-    sys::JS_GetContextOpaque(ctx) as *mut dom::Dom
+    let state = crate::host_state::get(ctx);
+    if state.is_null() {
+        return std::ptr::null_mut();
+    }
+    // A raw pointer to a field within the boxed `HostState` - sound as
+    // long as the box isn't moved, which `Context` guarantees the same
+    // way it already did when this pointed straight at a boxed `dom::Dom`
+    // (see `Context`'s own doc comment on why moving the `Box` doesn't
+    // move the heap allocation it points to).
+    std::ptr::addr_of_mut!((*state).dom)
 }
 
 unsafe extern "C" fn node_finalizer(_rt: *mut sys::JSRuntime, val: sys::JSValue) {

@@ -4,17 +4,22 @@
 
 use std::ffi::{CStr, CString};
 use std::marker::PhantomData;
+use std::path::Path;
 
 use quickjs_sys as sys;
 
 mod crypto;
 mod document;
+mod document_cookie;
 mod dom_bindings;
 mod events;
 mod fetch;
+mod host_state;
+mod indexed_db_bindings;
 mod page_visibility;
 mod performance;
 mod timers;
+mod value_bridge;
 
 #[derive(Debug)]
 pub struct EvalError(pub String);
@@ -64,7 +69,7 @@ pub struct Context<'rt> {
     // on Context::drop instead of leaking. Moving the Box moves this struct's
     // pointer field, not the heap allocation, so the raw pointer registered
     // with QuickJS via register() stays valid regardless.
-    _dom: Option<Box<dom::Dom>>,
+    _host_state: Option<Box<host_state::HostState>>,
 }
 
 impl<'rt> Context<'rt> {
@@ -77,26 +82,49 @@ impl<'rt> Context<'rt> {
             page_visibility::register(ptr);
             fetch::register(ptr);
             timers::register(ptr);
+            document_cookie::register(ptr);
+            indexed_db_bindings::register(ptr);
         };
         Context {
             ptr,
             _runtime: PhantomData,
-            _dom: None,
+            _host_state: None,
         }
     }
 
     /// Same as [`Context::new`], but also registers the minimal DOM
-    /// bindings (see `dom_bindings`) backed by `dom`.
+    /// bindings (see `dom_bindings`) backed by `dom`. `document.cookie`
+    /// and `indexedDB` are already globally present from [`Context::new`]
+    /// but stay inert (empty cookie string, `indexedDB.open` returning
+    /// `null`) until [`Context::with_storage`] configures real storage.
     pub fn with_dom(runtime: &'rt Runtime, dom: dom::Dom) -> Self {
         let mut ctx = Self::new(runtime);
-        let mut dom_box = Box::new(dom);
-        let raw = dom_box.as_mut() as *mut dom::Dom as *mut std::os::raw::c_void;
+        let mut state = Box::new(host_state::HostState { dom, cookies: None, host: String::new(), storage_dir: None });
+        let raw = state.as_mut() as *mut host_state::HostState as *mut std::os::raw::c_void;
         unsafe {
             sys::JS_SetContextOpaque(ctx.ptr, raw);
             dom_bindings::register(ctx.ptr);
         }
-        ctx._dom = Some(dom_box);
+        ctx._host_state = Some(state);
         ctx
+    }
+
+    /// Same as [`Context::with_dom`], but also wires real persisted
+    /// `document.cookie` and `indexedDB` access: cookies live in
+    /// `storage_dir/cookies.txt` (scoped to `host`, used as the default
+    /// `Domain` for cookies set without one), and `indexedDB.open(name)`
+    /// resolves each database under `storage_dir/idb/<name>`.
+    pub fn with_storage(runtime: &'rt Runtime, dom: dom::Dom, host: &str, storage_dir: impl AsRef<Path>) -> std::io::Result<Self> {
+        let storage_dir = storage_dir.as_ref().to_path_buf();
+        let cookies = storage::cookies::CookieJar::open(storage_dir.join("cookies.txt"))?;
+
+        let mut ctx = Self::with_dom(runtime, dom);
+        if let Some(state) = ctx._host_state.as_mut() {
+            state.cookies = Some(cookies);
+            state.host = host.to_string();
+            state.storage_dir = Some(storage_dir);
+        }
+        Ok(ctx)
     }
 
     /// Evaluates `code` as global script and returns the result coerced to
@@ -156,7 +184,7 @@ impl<'rt> Context<'rt> {
     /// layout/render against the live state — see `profile-worker`'s
     /// per-frame loop.
     pub fn dom(&self) -> Option<&dom::Dom> {
-        self._dom.as_deref()
+        self._host_state.as_ref().map(|s| &s.dom)
     }
 }
 

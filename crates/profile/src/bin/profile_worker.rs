@@ -84,12 +84,22 @@ const DEMO_HTML: &str = r#"
 /// `setInterval`, and separately bumps a `requestAnimationFrame`-driven
 /// counter every tick, proving both timer kinds are actually pumped by
 /// the host loop rather than just accepted and ignored.
+/// Also demonstrates real persisted `localStorage`/`document.cookie` on
+/// the demo page's own `#counter` text: `visits` increments in real
+/// `localStorage` every time this script runs (i.e. every `RELOAD`), and
+/// `document.cookie` gets a real cookie set - both readable proof (via
+/// the rendered text a `profile` test can read back from actual painted
+/// pixels) that `Context::with_storage`'s wiring reaches a real page, not
+/// just something `js-runtime`'s own unit tests exercise in isolation.
 const DEMO_SCRIPT: &str = r#"
 var tickCount = 0;
 var rafCount = 0;
+var visits = parseInt(localStorage.getItem('visits') || '0', 10) + 1;
+localStorage.setItem('visits', String(visits));
+document.cookie = 'visited=true';
 function onTick() {
     tickCount++;
-    document.getElementById('counter').textContent = 'tick ' + tickCount + ' raf ' + rafCount;
+    document.getElementById('counter').textContent = 'tick ' + tickCount + ' raf ' + rafCount + ' visits ' + visits;
     setTimeout(onTick, 50);
 }
 function onFrame() {
@@ -264,11 +274,37 @@ struct Page<'rt> {
 impl<'rt> Page<'rt> {
     /// Builds a page from `html`. `run_demo_script` should only be `true`
     /// for the built-in demo page - a real fetched page has no
-    /// `#counter` element for `DEMO_SCRIPT` to find.
-    fn load(runtime: &'rt Runtime, html: &str, run_demo_script: bool, base_url: Option<&str>, viewport_width: f64) -> Self {
+    /// `#counter` element for `DEMO_SCRIPT` to find (which now uses real
+    /// `localStorage`/`document.cookie` itself - see the const's doc).
+    /// `document.cookie`/`localStorage`/`sessionStorage`/`indexedDB` are
+    /// wired to real per-`storage_host` storage under `storage_root` (via
+    /// `js_runtime::Context::with_storage`) whenever `storage_host` is
+    /// `Some` - `None` gets a plain `Context::with_dom` instead. A
+    /// storage-open failure (rare - a permissions problem, a full disk)
+    /// degrades to `with_dom` rather than failing the whole page load.
+    fn load(
+        runtime: &'rt Runtime,
+        html: &str,
+        run_demo_script: bool,
+        base_url: Option<&str>,
+        storage_host: Option<&str>,
+        viewport_width: f64,
+        storage_root: &std::path::Path,
+    ) -> Self {
         let (dom, html_el) = html::parse_to_html_element(html);
         let sheet = build_stylesheet(&dom, html_el, base_url, viewport_width);
-        let ctx = Context::with_dom(runtime, dom);
+
+        let ctx = match storage_host {
+            Some(host) => match Context::with_storage(runtime, dom, host, storage_root.join(host)) {
+                Ok(ctx) => ctx,
+                // `with_storage` already consumed `dom` by the time it can
+                // fail (a rare I/O error opening the storage files) - it
+                // has to be re-parsed from `html` rather than reused,
+                // acceptable for a path this unlikely to hit in practice.
+                Err(_) => Context::with_dom(runtime, html::parse_to_html_element(html).0),
+            },
+            None => Context::with_dom(runtime, dom),
+        };
         if run_demo_script {
             let _ = ctx.eval(DEMO_SCRIPT, "<profile-worker demo>");
         }
@@ -300,15 +336,25 @@ impl<'rt> Page<'rt> {
 /// underlying fetch failed (the returned page is then the rendered error
 /// page, not a panic/empty page - callers still get something to publish
 /// either way).
-fn load_source<'rt>(runtime: &'rt Runtime, source: &PageSource, viewport_width: f64) -> (Page<'rt>, Option<String>) {
+/// The demo page's real storage host - not a URL, so not derived via
+/// `url::Url::parse` like a navigated page's host is; a fixed name is
+/// enough for it to get real per-origin `localStorage`/`document.cookie`
+/// (see `DEMO_SCRIPT`).
+const DEMO_STORAGE_HOST: &str = "demo.internal";
+
+fn load_source<'rt>(runtime: &'rt Runtime, source: &PageSource, viewport_width: f64, storage_root: &std::path::Path) -> (Page<'rt>, Option<String>) {
     let base_url = match source {
         PageSource::Demo => None,
         PageSource::Url(url) => Some(url.as_str()),
     };
+    let storage_host = match source {
+        PageSource::Demo => Some(DEMO_STORAGE_HOST.to_string()),
+        PageSource::Url(url) => url::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_string)),
+    };
     match resolve_html(source) {
         Ok(html) => {
             let run_demo_script = matches!(source, PageSource::Demo);
-            (Page::load(runtime, &html, run_demo_script, base_url, viewport_width), None)
+            (Page::load(runtime, &html, run_demo_script, base_url, storage_host.as_deref(), viewport_width, storage_root), None)
         }
         Err(message) => {
             let url = match source {
@@ -316,8 +362,11 @@ fn load_source<'rt>(runtime: &'rt Runtime, source: &PageSource, viewport_width: 
                 PageSource::Url(url) => url,
             };
             // The synthetic error page has no `<link>`s of its own to
-            // resolve - `base_url: None` here, not the failed `url`.
-            (Page::load(runtime, &error_page_html(url, &message), false, None, viewport_width), Some(message))
+            // resolve - `base_url: None` here, not the failed `url`. It
+            // still gets real storage scoped to the same host though, so
+            // a subsequent successful load/reload of that host sees
+            // consistent state.
+            (Page::load(runtime, &error_page_html(url, &message), false, None, storage_host.as_deref(), viewport_width, storage_root), Some(message))
         }
     }
 }
@@ -332,9 +381,16 @@ fn main() {
     let width: u32 = args[2].parse().expect("width must be a positive integer");
     let height: u32 = args[3].parse().expect("height must be a positive integer");
 
+    // One storage root per worker process, keyed by shmem name (already
+    // unique per spawned profile) so two profiles never share cookies/
+    // localStorage, then further split by host under `Page::load` -
+    // real per-origin partitioning. Doesn't persist across the worker
+    // process's own lifetime yet - see `Page::load`'s doc.
+    let storage_root = std::env::temp_dir().join("nimble-profile-storage").join(shmem_name);
+
     let runtime = Runtime::new();
     let mut current_source = PageSource::Demo;
-    let (mut page, _) = load_source(&runtime, &current_source, width as f64);
+    let (mut page, _) = load_source(&runtime, &current_source, width as f64, &storage_root);
     let renderer = GpuRenderer::new();
 
     let mut writer = ipc::FrameWriter::new(shmem_name, width, height).expect("failed to create/open shared memory");
@@ -364,7 +420,7 @@ fn main() {
                 let _ = writeln!(stdout, "PONG");
                 let _ = stdout.flush();
             } else if line == "RELOAD" {
-                let (loaded, error) = load_source(&runtime, &current_source, width as f64);
+                let (loaded, error) = load_source(&runtime, &current_source, width as f64, &storage_root);
                 page = loaded;
                 writer.publish(&page.render(&renderer, width, height));
                 match error {
@@ -378,7 +434,7 @@ fn main() {
                 let _ = stdout.flush();
             } else if let Some(url) = line.strip_prefix("NAVIGATE ") {
                 current_source = PageSource::Url(url.trim().to_string());
-                let (loaded, error) = load_source(&runtime, &current_source, width as f64);
+                let (loaded, error) = load_source(&runtime, &current_source, width as f64, &storage_root);
                 page = loaded;
                 writer.publish(&page.render(&renderer, width, height));
                 match error {

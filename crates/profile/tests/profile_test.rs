@@ -349,6 +349,34 @@ fn reload_retries_the_last_navigated_url() {
     profile.quit();
 }
 
+#[test]
+fn demo_page_visit_counter_persists_via_real_local_storage_across_reload() {
+    // DEMO_SCRIPT increments a real localStorage-backed `visits` counter
+    // into #counter's text every (re)load. Waiting for the 50ms tick then
+    // reloading and waiting again should visibly change the rendered
+    // pixels twice - real proof `Context::with_storage`'s localStorage
+    // reaches an actual profile-worker page, not just js-runtime's own
+    // isolated unit tests.
+    // 400x200: tall enough for the demo page's three paragraphs to
+    // actually land inside the canvas (see the same reasoning in the
+    // vsync loop's own tests) - too short a viewport would push #counter
+    // below the painted area and make this test vacuous either way.
+    let name = unique_shmem_name("local-storage-demo");
+    let mut profile = Profile::spawn(worker_path(), &name, 400, 200).expect("spawn should succeed");
+
+    let frame_a = wait_for_a_frame(&profile);
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    let frame_b = profile.latest_frame().unwrap();
+    assert_ne!(frame_a, frame_b, "the first tick should have painted a visits count");
+
+    profile.reload().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    let frame_c = profile.latest_frame().unwrap();
+    assert_ne!(frame_b, frame_c, "reloading should bump the real persisted visits count and repaint a different number");
+
+    profile.quit();
+}
+
 fn wait_for_a_frame(profile: &Profile) -> Vec<u8> {
     for _ in 0..100 {
         if let Some(f) = profile.latest_frame() {

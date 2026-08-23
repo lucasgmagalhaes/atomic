@@ -51,27 +51,67 @@ pub struct TextLayout {
     pub glyphs: Vec<PositionedGlyph>,
 }
 
+/// One run of same-styled text within an inline formatting context — e.g.
+/// `<p>hello <b>world</b></p>` is two spans: `"hello "` at the `<p>`'s
+/// style, `"world"` at the (inherited-plus-cascaded) `<b>`'s style. See
+/// `tree::InlineSpanSource`, which is where these actually get built (it
+/// needs the cascade/ancestor-chain machinery `tree::build` already has -
+/// this module only shapes what it's given).
+#[derive(Debug, Clone, Copy)]
+pub struct InlineSpan<'a> {
+    pub text: &'a str,
+    pub font_size: f32,
+    pub color: Color,
+}
+
 /// Shapes and line-wraps `text` at `font_size`, constrained to `max_width`
 /// if given (`None` = single unbounded line — real CSS `white-space:
 /// nowrap` behavior, though that property isn't parsed/wired up yet).
 /// `color` is threaded straight into every glyph since this crate has no
 /// separate paint step for text yet (unlike boxes, which carry their own
-/// `background_color` and let `render` read it back off the style).
+/// `background_color` and let `render` read it back off the style). A thin
+/// single-span wrapper over [`layout_inline`].
 pub fn layout_text(text: &str, font_size: f32, max_width: Option<f32>, color: Color) -> TextLayout {
-    if text.trim().is_empty() {
+    layout_inline(&[InlineSpan { text, font_size, color }], max_width)
+}
+
+/// Shapes `spans` as **one** inline formatting context — real multi-span
+/// shaping via `cosmic-text`'s `set_rich_text` (not string concatenation
+/// followed by uniform coloring), so text from different DOM nodes wraps
+/// together onto the same line(s) the way `<p>hello <b>world</b></p>`
+/// actually renders, each span keeping its own color/font-size. Per-span
+/// identity survives shaping via `Attrs::metadata` (an index into `spans`,
+/// cosmic-text's own mechanism for exactly this - it threads `metadata`
+/// through to every glyph it produces from that span) rather than trying
+/// to recover it from byte offsets after the fact.
+pub fn layout_inline(spans: &[InlineSpan], max_width: Option<f32>) -> TextLayout {
+    if spans.is_empty() || spans.iter().all(|s| s.text.trim().is_empty()) {
         return TextLayout::default();
     }
 
     let mut ctx = context().lock().unwrap();
     let TextContext { fonts, .. } = &mut *ctx;
 
-    let line_height = font_size * 1.2; // matches CSS's `normal` line-height approximation
-    let metrics = Metrics::new(font_size, line_height);
+    // The buffer's own `Metrics` (used for line-height/scroll bookkeeping,
+    // not the actual per-glyph size) just needs *a* reasonable font size -
+    // each span overrides it via `Attrs::metrics` below regardless.
+    let base_font_size = spans[0].font_size;
+    let metrics = Metrics::new(base_font_size, base_font_size * 1.2);
     let mut buffer = Buffer::new(fonts, metrics);
     let mut buffer = buffer.borrow_with(fonts);
 
     buffer.set_size(max_width, None);
-    buffer.set_text(text, &Attrs::new().family(Family::SansSerif), Shaping::Advanced, None);
+
+    let default_attrs = Attrs::new().family(Family::SansSerif);
+    let rich_spans: Vec<(&str, Attrs)> = spans
+        .iter()
+        .enumerate()
+        .map(|(i, span)| {
+            let span_metrics = Metrics::new(span.font_size, span.font_size * 1.2);
+            (span.text, default_attrs.clone().metrics(span_metrics).metadata(i))
+        })
+        .collect();
+    buffer.set_rich_text(rich_spans, &default_attrs, Shaping::Advanced, None);
     buffer.shape_until_scroll(false);
 
     let mut width = 0.0f32;
@@ -82,6 +122,11 @@ pub fn layout_text(text: &str, font_size: f32, max_width: Option<f32>, color: Co
         width = width.max(run.line_w);
         max_line_bottom = max_line_bottom.max(run.line_top + run.line_height);
         for glyph in run.glyphs {
+            // `metadata` is the span index set above - recovers which
+            // original DOM-derived span (and therefore which color) this
+            // glyph belongs to, after cosmic-text has already merged all
+            // spans into one shaped/wrapped paragraph.
+            let color = spans.get(glyph.metadata).map(|s| s.color).unwrap_or(spans[0].color);
             let physical = glyph.physical((0.0, run.line_y), 1.0);
             glyphs.push(PositionedGlyph {
                 cache_key: physical.cache_key,

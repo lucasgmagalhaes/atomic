@@ -28,6 +28,7 @@ use std::path::{Path, PathBuf};
 
 use base64::Engine;
 
+use crate::keychain;
 use crate::{decrypt, encrypt, generate_key, Error, KEY_LEN};
 
 pub struct CredentialVault {
@@ -63,6 +64,50 @@ impl CredentialVault {
                 key
             }
             Err(e) => return Err(e),
+        };
+
+        let entries = match std::fs::read(&path) {
+            Ok(blob) if !blob.is_empty() => {
+                let plaintext = decrypt(&key, &blob).map_err(|Error::DecryptionFailed| {
+                    io::Error::new(io::ErrorKind::InvalidData, "vault file failed to decrypt (wrong key or corrupted)")
+                })?;
+                parse_entries(&plaintext)
+            }
+            Ok(_) => BTreeMap::new(),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => BTreeMap::new(),
+            Err(e) => return Err(e),
+        };
+
+        Ok(CredentialVault { path, key, entries })
+    }
+
+    /// Same as [`open_or_create`](Self::open_or_create), except the master
+    /// key is sourced from and stored in the real OS credential store
+    /// (Windows Credential Manager — see [`crate::keychain`]) instead of a
+    /// plain file, closing the "OS keychain" deviation this module's own
+    /// doc comment flags. The credential's target name is derived from
+    /// `path` itself (`nimble-vault:<absolute path>`), so a distinct vault
+    /// file gets a distinct keychain entry without the caller having to
+    /// pick a name.
+    ///
+    /// Returns `Err` (not `Ok` with a fallback) on a platform without a
+    /// real [`crate::keychain`] backend, or if the OS credential store
+    /// itself rejects the read/write — same "no fake behavior" convention
+    /// as [`crate::sandbox::confine`].
+    pub fn open_or_create_with_keychain(path: impl AsRef<Path>) -> io::Result<Self> {
+        let path = path.as_ref().to_path_buf();
+        let target = keychain_target_for(&path);
+
+        let key = match keychain::read_credential(&target) {
+            Ok(bytes) => bytes
+                .try_into()
+                .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "keychain credential has the wrong length for a vault key"))?,
+            Err(e) if is_not_found(&e) => {
+                let key = generate_key();
+                keychain::write_credential(&target, &key).map_err(keychain_io_error)?;
+                key
+            }
+            Err(e) => return Err(keychain_io_error(e)),
         };
 
         let entries = match std::fs::read(&path) {
@@ -126,6 +171,26 @@ fn serialize_entries(entries: &BTreeMap<String, String>) -> Vec<u8> {
         out.push('\n');
     }
     out.into_bytes()
+}
+
+/// Deterministic keychain target name for a given vault file — one
+/// credential per distinct vault path.
+fn keychain_target_for(path: &Path) -> String {
+    format!("nimble-vault:{}", path.display())
+}
+
+#[cfg(windows)]
+fn is_not_found(e: &keychain::KeychainError) -> bool {
+    matches!(e, keychain::KeychainError::NotFound)
+}
+
+#[cfg(not(windows))]
+fn is_not_found(_e: &keychain::KeychainError) -> bool {
+    false
+}
+
+fn keychain_io_error(e: keychain::KeychainError) -> io::Error {
+    io::Error::new(io::ErrorKind::Other, e.to_string())
 }
 
 fn parse_entries(plaintext: &[u8]) -> BTreeMap<String, String> {

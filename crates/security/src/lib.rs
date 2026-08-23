@@ -13,6 +13,7 @@
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
 
+pub mod keychain;
 pub mod sandbox;
 pub mod updater;
 pub mod vault;

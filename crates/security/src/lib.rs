@@ -15,6 +15,7 @@ use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
 
 pub mod sandbox;
 pub mod updater;
+pub mod vault;
 
 pub const KEY_LEN: usize = 32; // AES-256
 pub const NONCE_LEN: usize = 12; // GCM's standard nonce size

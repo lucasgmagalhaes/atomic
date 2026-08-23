@@ -8,3 +8,4 @@ quickjs-sys = { path = "quickjs-sys" }
 dom = { path = "../dom" }
 platform-apis = { path = "../platform-apis" }
 net = { path = "../net" }
+storage = { path = "../storage" }

@@ -25,6 +25,8 @@
 //! header, and every response header (including repeated `Set-Cookie`
 //! lines) comes back on [`Response::headers`] for the caller to hand to a
 //! jar. Keeps `net` a plain transport, not a browser-policy layer.
+use std::path::Path;
+
 use bytes::Bytes;
 use http_body_util::{BodyExt, Empty};
 use hyper::header::{HeaderName, HeaderValue};
@@ -50,6 +52,7 @@ pub enum Error {
     Tls(String),
     Request(String),
     Body(String),
+    Io(String),
 }
 
 impl std::fmt::Display for Error {
@@ -59,6 +62,7 @@ impl std::fmt::Display for Error {
             Error::Tls(e) => write!(f, "TLS setup failed: {e}"),
             Error::Request(e) => write!(f, "request failed: {e}"),
             Error::Body(e) => write!(f, "failed to read response body: {e}"),
+            Error::Io(e) => write!(f, "failed to write downloaded file: {e}"),
         }
     }
 }
@@ -76,6 +80,24 @@ pub fn get(url: &str) -> Result<Response, Error> {
 pub fn get_with_headers(url: &str, extra_headers: &[(&str, &str)]) -> Result<Response, Error> {
     let runtime = tokio::runtime::Runtime::new().map_err(|e| Error::Request(e.to_string()))?;
     runtime.block_on(get_async(url, extra_headers))
+}
+
+/// Fetches `url` and writes the response body to `dest` (created or
+/// truncated, same as [`std::fs::write`]), returning the response's
+/// status/headers with an empty `body` (the bytes already went to disk,
+/// no reason to also hold a second copy in memory) — the "Downloads"
+/// mockup gap's missing network half; a caller still owns turning this
+/// into a downloads list/UI.
+pub fn download(url: &str, dest: impl AsRef<Path>) -> Result<Response, Error> {
+    download_with_headers(url, &[], dest)
+}
+
+/// Same as [`download`], with `extra_headers` attached to the request —
+/// e.g. a `Cookie` header, same convention as [`get_with_headers`].
+pub fn download_with_headers(url: &str, extra_headers: &[(&str, &str)], dest: impl AsRef<Path>) -> Result<Response, Error> {
+    let response = get_with_headers(url, extra_headers)?;
+    std::fs::write(dest, &response.body).map_err(|e| Error::Io(e.to_string()))?;
+    Ok(Response { status: response.status, body: Vec::new(), headers: response.headers })
 }
 
 async fn get_async(url: &str, extra_headers: &[(&str, &str)]) -> Result<Response, Error> {

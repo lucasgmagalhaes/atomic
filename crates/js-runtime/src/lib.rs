@@ -208,6 +208,18 @@ impl<'rt> Context<'rt> {
     pub fn dom(&self) -> Option<&dom::Dom> {
         self._host_state.as_ref().map(|s| &s.dom)
     }
+
+    /// Raw `JSContext` pointer, for a caller outside this crate that needs
+    /// to register its own native globals (e.g. `automation`'s `pane`/
+    /// `every`/`on`/cron bindings) via `quickjs-sys` directly, the same way
+    /// every `src/*_bindings.rs` module in this crate already does. Kept
+    /// deliberately narrow — callers get the pointer, not a way to install
+    /// a hook `Context::new` itself calls, since only one caller
+    /// (`automation`) needs this so far and a generic registration API
+    /// would be speculative.
+    pub fn as_raw(&self) -> *mut sys::JSContext {
+        self.ptr
+    }
 }
 
 impl Drop for Context<'_> {

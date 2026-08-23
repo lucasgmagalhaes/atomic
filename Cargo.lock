@@ -3423,6 +3423,7 @@ name = "security"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",
+ "platform-apis",
 ]
 
 [[package]]

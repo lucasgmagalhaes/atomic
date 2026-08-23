@@ -23,8 +23,14 @@
 //! `url` crate (`resolve_stylesheet_url` — relative, root-relative, and
 //! scheme-relative hrefs all work now, not just already-absolute ones),
 //! then fetched only if the result is `http(s)://` (skips `data:` etc.).
-//! Remaining scope cuts: no `@import`, no media queries, and every
-//! stylesheet fetch is sequential and blocking (same "the fetch blocks
+//! `@import` and `@media` are real now too (`css`'s own parser handles
+//! both - see that crate for the exact scope): `merge_stylesheet_text`
+//! fetches an imported stylesheet's URL (one level deep, media-gated) the
+//! same way a `<link>` is fetched, and every page renders against its own
+//! real viewport width (`build_box_tree_with_viewport`), so `@media
+//! (min-width: ...)` actually reflects the frame this worker is publishing
+//! at, not a guess. Remaining scope cuts: every stylesheet fetch is
+//! sequential and blocking (same "the fetch blocks
 //! this process's render loop for its duration" trade-off `NAVIGATE`
 //! itself already makes — a real browser fetches off the render thread
 //! and shows a loading state meanwhile; this one just misses a few frame
@@ -58,7 +64,7 @@ use std::time::{Duration, Instant};
 use css::{parse_stylesheet, Stylesheet};
 use dom::{Dom, NodeData, NodeId};
 use js_runtime::{Context, Runtime};
-use layout_engine::{build_box_tree, layout_block};
+use layout_engine::{build_box_tree_with_viewport, layout_block};
 use render::{build_display_list, build_glyph_list, composite_glyphs, GpuRenderer};
 
 const TARGET_FPS: u32 = 60;
@@ -161,7 +167,38 @@ fn resolve_stylesheet_url(base_url: Option<&str>, href: &str) -> Option<String> 
 /// `resolve_html`'s own "best-effort, never panics on a real page" stance
 /// rather than failing the whole page load over one bad stylesheet
 /// reference.
-fn build_stylesheet(dom: &Dom, root: NodeId, base_url: Option<&str>) -> Stylesheet {
+/// Parses `css_text`, fetches and merges any `@import`s it contains (an
+/// import whose trailing media query doesn't match `viewport_width` is
+/// skipped without fetching it at all — same "don't do the network work
+/// for a rule that couldn't apply anyway" reasoning `<link media="...">`
+/// would get if this crate parsed that attribute, which it doesn't yet),
+/// then appends its own rules — imported rules land first, same relative
+/// order a real `@import` (which must precede other rules) produces.
+/// Only one level deep: an imported stylesheet's own `@import`s aren't
+/// followed, to keep this bounded without needing cycle detection for
+/// what's a real but rare case (a stylesheet importing a stylesheet that
+/// imports another). `@import` hrefs resolve against the *page's* URL,
+/// not the importing stylesheet's own URL (a real engine resolves
+/// relative to whichever stylesheet contains the `@import`) — a
+/// documented simplification, not a distinction this worker tracks.
+fn merge_stylesheet_text(sheet: &mut Stylesheet, css_text: &str, base_url: Option<&str>, viewport_width: f64) {
+    let parsed = parse_stylesheet(css_text);
+    for import in &parsed.imports {
+        let should_fetch = import.media.as_ref().map(|m| m.matches(viewport_width)).unwrap_or(true);
+        if !should_fetch {
+            continue;
+        }
+        if let Some(resolved) = resolve_stylesheet_url(base_url, &import.url) {
+            if let Ok(response) = net::get(&resolved) {
+                let imported_text = String::from_utf8_lossy(&response.body).into_owned();
+                sheet.rules.extend(parse_stylesheet(&imported_text).rules);
+            }
+        }
+    }
+    sheet.rules.extend(parsed.rules);
+}
+
+fn build_stylesheet(dom: &Dom, root: NodeId, base_url: Option<&str>, viewport_width: f64) -> Stylesheet {
     let mut sources = Vec::new();
     collect_css_sources(dom, root, &mut sources);
 
@@ -174,7 +211,7 @@ fn build_stylesheet(dom: &Dom, root: NodeId, base_url: Option<&str>) -> Styleshe
                 .map(|response| String::from_utf8_lossy(&response.body).into_owned()),
         };
         if let Some(css_text) = css_text {
-            sheet.rules.extend(parse_stylesheet(&css_text).rules);
+            merge_stylesheet_text(&mut sheet, &css_text, base_url, viewport_width);
         }
     }
     sheet
@@ -228,9 +265,9 @@ impl<'rt> Page<'rt> {
     /// Builds a page from `html`. `run_demo_script` should only be `true`
     /// for the built-in demo page - a real fetched page has no
     /// `#counter` element for `DEMO_SCRIPT` to find.
-    fn load(runtime: &'rt Runtime, html: &str, run_demo_script: bool, base_url: Option<&str>) -> Self {
+    fn load(runtime: &'rt Runtime, html: &str, run_demo_script: bool, base_url: Option<&str>, viewport_width: f64) -> Self {
         let (dom, html_el) = html::parse_to_html_element(html);
-        let sheet = build_stylesheet(&dom, html_el, base_url);
+        let sheet = build_stylesheet(&dom, html_el, base_url, viewport_width);
         let ctx = Context::with_dom(runtime, dom);
         if run_demo_script {
             let _ = ctx.eval(DEMO_SCRIPT, "<profile-worker demo>");
@@ -246,7 +283,8 @@ impl<'rt> Page<'rt> {
     /// fixed frame interval.
     fn render(&self, renderer: &GpuRenderer, width: u32, height: u32) -> Vec<u8> {
         let dom = self.ctx.dom().expect("Page always constructs its Context via with_dom");
-        let mut tree = build_box_tree(dom, self.html_el, &self.sheet).expect("parsed HTML always produces a box");
+        let mut tree =
+            build_box_tree_with_viewport(dom, self.html_el, &self.sheet, width as f64).expect("parsed HTML always produces a box");
         layout_block(&mut tree, width as f64, 0.0, 0.0);
 
         let rects = build_display_list(&tree);
@@ -262,7 +300,7 @@ impl<'rt> Page<'rt> {
 /// underlying fetch failed (the returned page is then the rendered error
 /// page, not a panic/empty page - callers still get something to publish
 /// either way).
-fn load_source<'rt>(runtime: &'rt Runtime, source: &PageSource) -> (Page<'rt>, Option<String>) {
+fn load_source<'rt>(runtime: &'rt Runtime, source: &PageSource, viewport_width: f64) -> (Page<'rt>, Option<String>) {
     let base_url = match source {
         PageSource::Demo => None,
         PageSource::Url(url) => Some(url.as_str()),
@@ -270,7 +308,7 @@ fn load_source<'rt>(runtime: &'rt Runtime, source: &PageSource) -> (Page<'rt>, O
     match resolve_html(source) {
         Ok(html) => {
             let run_demo_script = matches!(source, PageSource::Demo);
-            (Page::load(runtime, &html, run_demo_script, base_url), None)
+            (Page::load(runtime, &html, run_demo_script, base_url, viewport_width), None)
         }
         Err(message) => {
             let url = match source {
@@ -279,7 +317,7 @@ fn load_source<'rt>(runtime: &'rt Runtime, source: &PageSource) -> (Page<'rt>, O
             };
             // The synthetic error page has no `<link>`s of its own to
             // resolve - `base_url: None` here, not the failed `url`.
-            (Page::load(runtime, &error_page_html(url, &message), false, None), Some(message))
+            (Page::load(runtime, &error_page_html(url, &message), false, None, viewport_width), Some(message))
         }
     }
 }
@@ -296,7 +334,7 @@ fn main() {
 
     let runtime = Runtime::new();
     let mut current_source = PageSource::Demo;
-    let (mut page, _) = load_source(&runtime, &current_source);
+    let (mut page, _) = load_source(&runtime, &current_source, width as f64);
     let renderer = GpuRenderer::new();
 
     let mut writer = ipc::FrameWriter::new(shmem_name, width, height).expect("failed to create/open shared memory");
@@ -326,7 +364,7 @@ fn main() {
                 let _ = writeln!(stdout, "PONG");
                 let _ = stdout.flush();
             } else if line == "RELOAD" {
-                let (loaded, error) = load_source(&runtime, &current_source);
+                let (loaded, error) = load_source(&runtime, &current_source, width as f64);
                 page = loaded;
                 writer.publish(&page.render(&renderer, width, height));
                 match error {
@@ -340,7 +378,7 @@ fn main() {
                 let _ = stdout.flush();
             } else if let Some(url) = line.strip_prefix("NAVIGATE ") {
                 current_source = PageSource::Url(url.trim().to_string());
-                let (loaded, error) = load_source(&runtime, &current_source);
+                let (loaded, error) = load_source(&runtime, &current_source, width as f64);
                 page = loaded;
                 writer.publish(&page.render(&renderer, width, height));
                 match error {

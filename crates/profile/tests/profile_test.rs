@@ -156,6 +156,67 @@ fn navigate_fetches_a_real_page_and_renders_its_content() {
 }
 
 #[test]
+fn navigate_fetches_and_applies_a_real_import() {
+    let imported_addr = serve_html_once("#box { background-color: #00ffff; width: 300px; height: 150px; }");
+    let imported_url = format!("http://{imported_addr}/imported.css");
+    let html = format!(r#"<div id="box">hi</div><style>@import "{imported_url}";</style>"#);
+    let page_addr = serve_html_once(&html);
+    let page_url = format!("http://{page_addr}/");
+
+    let name = unique_shmem_name("import-extract");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let result = profile.navigate(&page_url).expect("protocol should not fail");
+    assert!(result.is_ok(), "navigate should succeed: {result:?}");
+
+    let pixels = profile.latest_frame().unwrap();
+    let top_left = &pixels[0..4];
+    assert_eq!(
+        top_left,
+        &[0, 255, 255, 255],
+        "a real @import should be fetched and applied, got {top_left:?}"
+    );
+
+    profile.quit();
+}
+
+#[test]
+fn navigate_applies_a_media_query_matching_the_real_viewport_width() {
+    // Spawned at 300px wide: `min-width: 250px` should match, `max-width:
+    // 100px` should not - proves the worker evaluates @media against its
+    // *actual* frame width, not a hardcoded default.
+    // Pure-channel colors only (0 or 255 per channel) - a mid-range hex
+    // value round-trips through this render pipeline's sRGB texture
+    // format with a visible gamma shift, which isn't what this test is
+    // about; 0/255 endpoints are unaffected by that curve.
+    let html = r#"<div id="box">hi</div><style>
+        #box { background-color: #000000; width: 300px; height: 150px; }
+        @media (min-width: 250px) { #box { background-color: #00ff00; } }
+        @media (max-width: 100px) { #box { background-color: #0000ff; } }
+    </style>"#;
+    let addr = serve_html_once(html);
+    let url = format!("http://{addr}/");
+
+    let name = unique_shmem_name("media-query");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let result = profile.navigate(&url).expect("protocol should not fail");
+    assert!(result.is_ok(), "navigate should succeed: {result:?}");
+
+    let pixels = profile.latest_frame().unwrap();
+    let top_left = &pixels[0..4];
+    assert_eq!(
+        top_left,
+        &[0, 255, 0, 255],
+        "the min-width:250px rule should apply at a real 300px viewport and the max-width:100px rule should not, got {top_left:?}"
+    );
+
+    profile.quit();
+}
+
+#[test]
 fn navigate_applies_a_real_style_block_extracted_from_the_fetched_page() {
     let html = r#"<div id="box">hi</div><style>#box { background-color: #00ff00; width: 300px; height: 150px; }</style>"#;
     let addr = serve_html_once(html);

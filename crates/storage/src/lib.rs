@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 
 pub mod cookies;
 pub mod indexed_db;
+pub mod value;
 
 /// A flat string-keyed store for one origin, backed by one file on disk.
 /// Every mutation persists immediately (no write batching/debouncing) -

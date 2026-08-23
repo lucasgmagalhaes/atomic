@@ -19,6 +19,7 @@ mod fetch_async;
 mod host_state;
 mod indexed_db_bindings;
 mod local_storage_bindings;
+mod notifications;
 mod page_visibility;
 mod performance;
 mod timers;
@@ -90,6 +91,7 @@ impl<'rt> Context<'rt> {
             indexed_db_bindings::register(ptr);
             local_storage_bindings::register(ptr);
             blob::register(ptr);
+            notifications::register(ptr);
         };
         Context {
             ptr,
@@ -228,6 +230,7 @@ impl Drop for Context<'_> {
             timers::cleanup(self.ptr);
             fetch_async::cleanup(self.ptr);
             blob::cleanup(self.ptr);
+            notifications::cleanup(self.ptr);
             sys::JS_FreeContext(self.ptr);
         }
     }

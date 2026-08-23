@@ -4,3 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+ipc = { path = "../ipc" }
+dom = { path = "../dom" }
+css = { path = "../css" }
+layout-engine = { path = "../layout-engine" }
+render = { path = "../render" }
+
+[[bin]]
+name = "profile-worker"
+path = "src/bin/profile_worker.rs"

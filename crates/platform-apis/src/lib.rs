@@ -1,3 +1,5 @@
+pub mod process_stats;
+
 /// Fills `buf` with cryptographically secure random bytes from the OS
 /// (BCryptGenRandom on Windows, getrandom(2)/arc4random on Linux/macOS via
 /// the `getrandom` crate). Backs `crypto.getRandomValues` in `js-runtime`.

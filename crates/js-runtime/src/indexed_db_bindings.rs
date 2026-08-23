@@ -17,11 +17,11 @@
 //! the CRUD subset first.
 use std::ffi::CString;
 use std::os::raw::{c_int, c_void};
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use quickjs_sys as sys;
 
-static DB_CLASS_ID: AtomicU32 = AtomicU32::new(0);
+/// See `crate::class_registry` - one registry entry per `JSRuntime`.
+const DB_CLASS_KIND: &str = "IDBDatabaseHandle";
 
 unsafe fn read_js_string(ctx: *mut sys::JSContext, val: sys::JSValue) -> Option<String> {
     let mut len: usize = 0;
@@ -35,13 +35,13 @@ unsafe fn read_js_string(ctx: *mut sys::JSContext, val: sys::JSValue) -> Option<
     Some(s)
 }
 
-unsafe fn db_opaque(this_val: sys::JSValue) -> *mut storage::indexed_db::IndexedDb {
-    let class_id = DB_CLASS_ID.load(Ordering::Relaxed);
+unsafe fn db_opaque(rt: *mut sys::JSRuntime, this_val: sys::JSValue) -> *mut storage::indexed_db::IndexedDb {
+    let class_id = crate::class_registry::class_id_for(rt, DB_CLASS_KIND);
     sys::JS_GetOpaque(this_val, class_id) as *mut storage::indexed_db::IndexedDb
 }
 
-unsafe extern "C" fn db_finalizer(_rt: *mut sys::JSRuntime, val: sys::JSValue) {
-    let ptr = db_opaque(val);
+unsafe extern "C" fn db_finalizer(rt: *mut sys::JSRuntime, val: sys::JSValue) {
+    let ptr = db_opaque(rt, val);
     if !ptr.is_null() {
         drop(Box::from_raw(ptr));
     }
@@ -49,8 +49,6 @@ unsafe extern "C" fn db_finalizer(_rt: *mut sys::JSRuntime, val: sys::JSValue) {
 
 unsafe fn ensure_db_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
     let rt = sys::JS_GetRuntime(ctx);
-    let class_id = sys::JS_NewClassID(rt, DB_CLASS_ID.as_ptr());
-
     let class_name = CString::new("IDBDatabaseHandle").unwrap();
     let def = sys::JSClassDef {
         class_name: class_name.as_ptr(),
@@ -59,7 +57,7 @@ unsafe fn ensure_db_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
         call: std::ptr::null_mut(),
         exotic: std::ptr::null_mut(),
     };
-    sys::JS_NewClass(rt, class_id, &def);
+    let class_id = crate::class_registry::ensure_class(rt, DB_CLASS_KIND, &def);
 
     let proto = sys::JS_NewObject(ctx);
     define_method(ctx, proto, "createObjectStore", create_object_store, 1);
@@ -84,7 +82,7 @@ unsafe extern "C" fn create_object_store(
     argc: c_int,
     argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-    let db_ptr = db_opaque(this_val);
+    let db_ptr = db_opaque(sys::JS_GetRuntime(ctx), this_val);
     if db_ptr.is_null() || argc < 1 {
         return sys::js_undefined();
     }
@@ -96,7 +94,7 @@ unsafe extern "C" fn create_object_store(
 }
 
 unsafe extern "C" fn put(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
-    let db_ptr = db_opaque(this_val);
+    let db_ptr = db_opaque(sys::JS_GetRuntime(ctx), this_val);
     if db_ptr.is_null() || argc < 3 {
         return sys::js_undefined();
     }
@@ -115,7 +113,7 @@ unsafe extern "C" fn put(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc:
 }
 
 unsafe extern "C" fn get(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
-    let db_ptr = db_opaque(this_val);
+    let db_ptr = db_opaque(sys::JS_GetRuntime(ctx), this_val);
     if db_ptr.is_null() || argc < 2 {
         return sys::js_null();
     }
@@ -136,7 +134,7 @@ unsafe extern "C" fn get(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc:
 }
 
 unsafe extern "C" fn delete(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
-    let db_ptr = db_opaque(this_val);
+    let db_ptr = db_opaque(sys::JS_GetRuntime(ctx), this_val);
     if db_ptr.is_null() || argc < 2 {
         return sys::js_undefined();
     }
@@ -153,7 +151,7 @@ unsafe extern "C" fn delete(ctx: *mut sys::JSContext, this_val: sys::JSValue, ar
 }
 
 unsafe extern "C" fn clear(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
-    let db_ptr = db_opaque(this_val);
+    let db_ptr = db_opaque(sys::JS_GetRuntime(ctx), this_val);
     if db_ptr.is_null() || argc < 1 {
         return sys::js_undefined();
     }

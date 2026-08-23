@@ -1,5 +1,15 @@
 use js_runtime::{Context, Runtime};
+use std::sync::Mutex;
 use std::time::Duration;
+
+// The OS clipboard is one real, process-wide (in fact system-wide)
+// resource - tests running concurrently on separate threads (Rust's
+// default test harness) that each write then read it back would
+// otherwise race against each other's writes. This has nothing to do
+// with `js-runtime`'s own concurrency (each test still gets its own
+// `Runtime`/`Context`) - it's purely "don't touch the one real
+// clipboard from two tests at once".
+static CLIPBOARD: Mutex<()> = Mutex::new(());
 
 fn pump_until<F: Fn(&Context) -> bool>(ctx: &Context, predicate: F, timeout: Duration) -> bool {
     let deadline = std::time::Instant::now() + timeout;
@@ -16,6 +26,7 @@ fn pump_until<F: Fn(&Context) -> bool>(ctx: &Context, predicate: F, timeout: Dur
 
 #[test]
 fn write_text_then_read_text_round_trips_through_the_real_os_clipboard() {
+    let _guard = CLIPBOARD.lock().unwrap_or_else(|e| e.into_inner());
     let rt = Runtime::new();
     let ctx = Context::new(&rt);
     ctx.eval(
@@ -36,6 +47,7 @@ fn write_text_then_read_text_round_trips_through_the_real_os_clipboard() {
 
 #[test]
 fn write_text_returns_a_real_promise_object() {
+    let _guard = CLIPBOARD.lock().unwrap_or_else(|e| e.into_inner());
     let rt = Runtime::new();
     let ctx = Context::new(&rt);
     let result = ctx.eval("Object.prototype.toString.call(navigator.clipboard.writeText('x'))", "<test>").unwrap();

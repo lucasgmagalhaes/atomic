@@ -4,15 +4,12 @@
 //! context's opaque slot (see `Context::with_dom`).
 use std::ffi::CString;
 use std::os::raw::{c_int, c_void};
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use quickjs_sys as sys;
 
-/// Registered once per process via `JS_NewClassID`, then (re-)registered on
-/// each `JSRuntime` via `JS_NewClass` in `ensure_node_class`. Safe to reuse
-/// across runtimes: class IDs are just table indices, and each runtime
-/// keeps its own class table.
-static NODE_CLASS_ID: AtomicU32 = AtomicU32::new(0);
+/// See `crate::class_registry` - one registry entry per `JSRuntime`, not
+/// a single value shared across every `Runtime` in the process.
+const NODE_CLASS_KIND: &str = "Node";
 
 unsafe fn read_js_string(ctx: *mut sys::JSContext, val: sys::JSValue) -> Option<String> {
     let mut len: usize = 0;
@@ -30,8 +27,8 @@ unsafe fn new_js_string(ctx: *mut sys::JSContext, s: &str) -> sys::JSValue {
     sys::JS_NewStringLen(ctx, s.as_ptr() as *const std::os::raw::c_char, s.len())
 }
 
-unsafe fn node_opaque(this_val: sys::JSValue) -> *mut dom::NodeId {
-    let class_id = NODE_CLASS_ID.load(Ordering::Relaxed);
+unsafe fn node_opaque(rt: *mut sys::JSRuntime, this_val: sys::JSValue) -> *mut dom::NodeId {
+    let class_id = crate::class_registry::class_id_for(rt, NODE_CLASS_KIND);
     sys::JS_GetOpaque(this_val, class_id) as *mut dom::NodeId
 }
 
@@ -48,8 +45,8 @@ unsafe fn dom_opaque(ctx: *mut sys::JSContext) -> *mut dom::Dom {
     std::ptr::addr_of_mut!((*state).dom)
 }
 
-unsafe extern "C" fn node_finalizer(_rt: *mut sys::JSRuntime, val: sys::JSValue) {
-    let ptr = node_opaque(val);
+unsafe extern "C" fn node_finalizer(rt: *mut sys::JSRuntime, val: sys::JSValue) {
+    let ptr = node_opaque(rt, val);
     if !ptr.is_null() {
         drop(Box::from_raw(ptr));
     }
@@ -66,7 +63,7 @@ unsafe extern "C" fn node_text_content_get(
     ctx: *mut sys::JSContext,
     this_val: sys::JSValue,
 ) -> sys::JSValue {
-    let node_ptr = node_opaque(this_val);
+    let node_ptr = node_opaque(sys::JS_GetRuntime(ctx), this_val);
     let dom_ptr = dom_opaque(ctx);
     if node_ptr.is_null() || dom_ptr.is_null() {
         return sys::js_undefined();
@@ -79,7 +76,7 @@ unsafe extern "C" fn node_text_content_set(
     this_val: sys::JSValue,
     val: sys::JSValue,
 ) -> sys::JSValue {
-    let node_ptr = node_opaque(this_val);
+    let node_ptr = node_opaque(sys::JS_GetRuntime(ctx), this_val);
     let dom_ptr = dom_opaque(ctx);
     let Some(text) = read_js_string(ctx, val) else {
         return sys::js_undefined();
@@ -128,8 +125,6 @@ unsafe fn define_text_content(ctx: *mut sys::JSContext, proto: sys::JSValue) {
 /// this runtime) and builds this context's `Node.prototype`.
 unsafe fn ensure_node_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
     let rt = sys::JS_GetRuntime(ctx);
-    let class_id = sys::JS_NewClassID(rt, NODE_CLASS_ID.as_ptr());
-
     let class_name = CString::new("Node").unwrap();
     let def = sys::JSClassDef {
         class_name: class_name.as_ptr(),
@@ -138,9 +133,7 @@ unsafe fn ensure_node_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
         call: std::ptr::null_mut(),
         exotic: std::ptr::null_mut(),
     };
-    // Ignore failure: it just means this runtime already has `class_id`
-    // registered from an earlier Context on the same Runtime.
-    sys::JS_NewClass(rt, class_id, &def);
+    let class_id = crate::class_registry::ensure_class(rt, NODE_CLASS_KIND, &def);
 
     let proto = sys::JS_NewObject(ctx);
     define_text_content(ctx, proto);
@@ -176,7 +169,7 @@ unsafe extern "C" fn document_get_element_by_id(
         return sys::js_null();
     }
     match (*dom_ptr).find_by_id(&id) {
-        Some(node_id) => make_node_object(ctx, NODE_CLASS_ID.load(Ordering::Relaxed), node_id),
+        Some(node_id) => make_node_object(ctx, crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NODE_CLASS_KIND), node_id),
         None => sys::js_null(),
     }
 }

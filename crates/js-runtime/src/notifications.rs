@@ -18,11 +18,11 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::os::raw::{c_int, c_void};
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use quickjs_sys as sys;
 
-static NOTIFICATION_CLASS_ID: AtomicU32 = AtomicU32::new(0);
+/// See `crate::class_registry` - one registry entry per `JSRuntime`.
+const NOTIFICATION_CLASS_KIND: &str = "Notification";
 
 thread_local! {
     // Keyed by JSContext pointer, same convention as `blob::OBJECT_URLS`.
@@ -43,13 +43,13 @@ struct NotificationInner {
     closed: bool,
 }
 
-unsafe fn notification_opaque(this_val: sys::JSValue) -> *mut NotificationInner {
-    let class_id = NOTIFICATION_CLASS_ID.load(Ordering::Relaxed);
+unsafe fn notification_opaque(rt: *mut sys::JSRuntime, this_val: sys::JSValue) -> *mut NotificationInner {
+    let class_id = crate::class_registry::class_id_for(rt, NOTIFICATION_CLASS_KIND);
     sys::JS_GetOpaque(this_val, class_id) as *mut NotificationInner
 }
 
-unsafe extern "C" fn notification_finalizer(_rt: *mut sys::JSRuntime, val: sys::JSValue) {
-    let ptr = notification_opaque(val);
+unsafe extern "C" fn notification_finalizer(rt: *mut sys::JSRuntime, val: sys::JSValue) {
+    let ptr = notification_opaque(rt, val);
     if !ptr.is_null() {
         drop(Box::from_raw(ptr));
     }
@@ -98,7 +98,7 @@ unsafe extern "C" fn notification_constructor(
     argc: c_int,
     argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-    let class_id = NOTIFICATION_CLASS_ID.load(Ordering::Relaxed);
+    let class_id = crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NOTIFICATION_CLASS_KIND);
     let obj = sys::JS_NewObjectClass(ctx, class_id);
     if sys::js_is_exception(&obj) {
         return obj;
@@ -124,8 +124,7 @@ unsafe extern "C" fn notification_constructor(
 }
 
 unsafe extern "C" fn notification_close(ctx: *mut sys::JSContext, this_val: sys::JSValue, _argc: c_int, _argv: *mut sys::JSValue) -> sys::JSValue {
-    let _ = ctx;
-    let ptr = notification_opaque(this_val);
+    let ptr = notification_opaque(sys::JS_GetRuntime(ctx), this_val);
     if !ptr.is_null() {
         (*ptr).closed = true;
     }
@@ -179,7 +178,6 @@ unsafe fn define_static_getter(ctx: *mut sys::JSContext, obj: sys::JSValue, name
 /// accessor and `requestPermission` static method) as a global.
 pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     let rt = sys::JS_GetRuntime(ctx);
-    let class_id = sys::JS_NewClassID(rt, NOTIFICATION_CLASS_ID.as_ptr());
     let class_name = CString::new("Notification").unwrap();
     let def = sys::JSClassDef {
         class_name: class_name.as_ptr(),
@@ -188,7 +186,7 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
         call: std::ptr::null_mut(),
         exotic: std::ptr::null_mut(),
     };
-    sys::JS_NewClass(rt, class_id, &def);
+    let class_id = crate::class_registry::ensure_class(rt, NOTIFICATION_CLASS_KIND, &def);
 
     let proto = sys::JS_NewObject(ctx);
     let close_name = CString::new("close").unwrap();

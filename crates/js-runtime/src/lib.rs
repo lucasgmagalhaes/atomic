@@ -9,6 +9,7 @@ use std::path::Path;
 use quickjs_sys as sys;
 
 mod blob;
+mod class_registry;
 mod clipboard;
 mod crypto;
 mod document;
@@ -58,6 +59,11 @@ impl Default for Runtime {
 
 impl Drop for Runtime {
     fn drop(&mut self) {
+        // Must run before JS_FreeRuntime: once this runtime's memory can
+        // be reused for a new one, a stale class_registry entry at the
+        // same address would corrupt that new runtime's class
+        // registration (see class_registry's module docs).
+        class_registry::cleanup_runtime(self.ptr);
         unsafe { sys::JS_FreeRuntime(self.ptr) };
     }
 }

@@ -248,7 +248,7 @@ Levantamento de `mockup/Nimble Browser.dc.html` (nome do produto no mockup: **Ni
 
 | Feature no mockup | Crate/fase responsável | Status na spec |
 |---|---|---|
-| Grid de panes 1/2/4/6 com tiling | apps/shell, layout BSP (fase 1 stub → 4 completo) | coberto (layout BSP) |
+| Grid de panes 1/2/4/6 com tiling | apps/shell, layout BSP (fase 1 stub → 4 completo) | coberto de verdade agora — `apps/shell/src/tiling.rs` (presets fixos 1/2/4/6 + fallback N-colunas, não BSP recursivo literal — ver doc do módulo) + `NimbleApp` com `Vec<Pane>` real (cada uma um `profile-worker` de verdade, registrado em `WorkspaceManager`); antes disso o diretório `tiling/` estava vazio e só um profile era spawnado |
 | Input sync entre panes (toggle "Input sync on/off") | ipc (fase 4) | **gap** — spec de ipc só cobre frame+input+comandos ponto-a-ponto shell↔profile; sync de input entre múltiplos profiles simultâneos não está especificado |
 | Workspaces nomeados (Principal/Farm squad/Trades/Testing), múltiplas contas por workspace | apps/shell/workspace (fase 4) | **parcialmente coberto** — `WorkspaceManager` real e testado (create/switch/move profiles) existe em `apps/shell`, mas sem UI de switch/grid especificada nem fluxo de "múltiplas contas por workspace" completo |
 | Resource monitor (CPU/RAM/FPS por profile, gráfico 60s, kill process) | platform-apis + profile (fase 4) | **gap parcial** — `platform-apis` agora tem `process_stats::sample`/`cpu_percent` reais (`GetProcessTimes`+`GetProcessMemoryInfo` via `windows-sys`, testado contra processo real), FPS já existe via `Profile::frame_generation()`, kill process já existe via `Profile::quit()`/`Drop`; falta só o gráfico de 60s e a UI de monitor em `apps/shell` |

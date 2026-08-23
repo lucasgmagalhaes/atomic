@@ -1,20 +1,11 @@
 use std::time::Duration;
 
+use shell::automation_bridge::{self, MAIN_PANE_ID};
 use shell::browser_view::BrowserView;
 use shell::workspace::WorkspaceManager;
 
 const FRAME_WIDTH: u32 = 1024;
 const FRAME_HEIGHT: u32 = 640;
-
-/// The pane name the currently running `BrowserView`'s profile is
-/// registered under in the active workspace, and therefore the only name
-/// an automation script can pass to `pane(...)` right now — `apps/shell`
-/// only ever spawns one live profile process at a time (see
-/// `BrowserView`'s own doc comment), so this is the one entry
-/// `WorkspaceManager::active().profiles()` can actually resolve to a
-/// running `Profile`. A future multi-pane grid would give each spawned
-/// profile its own id here instead of one constant.
-const MAIN_PANE_ID: &str = "main";
 
 struct NimbleApp {
     browser: BrowserView,
@@ -85,44 +76,15 @@ impl NimbleApp {
         self.address_bar_text.clear();
     }
 
-    /// Runs `self.automation_script`'s top-level code once against whatever
-    /// panes from the *active workspace* actually have a live `Profile`
-    /// right now - built fresh from `self.workspace` each call rather than
-    /// kept around, so pane names always reflect the current workspace
-    /// instead of a stale snapshot.
-    ///
-    /// Ephemeral by design, not a limitation to fix later in this pass: the
-    /// `AutomationEngine`/`js_runtime::Runtime` it builds are dropped at the
-    /// end of this call, same as this whole method's stack frame. A script
-    /// that calls `every`/`on`/`cron` registers those callbacks into a
-    /// `Context` nothing will ever `tick()` again after this returns - they
-    /// silently never fire. A real "keep the engine alive across frames and
-    /// call `tick()` from `update`" wiring needs `NimbleApp` to hold an
-    /// `AutomationEngine` borrowing `self.browser`'s `Profile` at the same
-    /// time as `self.browser` itself is used elsewhere in `update` - a
-    /// self-referential-struct problem this pass doesn't take on. Good
-    /// enough for the mockup's "editor + run" half of automation; the
-    /// "watchdog reconexão" / persistent-schedule half stays a gap.
+    /// Runs `self.automation_script` once via [`automation_bridge::run_script`]
+    /// (see that function's doc for what it does and doesn't cover - the
+    /// "ephemeral, no persistent `tick()`" gap included) and stores the
+    /// result for the panel below to display. Built fresh from
+    /// `self.workspace`/`self.browser` each call rather than kept around,
+    /// so pane names always reflect the current workspace instead of a
+    /// stale snapshot.
     fn run_automation_script(&mut self) {
-        let runtime = js_runtime::Runtime::new();
-        let mut panes = std::collections::HashMap::new();
-        // A loop over `self.workspace.active().profiles()` calling
-        // `self.browser.profile_mut()` per iteration doesn't borrow-check
-        // (NLL can't see the active workspace has at most one id this app
-        // can resolve to a live profile) - written as a single lookup
-        // instead. Any *other* id in the active workspace has no spawned
-        // process behind it (`apps/shell` only ever runs one `BrowserView`
-        // - see `MAIN_PANE_ID`'s doc), so it's correctly left out of
-        // `panes`: `pane("that-id")` throws automation's real "no pane
-        // named" error rather than something misleading.
-        if self.workspace.active().profiles().iter().any(|id| id == MAIN_PANE_ID) {
-            if let Some(profile) = self.browser.profile_mut() {
-                panes.insert(MAIN_PANE_ID.to_string(), profile);
-            }
-        }
-
-        let engine = automation::AutomationEngine::new(&runtime, panes);
-        self.automation_result = Some(engine.run(&self.automation_script, "shell-script.js").map_err(|e| e.to_string()));
+        self.automation_result = Some(automation_bridge::run_script(&self.workspace, &mut self.browser, &self.automation_script));
     }
 }
 

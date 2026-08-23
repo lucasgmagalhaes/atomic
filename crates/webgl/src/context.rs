@@ -3,15 +3,26 @@
 //! frontend (not WGSL-in-disguise), rendered headlessly to an off-screen
 //! texture and read back — same testability approach as `render::gpu`.
 //!
-//! Deliberately small subset of WebGL, plus one real limitation found
-//! while building this: naga's GLSL frontend only parses **desktop** GLSL
-//! (`#version 440/450/460`, `core` profile) — it rejects GLSL ES entirely
-//! (`#version 300 es` fails with `InvalidVersion`/`InvalidProfile`). So
-//! shader source here is desktop GLSL with explicit `layout(location=N)`
-//! on `in`/`out`, not the GLSL ES actual WebGL requires. Getting real
-//! GLSL ES support would need either a different frontend or preprocessing
-//! `300 es` down to something naga accepts — not attempted here. Other
-//! cuts:
+//! `create_shader` now accepts real GLSL ES 3.00 source (`#version 300
+//! es`), the actual WebGL2 shading language — not just desktop GLSL. The
+//! fix is narrower than it sounds: naga's GLSL frontend hard-codes its
+//! accepted `#version` line to `440`/`450`/`460` + `core` (read straight
+//! out of its parser source, not inferred from the error message), but
+//! everything *after* that line — precision qualifiers, `in`/`out`,
+//! `layout(location=N)`, the whole expression/statement grammar — is
+//! already shared between GLSL ES 3.00 and desktop core GLSL 4.50 in
+//! naga's parser (it accepts `precision highp float;` unconditionally,
+//! regardless of profile). So [`rewrite_glsl_es_version`] rewrites just
+//! that one directive line (`#version 300/310/320 es` → `#version 450
+//! core`) before handing the source to naga — real ES source in, no
+//! changes required from the caller. What this doesn't cover: GLSL ES
+//! 1.00 (WebGL1's `attribute`/`varying` shading language, not just a
+//! different version number — different enough grammar that a version-line
+//! rewrite alone wouldn't work), and any ES 3.x construct naga's core
+//! grammar genuinely doesn't implement (naga's GLSL frontend is itself a
+//! subset of desktop GLSL, not a complete implementation).
+//!
+//! Other cuts, unrelated to the version issue:
 //! - `gl.TRIANGLES` only, no other primitive topologies.
 //! - No textures, uniforms, indices (`drawElements`), framebuffers,
 //!   extensions, or WebGL2-only objects (VAOs, transform feedback, ...).
@@ -50,6 +61,32 @@ pub struct VertexAttribute {
     pub offset: u64,
 }
 
+/// Rewrites a leading `#version <N> es` directive (GLSL ES 3.00/3.10/3.20)
+/// to `#version 450 core`, the one naga's GLSL frontend actually accepts —
+/// see the module doc for why nothing past that line needs to change.
+/// Source with no ES version directive (already desktop GLSL, or malformed
+/// - naga will report the real error either way) passes through untouched.
+fn rewrite_glsl_es_version(source: &str) -> Cow<'_, str> {
+    let Some(first_line) = source.lines().next() else {
+        return Cow::Borrowed(source);
+    };
+    let trimmed = first_line.trim();
+    let Some(rest) = trimmed.strip_prefix("#version") else {
+        return Cow::Borrowed(source);
+    };
+    let Some(number) = rest.trim().strip_suffix("es").map(str::trim) else {
+        return Cow::Borrowed(source);
+    };
+    if number.is_empty() || !number.chars().all(|c| c.is_ascii_digit()) {
+        return Cow::Borrowed(source);
+    }
+
+    let mut rewritten = String::with_capacity(source.len());
+    rewritten.push_str("#version 450 core");
+    rewritten.push_str(&source[first_line.len()..]);
+    Cow::Owned(rewritten)
+}
+
 pub struct WebGl {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -86,8 +123,9 @@ impl WebGl {
             ShaderType::Fragment => NagaStage::Fragment,
         };
         let options = naga::front::glsl::Options::from(naga_stage);
+        let rewritten = rewrite_glsl_es_version(source);
         let module = naga::front::glsl::Frontend::default()
-            .parse(&options, source)
+            .parse(&options, &rewritten)
             .map_err(|e| e.to_string())?;
         Ok(Shader { module, stage })
     }

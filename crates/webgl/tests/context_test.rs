@@ -1,8 +1,9 @@
 use webgl::{ShaderType, VertexAttribute, WebGl};
 
-// naga's GLSL frontend only accepts desktop GLSL (440/450/460, core
-// profile) - no GLSL ES / #version xxx es, so these aren't literally
-// WebGL shader source despite the crate's WebGL-shaped API.
+// Plain desktop GLSL, not GLSL ES - see `glsl_es_test.rs` for real
+// `#version 300 es` source exercising `rewrite_glsl_es_version`. Kept as
+// desktop GLSL here since these tests are about program linking/drawing,
+// not shader-language compatibility.
 const VERTEX_SRC: &str = r#"#version 450 core
 layout(location = 0) in vec2 a_position;
 void main() {

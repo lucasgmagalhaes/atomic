@@ -34,6 +34,8 @@ pub struct JSValue {
     pub tag: i64,
 }
 
+pub const JS_TAG_STRING: i64 = -7;
+pub const JS_TAG_OBJECT: i64 = -1;
 pub const JS_TAG_INT: i64 = 0;
 pub const JS_TAG_BOOL: i64 = 1;
 pub const JS_TAG_NULL: i64 = 2;
@@ -213,7 +215,51 @@ extern "C" {
     /// Uint8Array (may also raise a JS exception on the context; not
     /// checked by this binding, see `js-runtime`'s crypto module).
     pub fn JS_GetUint8Array(ctx: *mut JSContext, psize: *mut usize, obj: JSValue) -> *mut u8;
+
+    pub fn JS_NewArray(ctx: *mut JSContext) -> JSValue;
+    /// `true`/`false` reflect `Array.isArray`-shaped intent, but per
+    /// quickjs-ng's own doc comment this no longer punches through
+    /// proxies - fine for this crate's use (only ever called on values it
+    /// itself constructed or received as plain arguments, never a proxy).
+    pub fn JS_IsArray(val: JSValue) -> bool;
+
+    pub fn JS_GetProperty(ctx: *mut JSContext, this_obj: JSValue, prop: JSAtom) -> JSValue;
+    pub fn JS_GetPropertyUint32(ctx: *mut JSContext, this_obj: JSValue, idx: u32) -> JSValue;
+    /// Returns `< 0` on failure. Takes ownership of `val` (consistent with
+    /// every other `JS_Set*` in this binding set).
+    pub fn JS_SetPropertyUint32(ctx: *mut JSContext, this_obj: JSValue, idx: u32, val: JSValue) -> c_int;
+
+    /// Writes `length` into `*pres`. Works for arrays and any other object
+    /// with a numeric `.length` (array-likes) - used here only on real
+    /// arrays.
+    pub fn JS_GetLength(ctx: *mut JSContext, obj: JSValue, pres: *mut i64) -> c_int;
+
+    /// Enumerates `obj`'s own properties matching `flags` into a
+    /// heap-allocated array the caller must free with
+    /// [`JS_FreePropertyEnum`]. Returns `< 0` on failure.
+    pub fn JS_GetOwnPropertyNames(
+        ctx: *mut JSContext,
+        ptab: *mut *mut JSPropertyEnum,
+        plen: *mut u32,
+        obj: JSValue,
+        flags: c_int,
+    ) -> c_int;
+    pub fn JS_FreePropertyEnum(ctx: *mut JSContext, tab: *mut JSPropertyEnum, len: u32);
+    pub fn JS_AtomToCStringLen(ctx: *mut JSContext, plen: *mut usize, atom: JSAtom) -> *const c_char;
 }
+
+/// Mirrors quickjs.h's `JSPropertyEnum` struct.
+#[repr(C)]
+pub struct JSPropertyEnum {
+    pub is_enumerable: bool,
+    pub atom: JSAtom,
+}
+
+/// `JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY` from quickjs.h - own,
+/// enumerable, string-keyed properties only (no symbols, no private
+/// fields, no inherited properties) - matches what a real structured
+/// clone of a plain JS object would walk.
+pub const JS_GPN_STRING_ENUM: c_int = (1 << 0) | (1 << 4);
 
 /// `JS_NULL` — the `JS_MKVAL(JS_TAG_NULL, 0)` constant from quickjs.h.
 pub const fn js_null() -> JSValue {

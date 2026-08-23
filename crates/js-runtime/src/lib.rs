@@ -17,6 +17,7 @@ mod fetch;
 mod fetch_async;
 mod host_state;
 mod indexed_db_bindings;
+mod local_storage_bindings;
 mod page_visibility;
 mod performance;
 mod timers;
@@ -86,6 +87,7 @@ impl<'rt> Context<'rt> {
             timers::register(ptr);
             document_cookie::register(ptr);
             indexed_db_bindings::register(ptr);
+            local_storage_bindings::register(ptr);
         };
         Context {
             ptr,
@@ -101,7 +103,14 @@ impl<'rt> Context<'rt> {
     /// `null`) until [`Context::with_storage`] configures real storage.
     pub fn with_dom(runtime: &'rt Runtime, dom: dom::Dom) -> Self {
         let mut ctx = Self::new(runtime);
-        let mut state = Box::new(host_state::HostState { dom, cookies: None, host: String::new(), storage_dir: None });
+        let mut state = Box::new(host_state::HostState {
+            dom,
+            cookies: None,
+            host: String::new(),
+            storage_dir: None,
+            local_storage: None,
+            session_storage: None,
+        });
         let raw = state.as_mut() as *mut host_state::HostState as *mut std::os::raw::c_void;
         unsafe {
             sys::JS_SetContextOpaque(ctx.ptr, raw);
@@ -112,19 +121,25 @@ impl<'rt> Context<'rt> {
     }
 
     /// Same as [`Context::with_dom`], but also wires real persisted
-    /// `document.cookie` and `indexedDB` access: cookies live in
-    /// `storage_dir/cookies.txt` (scoped to `host`, used as the default
-    /// `Domain` for cookies set without one), and `indexedDB.open(name)`
-    /// resolves each database under `storage_dir/idb/<name>`.
+    /// `document.cookie`, `indexedDB`, `localStorage`, and `sessionStorage`
+    /// access: cookies live in `storage_dir/cookies.txt` (scoped to
+    /// `host`, used as the default `Domain` for cookies set without one),
+    /// `indexedDB.open(name)` resolves each database under
+    /// `storage_dir/idb/<name>`, and `localStorage`/`sessionStorage` live
+    /// in `storage_dir/local_storage.txt`/`session_storage.txt`.
     pub fn with_storage(runtime: &'rt Runtime, dom: dom::Dom, host: &str, storage_dir: impl AsRef<Path>) -> std::io::Result<Self> {
         let storage_dir = storage_dir.as_ref().to_path_buf();
         let cookies = storage::cookies::CookieJar::open(storage_dir.join("cookies.txt"))?;
+        let local_storage = storage::LocalStorage::open(storage_dir.join("local_storage.txt"))?;
+        let session_storage = storage::LocalStorage::open(storage_dir.join("session_storage.txt"))?;
 
         let mut ctx = Self::with_dom(runtime, dom);
         if let Some(state) = ctx._host_state.as_mut() {
             state.cookies = Some(cookies);
             state.host = host.to_string();
             state.storage_dir = Some(storage_dir);
+            state.local_storage = Some(local_storage);
+            state.session_storage = Some(session_storage);
         }
         Ok(ctx)
     }

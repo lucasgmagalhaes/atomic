@@ -25,6 +25,14 @@ pub(crate) struct HostState {
     /// Base directory `indexedDB.open(name)` resolves `<dir>/idb/<name>`
     /// against. `None` disables `indexedDB` (`open` returns `null`).
     pub storage_dir: Option<PathBuf>,
+    /// Backs the `localStorage`/`sessionStorage` globals (`local_storage_bindings`).
+    /// `None` (a plain `Context::with_dom`) makes both read as empty and
+    /// silently drop writes, same degrade-gracefully pattern as `cookies`.
+    /// Real `sessionStorage`'s clear-on-tab-close lifetime isn't modeled —
+    /// see `storage::LocalStorage`'s own doc on why `SessionStorage` is
+    /// just an alias persisted the same way.
+    pub local_storage: Option<storage::LocalStorage>,
+    pub session_storage: Option<storage::LocalStorage>,
 }
 
 /// Reads the `HostState` behind `ctx`'s opaque slot, or null if unset

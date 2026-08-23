@@ -537,3 +537,72 @@ fn navigate_without_a_proxy_never_contacts_one() {
 
     profile.quit();
 }
+
+/// A real UDP DNS server for tests: answers every A query with `answer`
+/// (RFC 1035 wire format, same hand-rolled shape `net::dns`'s own client
+/// builds/parses) — a genuine query/response round trip, not a stand-in.
+fn spawn_fake_dns_server(answer: std::net::Ipv4Addr) -> std::net::SocketAddr {
+    let socket = std::net::UdpSocket::bind("127.0.0.1:0").expect("dns server should bind");
+    let addr = socket.local_addr().unwrap();
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 512];
+        loop {
+            let Ok((n, from)) = socket.recv_from(&mut buf) else { return };
+            if n < 12 {
+                continue;
+            }
+            let mut resp = Vec::new();
+            resp.extend_from_slice(&buf[0..2]); // id
+            resp.extend_from_slice(&[0x81, 0x80]); // QR=1, RD=1, RA=1
+            resp.extend_from_slice(&[0x00, 0x01]); // QDCOUNT
+            resp.extend_from_slice(&[0x00, 0x01]); // ANCOUNT
+            resp.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]);
+            resp.extend_from_slice(&buf[12..n]); // echoed question
+            resp.extend_from_slice(&[0xC0, 0x0C]); // name = pointer to offset 12
+            resp.extend_from_slice(&[0x00, 0x01, 0x00, 0x01]); // TYPE=A, CLASS=IN
+            resp.extend_from_slice(&[0x00, 0x00, 0x00, 0x3C]); // TTL
+            resp.extend_from_slice(&[0x00, 0x04]); // RDLENGTH
+            resp.extend_from_slice(&answer.octets());
+            let _ = socket.send_to(&resp, from);
+        }
+    });
+    addr
+}
+
+#[test]
+fn navigate_routes_through_a_configured_dns_server() {
+    // "custom.nimble.test" isn't a real domain - this only resolves (and
+    // the navigate only succeeds) because the worker actually used the
+    // fake DNS server's answer (127.0.0.1) instead of the OS resolver,
+    // which would fail this hostname outright.
+    let page_addr = serve_html_once(r#"<div id="box">hi</div><style>#box { background-color: #0000ff; width: 32px; height: 32px; }</style>"#);
+    let dns_addr = spawn_fake_dns_server(std::net::Ipv4Addr::LOCALHOST);
+    let page_url = format!("http://custom.nimble.test:{}/", page_addr.port());
+
+    let name = unique_shmem_name("dns-navigate");
+    let mut profile = Profile::spawn_with_dns(worker_path(), &name, 32, 32, Some(&dns_addr.to_string())).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let result = profile.navigate(&page_url).expect("protocol should not fail");
+    assert!(result.is_ok(), "navigate via the custom DNS server should succeed: {result:?}");
+
+    let pixels = profile.latest_frame().unwrap();
+    assert_eq!(&pixels[0..4], &[0, 0, 255, 255], "the page fetched via the custom resolver should still render correctly");
+
+    profile.quit();
+}
+
+#[test]
+fn navigate_without_a_dns_server_never_contacts_one() {
+    let page_addr = serve_html_once(r#"<div>direct</div>"#);
+    let page_url = format!("http://{page_addr}/");
+
+    let name = unique_shmem_name("no-dns-navigate");
+    let mut profile = Profile::spawn(worker_path(), &name, 32, 32).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let result = profile.navigate(&page_url).expect("protocol should not fail");
+    assert!(result.is_ok(), "direct navigate should succeed: {result:?}");
+
+    profile.quit();
+}

@@ -91,10 +91,42 @@ impl Profile {
     /// the exact same child-process invocation rather than one being a
     /// degraded version of the other.
     pub fn spawn_with_proxy(worker_path: &str, shmem_name: &str, width: u32, height: u32, proxy: Option<&str>) -> Result<Self, SpawnError> {
+        Self::spawn_with_proxy_and_dns(worker_path, shmem_name, width, height, proxy, None)
+    }
+
+    /// Same as [`spawn`](Self::spawn), plus a per-profile custom DNS
+    /// server (`"host:port"`, the server's own IP:port — this doesn't
+    /// resolve a hostname for *that*) every `NAVIGATE`/`RELOAD` fetch
+    /// resolves its target host through instead of the OS resolver, via
+    /// `net::get_via_dns` — closes the "DNS" half of the spec's Settings/
+    /// Network requirement the same way [`spawn_with_proxy`](Self::spawn_with_proxy)
+    /// closed the proxy half. `None` behaves exactly like [`spawn`](Self::spawn).
+    pub fn spawn_with_dns(worker_path: &str, shmem_name: &str, width: u32, height: u32, dns_server: Option<&str>) -> Result<Self, SpawnError> {
+        Self::spawn_with_proxy_and_dns(worker_path, shmem_name, width, height, None, dns_server)
+    }
+
+    /// The general form [`spawn`](Self::spawn)/[`spawn_with_proxy`](Self::spawn_with_proxy)/
+    /// [`spawn_with_dns`](Self::spawn_with_dns) all delegate to. A proxy and
+    /// a custom DNS server can both be passed, but the worker's own
+    /// `fetch_with_cookies` always prefers the proxy when both are set
+    /// (there's no `net` entry point combining `CONNECT` tunneling with a
+    /// caller-chosen resolver — a proxied request's DNS resolution is the
+    /// proxy's job).
+    pub fn spawn_with_proxy_and_dns(
+        worker_path: &str,
+        shmem_name: &str,
+        width: u32,
+        height: u32,
+        proxy: Option<&str>,
+        dns_server: Option<&str>,
+    ) -> Result<Self, SpawnError> {
         let mut command = Command::new(worker_path);
         command.arg(shmem_name).arg(width.to_string()).arg(height.to_string());
-        if let Some(proxy) = proxy {
-            command.arg(proxy);
+        if proxy.is_some() || dns_server.is_some() {
+            command.arg(proxy.unwrap_or(""));
+        }
+        if let Some(dns_server) = dns_server {
+            command.arg(dns_server);
         }
         let mut child = command
             .stdin(Stdio::piped())

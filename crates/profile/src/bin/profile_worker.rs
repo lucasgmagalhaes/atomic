@@ -177,8 +177,14 @@ fn collect_css_sources(dom: &Dom, node: NodeId, out: &mut Vec<CssSource>) {
 /// instead of connecting directly — every fetch this worker makes
 /// (page HTML, `<link>` stylesheets, `@import`s) shares this one function,
 /// so a profile's proxy choice applies to all of them uniformly, not just
-/// the page's own HTML.
-fn fetch_with_cookies(url: &str, storage_root: &std::path::Path, proxy: Option<&net::ProxyConfig>) -> Result<net::Response, net::Error> {
+/// the page's own HTML. `dns_server`, when `Some` and `proxy` is `None`,
+/// resolves `url`'s host through that server instead of the OS resolver
+/// via `net::get_via_dns` — closes the "DNS" half of the spec's Settings/
+/// Network gap the same way `proxy` closed the proxy half. A proxy always
+/// wins if both are set (there's no `net` entry point combining custom
+/// DNS resolution with proxy tunneling — a proxied request's DNS
+/// resolution is the proxy's own job, not this worker's).
+fn fetch_with_cookies(url: &str, storage_root: &std::path::Path, proxy: Option<&net::ProxyConfig>, dns_server: Option<std::net::SocketAddr>) -> Result<net::Response, net::Error> {
     let parsed = url::Url::parse(url).ok();
     let host = parsed.as_ref().and_then(|u| u.host_str()).map(str::to_string);
     let path = parsed.as_ref().map(|u| u.path().to_string()).unwrap_or_else(|| "/".to_string());
@@ -191,9 +197,10 @@ fn fetch_with_cookies(url: &str, storage_root: &std::path::Path, proxy: Option<&
     let cookie_header = jar.as_ref().zip(host.as_deref()).and_then(|(jar, h)| jar.header_value(h, &path, secure));
     let extra_headers: Vec<(&str, &str)> = cookie_header.as_deref().map(|v| vec![("Cookie", v)]).unwrap_or_default();
 
-    let response = match proxy {
-        Some(proxy) => net::get_via_proxy(url, &extra_headers, proxy)?,
-        None => net::get_with_headers(url, &extra_headers)?,
+    let response = match (proxy, dns_server) {
+        (Some(proxy), _) => net::get_via_proxy(url, &extra_headers, proxy)?,
+        (None, Some(dns_server)) => net::get_via_dns(url, &extra_headers, dns_server)?,
+        (None, None) => net::get_with_headers(url, &extra_headers)?,
     };
 
     if let (Some(jar), Some(host)) = (jar.as_mut(), host.as_deref()) {
@@ -234,6 +241,23 @@ fn parse_proxy_arg(arg: Option<&str>) -> Option<net::ProxyConfig> {
         None => (None, None),
     };
     Some(net::ProxyConfig { host: host.to_string(), port, username, password })
+}
+
+/// Parses this worker's optional 6th CLI argument (`"host:port"`) into
+/// the DNS server every fetch should resolve through instead of the OS
+/// resolver, via `net::get_via_dns`. Same "degrade to none rather than
+/// refuse to start" stance as [`parse_proxy_arg`] — a missing argument,
+/// empty string, or one that doesn't resolve to a real `SocketAddr`
+/// (`host:port` needs the host to already be an IP literal - DNS-syntax
+/// resolution of the server's own address isn't attempted, this worker
+/// has no resolver to bootstrap one with) all degrade to "use the OS
+/// resolver".
+fn parse_dns_arg(arg: Option<&str>) -> Option<std::net::SocketAddr> {
+    let arg = arg?;
+    if arg.is_empty() {
+        return None;
+    }
+    arg.parse().ok()
 }
 
 /// Resolves a `<link href>` against `base_url` (the page's own URL - the
@@ -286,6 +310,7 @@ fn merge_stylesheet_text(
     viewport_width: f64,
     storage_root: &std::path::Path,
     proxy: Option<&net::ProxyConfig>,
+    dns_server: Option<std::net::SocketAddr>,
 ) {
     let parsed = parse_stylesheet(css_text);
     for import in &parsed.imports {
@@ -294,7 +319,7 @@ fn merge_stylesheet_text(
             continue;
         }
         if let Some(resolved) = resolve_stylesheet_url(base_url, &import.url) {
-            if let Ok(response) = fetch_with_cookies(&resolved, storage_root, proxy) {
+            if let Ok(response) = fetch_with_cookies(&resolved, storage_root, proxy, dns_server) {
                 let imported_text = String::from_utf8_lossy(&response.body).into_owned();
                 sheet.rules.extend(parse_stylesheet(&imported_text).rules);
             }
@@ -310,6 +335,7 @@ fn build_stylesheet(
     viewport_width: f64,
     storage_root: &std::path::Path,
     proxy: Option<&net::ProxyConfig>,
+    dns_server: Option<std::net::SocketAddr>,
 ) -> Stylesheet {
     let mut sources = Vec::new();
     collect_css_sources(dom, root, &mut sources);
@@ -319,11 +345,11 @@ fn build_stylesheet(
         let css_text = match source {
             CssSource::Inline(text) => Some(text),
             CssSource::Link(href) => resolve_stylesheet_url(base_url, &href)
-                .and_then(|url| fetch_with_cookies(&url, storage_root, proxy).ok())
+                .and_then(|url| fetch_with_cookies(&url, storage_root, proxy, dns_server).ok())
                 .map(|response| String::from_utf8_lossy(&response.body).into_owned()),
         };
         if let Some(css_text) = css_text {
-            merge_stylesheet_text(&mut sheet, &css_text, base_url, viewport_width, storage_root, proxy);
+            merge_stylesheet_text(&mut sheet, &css_text, base_url, viewport_width, storage_root, proxy, dns_server);
         }
     }
     sheet
@@ -352,10 +378,10 @@ fn error_page_html(url: &str, message: &str) -> String {
 /// attempt charset detection from `Content-Type`/`<meta charset>`, real
 /// HTML often isn't UTF-8 but plenty is, and this crate doesn't have a
 /// non-UTF-8 text decoder yet).
-fn resolve_html(source: &PageSource, storage_root: &std::path::Path, proxy: Option<&net::ProxyConfig>) -> Result<String, String> {
+fn resolve_html(source: &PageSource, storage_root: &std::path::Path, proxy: Option<&net::ProxyConfig>, dns_server: Option<std::net::SocketAddr>) -> Result<String, String> {
     match source {
         PageSource::Demo => Ok(DEMO_HTML.to_string()),
-        PageSource::Url(url) => fetch_with_cookies(url, storage_root, proxy)
+        PageSource::Url(url) => fetch_with_cookies(url, storage_root, proxy, dns_server)
             .map(|response| String::from_utf8_lossy(&response.body).into_owned())
             .map_err(|e| e.to_string()),
     }
@@ -460,9 +486,10 @@ impl<'rt> Page<'rt> {
         viewport_width: f64,
         storage_root: &std::path::Path,
         proxy: Option<&net::ProxyConfig>,
+        dns_server: Option<std::net::SocketAddr>,
     ) -> Self {
         let (dom, html_el) = html::parse_to_html_element(html);
-        let sheet = build_stylesheet(&dom, html_el, base_url, viewport_width, storage_root, proxy);
+        let sheet = build_stylesheet(&dom, html_el, base_url, viewport_width, storage_root, proxy, dns_server);
 
         let ctx = match storage_host {
             Some(host) => match Context::with_storage(runtime, dom, host, storage_root.join(host)) {
@@ -518,6 +545,7 @@ fn load_source<'rt>(
     viewport_width: f64,
     storage_root: &std::path::Path,
     proxy: Option<&net::ProxyConfig>,
+    dns_server: Option<std::net::SocketAddr>,
 ) -> (Page<'rt>, Option<String>) {
     let base_url = match source {
         PageSource::Demo => None,
@@ -527,10 +555,10 @@ fn load_source<'rt>(
         PageSource::Demo => Some(DEMO_STORAGE_HOST.to_string()),
         PageSource::Url(url) => url::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_string)),
     };
-    match resolve_html(source, storage_root, proxy) {
+    match resolve_html(source, storage_root, proxy, dns_server) {
         Ok(html) => {
             let run_demo_script = matches!(source, PageSource::Demo);
-            (Page::load(runtime, &html, run_demo_script, base_url, storage_host.as_deref(), viewport_width, storage_root, proxy), None)
+            (Page::load(runtime, &html, run_demo_script, base_url, storage_host.as_deref(), viewport_width, storage_root, proxy, dns_server), None)
         }
         Err(message) => {
             let url = match source {
@@ -543,7 +571,7 @@ fn load_source<'rt>(
             // a subsequent successful load/reload of that host sees
             // consistent state.
             (
-                Page::load(runtime, &error_page_html(url, &message), false, None, storage_host.as_deref(), viewport_width, storage_root, proxy),
+                Page::load(runtime, &error_page_html(url, &message), false, None, storage_host.as_deref(), viewport_width, storage_root, proxy, dns_server),
                 Some(message),
             )
         }
@@ -552,14 +580,15 @@ fn load_source<'rt>(
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    if args.len() != 4 && args.len() != 5 {
-        eprintln!("usage: profile-worker <shmem-name> <width> <height> [proxy: host:port or user:pass@host:port]");
+    if args.len() < 4 || args.len() > 6 {
+        eprintln!("usage: profile-worker <shmem-name> <width> <height> [proxy: host:port or user:pass@host:port] [dns-server: host:port]");
         std::process::exit(2);
     }
     let shmem_name = &args[1];
     let width: u32 = args[2].parse().expect("width must be a positive integer");
     let height: u32 = args[3].parse().expect("height must be a positive integer");
     let proxy = parse_proxy_arg(args.get(4).map(String::as_str));
+    let dns_server = parse_dns_arg(args.get(5).map(String::as_str));
 
     // One storage root per worker process, keyed by shmem name (already
     // unique per spawned profile) so two profiles never share cookies/
@@ -570,7 +599,7 @@ fn main() {
 
     let runtime = Runtime::new();
     let mut current_source = PageSource::Demo;
-    let (mut page, _) = load_source(&runtime, &current_source, width as f64, &storage_root, proxy.as_ref());
+    let (mut page, _) = load_source(&runtime, &current_source, width as f64, &storage_root, proxy.as_ref(), dns_server);
     let renderer = GpuRenderer::new();
 
     let mut writer = ipc::FrameWriter::new(shmem_name, width, height).expect("failed to create/open shared memory");
@@ -600,7 +629,7 @@ fn main() {
                 let _ = writeln!(stdout, "PONG");
                 let _ = stdout.flush();
             } else if line == "RELOAD" {
-                let (loaded, error) = load_source(&runtime, &current_source, width as f64, &storage_root, proxy.as_ref());
+                let (loaded, error) = load_source(&runtime, &current_source, width as f64, &storage_root, proxy.as_ref(), dns_server);
                 page = loaded;
                 writer.publish(&page.render(&renderer, width, height));
                 match error {
@@ -614,7 +643,7 @@ fn main() {
                 let _ = stdout.flush();
             } else if let Some(url) = line.strip_prefix("NAVIGATE ") {
                 current_source = PageSource::Url(url.trim().to_string());
-                let (loaded, error) = load_source(&runtime, &current_source, width as f64, &storage_root, proxy.as_ref());
+                let (loaded, error) = load_source(&runtime, &current_source, width as f64, &storage_root, proxy.as_ref(), dns_server);
                 page = loaded;
                 writer.publish(&page.render(&renderer, width, height));
                 match error {

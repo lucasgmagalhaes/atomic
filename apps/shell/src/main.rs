@@ -125,28 +125,42 @@ impl Default for NimbleApp {
 }
 
 impl NimbleApp {
-    /// Grows or shrinks `self.panes` to exactly `count` (the mockup's
-    /// 1/2/4/6 grid toggle - see `tiling::grid_layout`'s doc for why any
-    /// other count still works). Shrinking drops the trailing panes -
-    /// `Pane`'s `BrowserView` (and therefore its `profile::Profile`, which
-    /// has its own real `Drop` impl - see that crate) is force-killed the
-    /// same way closing a single pane always was, not a new code path.
-    /// Every remaining pane keeps its id and live process; only newly
-    /// grown ones spawn fresh.
+    /// Indices into `self.panes` whose id is registered in the *active*
+    /// workspace - what the grid actually draws, and what the "Panes:"
+    /// count buttons grow/shrink. A pane belonging to a different
+    /// workspace keeps running (its process isn't touched) but isn't
+    /// visible while that other workspace isn't active - switching
+    /// `WorkspaceManager`'s active index is what changes this list, not a
+    /// respawn.
+    fn active_workspace_pane_indices(&self) -> Vec<usize> {
+        let active_ids = self.workspace.active().profiles();
+        self.panes.iter().enumerate().filter(|(_, p)| active_ids.iter().any(|id| id == &p.id)).map(|(i, _)| i).collect()
+    }
+
+    /// Grows or shrinks the *active workspace's visible* pane count to
+    /// exactly `count` (the mockup's 1/2/4/6 grid toggle - see
+    /// `tiling::grid_layout`'s doc for why any other count still works).
+    /// A newly grown pane is a genuinely new process, appended to
+    /// `self.panes` and registered into the active workspace (same as
+    /// [`spawn_pane`]). Shrinking closes the active workspace's own
+    /// *trailing* panes (via [`close_pane`](Self::close_pane), largest
+    /// index first so removal doesn't shift indices still to be closed
+    /// out from under this loop) - panes belonging to other workspaces
+    /// are never touched by this, regardless of count.
     fn set_pane_count(&mut self, count: usize) {
         let count = count.max(1);
-        while self.panes.len() < count {
-            let index = self.panes.len();
-            self.panes.push(spawn_pane(&mut self.workspace, index));
-        }
-        while self.panes.len() > count {
-            if let Some(pane) = self.panes.pop() {
-                let active = self.workspace.active_index();
-                self.workspace.remove_profile(active, &pane.id);
+        let visible = self.active_workspace_pane_indices();
+        if visible.len() < count {
+            for _ in visible.len()..count {
+                let index = self.panes.len();
+                self.panes.push(spawn_pane(&mut self.workspace, index));
             }
-        }
-        if self.selected >= self.panes.len() {
-            self.selected = self.panes.len() - 1;
+        } else if visible.len() > count {
+            let mut to_close: Vec<usize> = visible[count..].to_vec();
+            to_close.sort_unstable_by(|a, b| b.cmp(a)); // descending
+            for index in to_close {
+                self.close_pane(index);
+            }
         }
     }
 
@@ -261,6 +275,30 @@ impl NimbleApp {
         let new_index = self.workspace.create(name);
         self.move_pane_to_workspace(index, new_index);
     }
+
+    /// Switches which workspace is active - the grid now shows only
+    /// `self.panes` whose id that workspace lists (see
+    /// `active_workspace_pane_indices`'s doc), all other panes keep
+    /// running unseen. Re-clamps `self.selected` immediately (not left for
+    /// the next `CentralPanel` frame) since the toolbar's Reload/address
+    /// bar/proxy controls run before the grid in `update`'s draw order and
+    /// would otherwise act on a pane this frame no longer shows.
+    fn switch_workspace(&mut self, index: usize) {
+        self.workspace.set_active(index);
+        let visible = self.active_workspace_pane_indices();
+        self.selected = visible.first().copied().unwrap_or(0);
+    }
+
+    /// The toolbar's "+ New" workspace button: creates an empty workspace
+    /// (positionally named, same as [`move_pane_to_new_workspace`](Self::move_pane_to_new_workspace))
+    /// and switches to it - the grid shows nothing until the pane-count
+    /// buttons spawn one (which registers into whichever workspace is now
+    /// active) or a pane is moved in from elsewhere via its context menu.
+    fn create_workspace_and_switch(&mut self) {
+        let name = format!("Workspace {}", self.workspace.workspaces().len() + 1);
+        let new_index = self.workspace.create(name);
+        self.switch_workspace(new_index);
+    }
 }
 
 impl eframe::App for NimbleApp {
@@ -273,9 +311,27 @@ impl eframe::App for NimbleApp {
 
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             ui.horizontal(|ui| {
+                ui.label("Workspace:");
+                let active_index = self.workspace.active_index();
+                let mut switch_to = None;
+                for (i, workspace) in self.workspace.workspaces().iter().enumerate() {
+                    if ui.selectable_label(i == active_index, &workspace.name).clicked() {
+                        switch_to = Some(i);
+                    }
+                }
+                let new_clicked = ui.button("+ New").clicked();
+                if let Some(i) = switch_to {
+                    self.switch_workspace(i);
+                }
+                if new_clicked {
+                    self.create_workspace_and_switch();
+                }
+            });
+            let visible = self.active_workspace_pane_indices();
+            ui.horizontal(|ui| {
                 ui.label(i18n::t(i18n::PANES_LABEL, self.locale));
                 for count in [1, 2, 4, 6] {
-                    if ui.selectable_label(self.panes.len() == count, count.to_string()).clicked() {
+                    if ui.selectable_label(visible.len() == count, count.to_string()).clicked() {
                         self.set_pane_count(count);
                     }
                 }
@@ -287,11 +343,23 @@ impl eframe::App for NimbleApp {
                     self.locale = Locale::Pt;
                 }
                 ui.separator();
-                ui.label(i18n::fill(i18n::t(i18n::SELECTED_LABEL, self.locale), &[&self.panes[self.selected].id]));
-                if ui.button(i18n::t(i18n::RELOAD_BUTTON, self.locale)).clicked() {
-                    self.panes[self.selected].browser.reload();
+                // `visible` (this workspace's panes) can be empty right
+                // after switching to a freshly created workspace -
+                // `self.selected` stays a valid `self.panes` index either
+                // way (that invariant is `close_pane`/`switch_workspace`'s
+                // job), but showing/acting on it here would be confusing
+                // when the grid below isn't even displaying it.
+                if !visible.is_empty() {
+                    ui.label(i18n::fill(i18n::t(i18n::SELECTED_LABEL, self.locale), &[&self.panes[self.selected].id]));
+                    if ui.button(i18n::t(i18n::RELOAD_BUTTON, self.locale)).clicked() {
+                        self.panes[self.selected].browser.reload();
+                    }
                 }
             });
+            if visible.is_empty() {
+                ui.label("No panes in this workspace - use the pane count buttons above to spawn one, or move one in from another pane's context menu.");
+                return;
+            }
             ui.horizontal(|ui| {
                 let address_bar = ui.add_sized(
                     [ui.available_width() - 8.0, ui.spacing().interact_size.y],
@@ -347,7 +415,12 @@ impl eframe::App for NimbleApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             let available = ui.available_rect_before_wrap();
             let container = tiling::Rect { x: available.min.x, y: available.min.y, width: available.width(), height: available.height() };
-            let cells = tiling::grid_layout(container, self.panes.len());
+            // Only the active workspace's panes - see
+            // `active_workspace_pane_indices`'s doc. A pane belonging to a
+            // different (inactive) workspace keeps running but isn't
+            // drawn or ticked here.
+            let visible = self.active_workspace_pane_indices();
+            let cells = tiling::grid_layout(container, visible.len());
 
             // Deliberately not a `for (pane, cell) in self.panes.iter_mut()...`
             // loop: the context menu below needs `&self.workspace` (to list
@@ -357,7 +430,8 @@ impl eframe::App for NimbleApp {
             // conflict with those `self.method(...)` calls. Indexing
             // `self.panes[index]` fresh each time avoids holding a borrow
             // across them.
-            for (index, cell) in cells.into_iter().enumerate() {
+            for (slot, cell) in cells.into_iter().enumerate() {
+                let index = visible[slot];
                 let cell_rect = egui::Rect::from_min_size(egui::pos2(cell.x, cell.y), egui::vec2(cell.width, cell.height));
                 let mut cell_ui = ui.child_ui(cell_rect, egui::Layout::top_down(egui::Align::Center), None);
 

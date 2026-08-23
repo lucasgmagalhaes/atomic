@@ -1,10 +1,9 @@
 //! `localStorage`/`sessionStorage`-shaped key-value storage, persisted to
-//! disk per origin — real file I/O, not an in-memory stub. Scoped down
-//! from the spec's full "cookies/localStorage/sessionStorage/IndexedDB"
-//! line: only the localStorage/sessionStorage shape (flat string->string
-//! maps) is implemented. No cookies (need HTTP header integration in
-//! `net`, which doesn't exist) and no IndexedDB (a real object store with
-//! indexes/transactions/cursors — a much bigger surface, deferred).
+//! disk per origin — real file I/O, not an in-memory stub. Also has real
+//! cookie handling ([`cookies`]) and a scoped-down IndexedDB
+//! ([`indexed_db`]) — see their module docs for what's cut. That closes
+//! the spec's full "cookies/localStorage/sessionStorage/IndexedDB" line,
+//! though not every corner of each piece.
 //!
 //! `sessionStorage`'s real-spec lifetime (cleared when the tab/process
 //! ends) isn't modeled either — `SessionStorage` here is just
@@ -16,6 +15,9 @@ use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+
+pub mod cookies;
+pub mod indexed_db;
 
 /// A flat string-keyed store for one origin, backed by one file on disk.
 /// Every mutation persists immediately (no write batching/debouncing) -
@@ -29,11 +31,11 @@ pub struct LocalStorage {
 /// Escapes `\` and `\n` so entries can round-trip through a
 /// newline-delimited file format without ambiguity - not a general
 /// serialization format, just enough for flat string keys/values.
-fn escape(s: &str) -> String {
+pub(crate) fn escape(s: &str) -> String {
     s.replace('\\', "\\\\").replace('\n', "\\n")
 }
 
-fn unescape(s: &str) -> String {
+pub(crate) fn unescape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars();
     while let Some(c) = chars.next() {

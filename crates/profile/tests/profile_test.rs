@@ -79,6 +79,57 @@ fn quit_makes_the_child_process_exit() {
     profile.quit();
 }
 
+fn wait_for_a_frame(profile: &Profile) -> Vec<u8> {
+    for _ in 0..100 {
+        if let Some(f) = profile.latest_frame() {
+            return f;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    panic!("worker should publish a frame within 5s");
+}
+
+#[test]
+fn frame_generation_advances_on_its_own_without_any_reload() {
+    let name = unique_shmem_name("vsync-gen");
+    let profile = Profile::spawn(worker_path(), &name, 32, 32).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let gen0 = profile.frame_generation();
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    let gen1 = profile.frame_generation();
+
+    // ~60fps over 200ms should easily clear a handful of new frames -
+    // this is the vsync loop's whole point: frames keep publishing without
+    // any RELOAD (or any other command) being sent at all.
+    assert!(gen1 > gen0 + 3, "frame generation should keep advancing on its own, got {gen0} -> {gen1}");
+
+    profile.quit();
+}
+
+#[test]
+fn js_timers_pumped_by_the_loop_visibly_change_rendered_pixels() {
+    let name = unique_shmem_name("vsync-js");
+    // Large enough that the counter paragraph's text actually lands inside
+    // the canvas - the demo page's three paragraphs plus 20px padding
+    // don't fit in a tiny viewport, and pixels outside it are never
+    // touched by `composite_glyphs`, which would make this test vacuous.
+    let profile = Profile::spawn(worker_path(), &name, 400, 200).expect("spawn should succeed");
+
+    let frame_a = wait_for_a_frame(&profile);
+    // The demo script's setInterval-style counter ticks every 50ms and
+    // rewrites #counter's text - give it a few ticks' worth of real time.
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let frame_b = profile.latest_frame().expect("should still have a frame");
+
+    assert_ne!(
+        frame_a, frame_b,
+        "rendered pixels should change as the worker's per-frame loop pumps setTimeout/requestAnimationFrame and re-renders the mutated DOM"
+    );
+
+    profile.quit();
+}
+
 #[test]
 fn dropping_without_quit_still_kills_the_process() {
     let name = unique_shmem_name("drop");

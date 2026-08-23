@@ -65,6 +65,12 @@ pub type JSCFunction = unsafe extern "C" fn(
 /// shape. Callers register a function with this narrower signature and
 /// hand it to `JS_NewCFunction2` via `mem::transmute` to `JSCFunction` —
 /// mirroring the same union punning quickjs.h itself does internally.
+/// `JSCFunctionEnum::JS_CFUNC_constructor_or_func` - callable both as
+/// `Foo()` and `new Foo()`; the native function receives `new.target`
+/// (or `undefined` for a plain call) in place of `this_val` and is fully
+/// responsible for building and returning the new object (quickjs
+/// doesn't pre-allocate one, unlike a real JS `class` constructor).
+pub const JS_CFUNC_CONSTRUCTOR_OR_FUNC: c_int = 4;
 pub const JS_CFUNC_GETTER: c_int = 8;
 /// `JSCFunctionEnum::JS_CFUNC_setter` — see [`JS_CFUNC_GETTER`]; dispatches
 /// to `(ctx, this_val, value) -> JSValue`.
@@ -246,6 +252,33 @@ extern "C" {
     ) -> c_int;
     pub fn JS_FreePropertyEnum(ctx: *mut JSContext, tab: *mut JSPropertyEnum, len: u32);
     pub fn JS_AtomToCStringLen(ctx: *mut JSContext, plen: *mut usize, atom: JSAtom) -> *const c_char;
+
+    /// Creates a `Promise` plus its `resolve`/`reject` functions, written
+    /// into `resolving_funcs[0]`/`[1]` (must point at a 2-element array).
+    /// Calling either function later queues the promise's reaction jobs -
+    /// [`JS_ExecutePendingJob`] actually runs them.
+    pub fn JS_NewPromiseCapability(ctx: *mut JSContext, resolving_funcs: *mut JSValue) -> JSValue;
+
+    /// Runs one job off `rt`'s internal job queue (a `Promise` reaction, or
+    /// microtask-equivalent) - the real quickjs mechanism `.then()`/
+    /// `async`/`await` continuations run through. `*pctx` receives the
+    /// context the job runs in (relevant for multi-context runtimes; this
+    /// crate only ever has one `Context` per `Runtime`, so it's always the
+    /// same). Returns `> 0` if a job ran, `0` if the queue was empty,
+    /// `< 0` if the job itself threw (the exception is left pending on
+    /// `*pctx`, same convention as any other failed `JS_Eval`/`JS_Call`).
+    pub fn JS_ExecutePendingJob(rt: *mut JSRuntime, pctx: *mut *mut JSContext) -> c_int;
+
+    pub fn JS_Throw(ctx: *mut JSContext, obj: JSValue) -> JSValue;
+
+    /// Takes ownership of `proto_val`. Used by a native constructor
+    /// (`JS_CFUNC_CONSTRUCTOR_OR_FUNC`) to link a freshly built plain
+    /// object to its class's shared prototype, since quickjs doesn't
+    /// pre-allocate/pre-link one the way it does for `class`-declared
+    /// constructors.
+    pub fn JS_SetPrototype(ctx: *mut JSContext, obj: JSValue, proto_val: JSValue) -> c_int;
+
+    pub fn JS_IsJobPending(rt: *mut JSRuntime) -> bool;
 }
 
 /// Mirrors quickjs.h's `JSPropertyEnum` struct.

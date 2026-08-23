@@ -148,6 +148,43 @@ fn collect_css_sources(dom: &Dom, node: NodeId, out: &mut Vec<CssSource>) {
     }
 }
 
+/// Fetches `url` with a `Cookie` header built from the jar at
+/// `storage_root/<host>/cookies.txt` (the same file
+/// `js_runtime::Context::with_storage` opens for `document.cookie` — see
+/// that constructor's doc), then feeds every `Set-Cookie` response header
+/// back into that same jar before returning. Because this runs *before*
+/// `Page::load` opens its own `Context`, a `Set-Cookie` on the page's own
+/// HTML response is already on disk by the time `document.cookie` reads
+/// it — real browsers show the same same-navigation consistency. A jar
+/// open/write failure (permissions, full disk) degrades to "send/store no
+/// cookies" rather than failing the fetch — matches this file's existing
+/// storage-failure fallback in `Page::load`.
+fn fetch_with_cookies(url: &str, storage_root: &std::path::Path) -> Result<net::Response, net::Error> {
+    let parsed = url::Url::parse(url).ok();
+    let host = parsed.as_ref().and_then(|u| u.host_str()).map(str::to_string);
+    let path = parsed.as_ref().map(|u| u.path().to_string()).unwrap_or_else(|| "/".to_string());
+    let secure = parsed.as_ref().map(|u| u.scheme() == "https").unwrap_or(false);
+
+    let mut jar = host
+        .as_deref()
+        .and_then(|h| storage::cookies::CookieJar::open(storage_root.join(h).join("cookies.txt")).ok());
+
+    let cookie_header = jar.as_ref().zip(host.as_deref()).and_then(|(jar, h)| jar.header_value(h, &path, secure));
+    let extra_headers: Vec<(&str, &str)> = cookie_header.as_deref().map(|v| vec![("Cookie", v)]).unwrap_or_default();
+
+    let response = net::get_with_headers(url, &extra_headers)?;
+
+    if let (Some(jar), Some(host)) = (jar.as_mut(), host.as_deref()) {
+        for (name, value) in &response.headers {
+            if name.eq_ignore_ascii_case("set-cookie") {
+                let _ = jar.set_from_header(value, host);
+            }
+        }
+    }
+
+    Ok(response)
+}
+
 /// Resolves a `<link href>` against `base_url` (the page's own URL - the
 /// second argument to `Url::join`, exactly WHATWG's URL-resolution
 /// algorithm via the real `url` crate: handles absolute hrefs,
@@ -191,7 +228,7 @@ fn resolve_stylesheet_url(base_url: Option<&str>, href: &str) -> Option<String> 
 /// not the importing stylesheet's own URL (a real engine resolves
 /// relative to whichever stylesheet contains the `@import`) — a
 /// documented simplification, not a distinction this worker tracks.
-fn merge_stylesheet_text(sheet: &mut Stylesheet, css_text: &str, base_url: Option<&str>, viewport_width: f64) {
+fn merge_stylesheet_text(sheet: &mut Stylesheet, css_text: &str, base_url: Option<&str>, viewport_width: f64, storage_root: &std::path::Path) {
     let parsed = parse_stylesheet(css_text);
     for import in &parsed.imports {
         let should_fetch = import.media.as_ref().map(|m| m.matches(viewport_width)).unwrap_or(true);
@@ -199,7 +236,7 @@ fn merge_stylesheet_text(sheet: &mut Stylesheet, css_text: &str, base_url: Optio
             continue;
         }
         if let Some(resolved) = resolve_stylesheet_url(base_url, &import.url) {
-            if let Ok(response) = net::get(&resolved) {
+            if let Ok(response) = fetch_with_cookies(&resolved, storage_root) {
                 let imported_text = String::from_utf8_lossy(&response.body).into_owned();
                 sheet.rules.extend(parse_stylesheet(&imported_text).rules);
             }
@@ -208,7 +245,7 @@ fn merge_stylesheet_text(sheet: &mut Stylesheet, css_text: &str, base_url: Optio
     sheet.rules.extend(parsed.rules);
 }
 
-fn build_stylesheet(dom: &Dom, root: NodeId, base_url: Option<&str>, viewport_width: f64) -> Stylesheet {
+fn build_stylesheet(dom: &Dom, root: NodeId, base_url: Option<&str>, viewport_width: f64, storage_root: &std::path::Path) -> Stylesheet {
     let mut sources = Vec::new();
     collect_css_sources(dom, root, &mut sources);
 
@@ -217,11 +254,11 @@ fn build_stylesheet(dom: &Dom, root: NodeId, base_url: Option<&str>, viewport_wi
         let css_text = match source {
             CssSource::Inline(text) => Some(text),
             CssSource::Link(href) => resolve_stylesheet_url(base_url, &href)
-                .and_then(|url| net::get(&url).ok())
+                .and_then(|url| fetch_with_cookies(&url, storage_root).ok())
                 .map(|response| String::from_utf8_lossy(&response.body).into_owned()),
         };
         if let Some(css_text) = css_text {
-            merge_stylesheet_text(&mut sheet, &css_text, base_url, viewport_width);
+            merge_stylesheet_text(&mut sheet, &css_text, base_url, viewport_width, storage_root);
         }
     }
     sheet
@@ -250,10 +287,10 @@ fn error_page_html(url: &str, message: &str) -> String {
 /// attempt charset detection from `Content-Type`/`<meta charset>`, real
 /// HTML often isn't UTF-8 but plenty is, and this crate doesn't have a
 /// non-UTF-8 text decoder yet).
-fn resolve_html(source: &PageSource) -> Result<String, String> {
+fn resolve_html(source: &PageSource, storage_root: &std::path::Path) -> Result<String, String> {
     match source {
         PageSource::Demo => Ok(DEMO_HTML.to_string()),
-        PageSource::Url(url) => net::get(url)
+        PageSource::Url(url) => fetch_with_cookies(url, storage_root)
             .map(|response| String::from_utf8_lossy(&response.body).into_owned())
             .map_err(|e| e.to_string()),
     }
@@ -292,7 +329,7 @@ impl<'rt> Page<'rt> {
         storage_root: &std::path::Path,
     ) -> Self {
         let (dom, html_el) = html::parse_to_html_element(html);
-        let sheet = build_stylesheet(&dom, html_el, base_url, viewport_width);
+        let sheet = build_stylesheet(&dom, html_el, base_url, viewport_width, storage_root);
 
         let ctx = match storage_host {
             Some(host) => match Context::with_storage(runtime, dom, host, storage_root.join(host)) {
@@ -351,7 +388,7 @@ fn load_source<'rt>(runtime: &'rt Runtime, source: &PageSource, viewport_width: 
         PageSource::Demo => Some(DEMO_STORAGE_HOST.to_string()),
         PageSource::Url(url) => url::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_string)),
     };
-    match resolve_html(source) {
+    match resolve_html(source, storage_root) {
         Ok(html) => {
             let run_demo_script = matches!(source, PageSource::Demo);
             (Page::load(runtime, &html, run_demo_script, base_url, storage_host.as_deref(), viewport_width, storage_root), None)

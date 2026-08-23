@@ -13,6 +13,7 @@ render = { path = "../render" }
 security = { path = "../security" }
 js-runtime = { path = "../js-runtime" }
 net = { path = "../net" }
+storage = { path = "../storage" }
 url = "2.5.8"
 
 [[bin]]

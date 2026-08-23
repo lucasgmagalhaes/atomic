@@ -105,6 +105,10 @@ impl Dom {
         self.insert(NodeData::Text(text.to_string()))
     }
 
+    pub fn create_comment(&mut self, text: &str) -> NodeId {
+        self.insert(NodeData::Comment(text.to_string()))
+    }
+
     pub fn append_child(&mut self, parent: NodeId, child: NodeId) {
         self.detach(child);
         if let Some(node) = self.get_mut(child) {
@@ -115,13 +119,40 @@ impl Dom {
         }
     }
 
-    /// Removes `child` from its current parent's children list without freeing it.
+    /// Inserts `new_node` as the sibling immediately before `sibling`,
+    /// under `sibling`'s current parent. Panics (via `unwrap`) if
+    /// `sibling` has no parent — mirrors `html5ever`'s own contract for
+    /// `TreeSink::append_before_sibling`, which never calls this on a
+    /// node without one.
+    pub fn insert_before(&mut self, sibling: NodeId, new_node: NodeId) {
+        let parent = self.get(sibling).and_then(|n| n.parent).expect("sibling must have a parent");
+        self.detach(new_node);
+        if let Some(node) = self.get_mut(new_node) {
+            node.parent = Some(parent);
+        }
+        if let Some(node) = self.get_mut(parent) {
+            let pos = node.children.iter().position(|&c| c == sibling).unwrap_or(node.children.len());
+            node.children.insert(pos, new_node);
+        }
+    }
+
+    /// Removes `child` from its current parent's children list without
+    /// freeing it — the node and its subtree remain valid and can be
+    /// reattached elsewhere. Use [`Dom::remove`] to actually delete a
+    /// subtree instead.
+    pub fn remove_from_parent(&mut self, child: NodeId) {
+        self.detach(child);
+    }
+
     fn detach(&mut self, child: NodeId) {
         let old_parent = self.get(child).and_then(|n| n.parent);
         if let Some(old_parent) = old_parent {
             if let Some(node) = self.get_mut(old_parent) {
                 node.children.retain(|&c| c != child);
             }
+        }
+        if let Some(node) = self.get_mut(child) {
+            node.parent = None;
         }
     }
 
@@ -170,6 +201,28 @@ impl Dom {
         }) = self.get_mut(id)
         {
             attributes.insert(name.to_string(), value.to_string());
+        }
+    }
+
+    pub fn attribute(&self, id: NodeId, name: &str) -> Option<&str> {
+        match &self.get(id)?.data {
+            NodeData::Element { attributes, .. } => attributes.get(name).map(String::as_str),
+            _ => None,
+        }
+    }
+
+    /// Appends `more` onto an existing `Text` node's content in place —
+    /// mirrors the HTML parsing spec's "adjacent text nodes are merged"
+    /// rule (`TreeSink::append`'s `AppendText` case), where consecutive
+    /// character tokens land in the same DOM text node rather than each
+    /// getting their own. No-op if `id` isn't a `Text` node.
+    pub fn append_text(&mut self, id: NodeId, more: &str) {
+        if let Some(Node {
+            data: NodeData::Text(text),
+            ..
+        }) = self.get_mut(id)
+        {
+            text.push_str(more);
         }
     }
 

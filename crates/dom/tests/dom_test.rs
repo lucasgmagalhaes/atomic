@@ -109,3 +109,58 @@ fn set_text_content_replaces_all_children() {
     assert_eq!(dom.text_content(p), "replaced");
     assert_eq!(dom.get(p).unwrap().children.len(), 1);
 }
+
+#[test]
+fn create_comment_produces_a_comment_node() {
+    let mut dom = Dom::new();
+    let c = dom.create_comment("a comment");
+    assert!(matches!(dom.get(c).unwrap().data, dom::NodeData::Comment(ref s) if s == "a comment"));
+}
+
+#[test]
+fn remove_from_parent_detaches_without_freeing() {
+    let mut dom = Dom::new();
+    let root = dom.root();
+    let div = dom.create_element("div");
+    dom.append_child(root, div);
+
+    dom.remove_from_parent(div);
+
+    assert!(dom.get(root).unwrap().children.is_empty());
+    // Still alive - unlike remove(), which frees the slot.
+    assert!(dom.get(div).is_some());
+    assert_eq!(dom.get(div).unwrap().parent, None);
+}
+
+#[test]
+fn insert_before_places_new_node_ahead_of_sibling() {
+    let mut dom = Dom::new();
+    let root = dom.root();
+    let a = dom.create_element("a");
+    let b = dom.create_element("b");
+    dom.append_child(root, a);
+    dom.append_child(root, b);
+
+    let c = dom.create_element("c");
+    dom.insert_before(b, c);
+
+    assert_eq!(dom.get(root).unwrap().children, vec![a, c, b]);
+}
+
+#[test]
+fn attribute_reads_back_a_set_value_and_none_for_missing() {
+    let mut dom = Dom::new();
+    let div = dom.create_element("div");
+    dom.set_attribute(div, "class", "box");
+
+    assert_eq!(dom.attribute(div, "class"), Some("box"));
+    assert_eq!(dom.attribute(div, "id"), None);
+}
+
+#[test]
+fn append_text_merges_onto_an_existing_text_node() {
+    let mut dom = Dom::new();
+    let t = dom.create_text("hello ");
+    dom.append_text(t, "world");
+    assert!(matches!(dom.get(t).unwrap().data, dom::NodeData::Text(ref s) if s == "hello world"));
+}

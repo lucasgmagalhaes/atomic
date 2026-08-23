@@ -4,3 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+html5ever = "0.39.0"
+dom = { path = "../dom" }
+elsa = "1.11.2"

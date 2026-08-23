@@ -174,6 +174,16 @@ impl Profile {
         }
     }
 
+    /// The OS process id of the spawned `profile-worker` child - real
+    /// value from `std::process::Child::id()`, not synthesized. Lets a
+    /// caller sample real per-process telemetry against it (e.g.
+    /// `platform_apis::process_stats::sample(profile.pid())` for the
+    /// mockup's resource-monitor CPU/RAM column) without this crate having
+    /// to depend on `platform-apis` itself.
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
     /// Dispatches a real `"click"` event at the element with id `selector`
     /// (only `#id` is accepted — see `profile-worker`'s own doc on why).
     /// `Ok(Ok(()))` means it dispatched (a page-attached `"click"` listener,

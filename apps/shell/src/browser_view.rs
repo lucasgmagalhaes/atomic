@@ -138,6 +138,22 @@ impl BrowserView {
         self.profile.as_mut()
     }
 
+    /// The live profile process's OS pid, for real per-process telemetry
+    /// (see `platform_apis::process_stats`) - `None` if this view failed
+    /// to spawn.
+    pub fn pid(&self) -> Option<u32> {
+        self.profile.as_ref().map(|p| p.pid())
+    }
+
+    /// The live profile process's current frame generation (see
+    /// `profile::Profile::frame_generation`) - `None` if this view failed
+    /// to spawn. For a resource monitor deriving FPS from how fast this
+    /// counter advances, not for texture-upload logic (`poll_texture`
+    /// already tracks its own generation internally).
+    pub fn frame_generation(&self) -> Option<u32> {
+        self.profile.as_ref().map(|p| p.frame_generation())
+    }
+
     pub fn reload(&mut self) {
         if let Some(profile) = &mut self.profile {
             let _ = profile.reload();

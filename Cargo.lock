@@ -3682,6 +3682,7 @@ dependencies = [
  "eframe",
  "egui",
  "js-runtime",
+ "platform-apis",
  "profile",
 ]
 

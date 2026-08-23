@@ -3,6 +3,7 @@ use std::time::Duration;
 use shell::automation_bridge;
 use shell::browser_view::BrowserView;
 use shell::i18n::{self, Locale};
+use shell::resource_monitor::PaneMonitor;
 use shell::tiling;
 use shell::workspace::WorkspaceManager;
 
@@ -19,6 +20,11 @@ const PANE_HEIGHT: u32 = 320;
 struct Pane {
     id: String,
     browser: BrowserView,
+    /// Real CPU/RAM/FPS telemetry for this pane's process - see
+    /// `resource_monitor`'s own doc. Lives on `Pane` (not a separate
+    /// `Vec` NimbleApp would have to keep in sync with `panes`) so it
+    /// naturally follows spawn/close/duplicate without extra bookkeeping.
+    monitor: PaneMonitor,
 }
 
 struct NimbleApp {
@@ -50,13 +56,54 @@ struct NimbleApp {
     locale: Locale,
 }
 
+const SPARKLINE_HEIGHT: f32 = 24.0;
+const SPARKLINE_MARGIN: f32 = 6.0;
+
+/// Draws the resource-monitor overlay (mockup's "CPU/RAM/FPS por profile,
+/// gráfico 60s") in `cell_rect`'s top-left corner: one text line, plus a
+/// hand-drawn CPU sparkline underneath it (no `egui_plot`/charting crate
+/// dependency for one small line - `monitor.cpu_history()` is already
+/// exactly the 0..=60-point series a sparkline needs). Draws nothing but
+/// the text placeholder "..." before the monitor's first real sample
+/// arrives (see `PaneMonitor::tick`'s throttling) rather than showing
+/// stale zeros.
+fn draw_resource_overlay(ui: &egui::Ui, cell_rect: egui::Rect, monitor: &PaneMonitor) {
+    let text = match (monitor.latest_cpu_percent(), monitor.latest_memory_bytes(), monitor.latest_fps()) {
+        (Some(cpu), Some(mem), Some(fps)) => format!("CPU {cpu:.0}% · RAM {:.0} MB · FPS {fps:.0}", mem as f64 / 1_000_000.0),
+        _ => "CPU ... · RAM ... · FPS ...".to_string(),
+    };
+    let text_pos = cell_rect.min + egui::vec2(SPARKLINE_MARGIN, SPARKLINE_MARGIN);
+    ui.painter().text(text_pos, egui::Align2::LEFT_TOP, text, egui::FontId::monospace(11.0), egui::Color32::WHITE);
+
+    let history: Vec<f64> = monitor.cpu_history().collect();
+    if history.len() < 2 {
+        return;
+    }
+    let sparkline_rect = egui::Rect::from_min_size(
+        text_pos + egui::vec2(0.0, 16.0),
+        egui::vec2((cell_rect.width() - SPARKLINE_MARGIN * 2.0).max(0.0), SPARKLINE_HEIGHT),
+    );
+    ui.painter().rect_filled(sparkline_rect, 0.0, egui::Color32::from_black_alpha(120));
+    let max = history.iter().cloned().fold(1.0_f64, f64::max); // at least 1.0 so an all-zero window doesn't divide by zero
+    let points: Vec<egui::Pos2> = history
+        .iter()
+        .enumerate()
+        .map(|(i, &cpu)| {
+            let x = sparkline_rect.min.x + (i as f32 / (history.len() - 1) as f32) * sparkline_rect.width();
+            let y = sparkline_rect.max.y - (cpu / max) as f32 * sparkline_rect.height();
+            egui::pos2(x, y)
+        })
+        .collect();
+    ui.painter().add(egui::Shape::line(points, egui::Stroke::new(1.5_f32, egui::Color32::LIGHT_GREEN)));
+}
+
 /// Spawns one pane with the next positional id and registers it into the
 /// active workspace.
 fn spawn_pane(workspace: &mut WorkspaceManager, index: usize) -> Pane {
     let id = format!("pane-{}", index + 1);
     let active = workspace.active_index();
     workspace.add_profile(active, id.clone());
-    Pane { id, browser: BrowserView::spawn(PANE_WIDTH, PANE_HEIGHT) }
+    Pane { id, browser: BrowserView::spawn(PANE_WIDTH, PANE_HEIGHT), monitor: PaneMonitor::new() }
 }
 
 impl Default for NimbleApp {
@@ -120,6 +167,10 @@ impl NimbleApp {
         let proxy = self.proxy_text.trim();
         let proxy = if proxy.is_empty() { None } else { Some(proxy) };
         self.panes[self.selected].browser = BrowserView::spawn_with_proxy(PANE_WIDTH, PANE_HEIGHT, proxy);
+        // A respawn is a new OS process (see this method's own doc) - a
+        // stale monitor would diff the new process's first sample against
+        // the old process's last one, reading a nonsense CPU/FPS spike.
+        self.panes[self.selected].monitor = PaneMonitor::new();
         self.address_bar_text.clear();
     }
 
@@ -399,6 +450,11 @@ impl eframe::App for NimbleApp {
                 } else if pane.browser.error().is_none() {
                     cell_ui.put(cell_rect, egui::Label::new(i18n::t(i18n::STARTING_PROFILE, self.locale)));
                 }
+
+                if let (Some(pid), Some(frame_generation)) = (pane.browser.pid(), pane.browser.frame_generation()) {
+                    pane.monitor.tick(pid, frame_generation);
+                }
+                draw_resource_overlay(&cell_ui, cell_rect, &pane.monitor);
 
                 let border_color = if index == self.selected { egui::Color32::LIGHT_BLUE } else { egui::Color32::DARK_GRAY };
                 cell_ui.painter().rect_stroke(cell_rect, 0.0, egui::Stroke::new(2.0_f32, border_color));

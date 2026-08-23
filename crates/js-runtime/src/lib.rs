@@ -14,6 +14,7 @@ mod document_cookie;
 mod dom_bindings;
 mod events;
 mod fetch;
+mod fetch_async;
 mod host_state;
 mod indexed_db_bindings;
 mod page_visibility;
@@ -81,6 +82,7 @@ impl<'rt> Context<'rt> {
             crypto::register(ptr);
             page_visibility::register(ptr);
             fetch::register(ptr);
+            fetch_async::register(ptr);
             timers::register(ptr);
             document_cookie::register(ptr);
             indexed_db_bindings::register(ptr);
@@ -169,12 +171,15 @@ impl<'rt> Context<'rt> {
     }
 
     /// Fires every due `setTimeout`/`setInterval` and every queued
-    /// `requestAnimationFrame` callback. See `timers` module doc — there's
-    /// no real event loop yet, so nothing calls this on its own; the host
+    /// `requestAnimationFrame` callback, resolves/rejects every completed
+    /// `fetch()`/`XMLHttpRequest`, and drains quickjs's own Promise job
+    /// queue so `.then()` continuations from any of the above actually
+    /// run. See `timers`/`fetch_async`'s module docs — there's no real
+    /// event loop yet, so nothing calls this on its own; the host
     /// (`profile-worker`'s per-frame loop, or tests) must pump it
-    /// explicitly. Returns how many callbacks fired.
+    /// explicitly. Returns how many callbacks/jobs ran in total.
     pub fn run_pending_timers(&self) -> usize {
-        unsafe { timers::pump(self.ptr) }
+        unsafe { timers::pump(self.ptr) + fetch_async::pump(self.ptr) }
     }
 
     /// The DOM this context was constructed with via
@@ -192,6 +197,7 @@ impl Drop for Context<'_> {
     fn drop(&mut self) {
         unsafe {
             timers::cleanup(self.ptr);
+            fetch_async::cleanup(self.ptr);
             sys::JS_FreeContext(self.ptr);
         }
     }

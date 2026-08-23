@@ -1,46 +1,38 @@
 //! The per-profile child process `profile::Profile` spawns. Hosts the
-//! dom+css+layout-engine+render stack for one profile and publishes
-//! rendered frames over `ipc::FrameWriter`. No real page-loading yet -
-//! there's no HTML parser wired up anywhere in this workspace, so this
-//! renders one hardcoded demo DOM tree instead of an actual URL. Proves
-//! the process-isolation/IPC transport; loading real content is separate,
-//! blocked on the `html` crate (still a stub).
+//! html+dom+css+layout-engine+render stack for one profile and publishes
+//! rendered frames over `ipc::FrameWriter`. Parses real HTML via `html`
+//! (html5ever-backed) — no longer a hardcoded DOM tree. Still not a
+//! working browser tab: the HTML source is a fixed demo string, not
+//! fetched from a URL (`net` isn't wired in here), and there's no
+//! `<style>`/`<link>` extraction — the stylesheet is applied separately,
+//! not read out of the parsed document.
 //!
 //! Command protocol over stdin (newline-delimited, one command per line):
 //! - `PING` -> replies `PONG` on stdout (liveness check)
-//! - `RELOAD` -> re-renders the demo page and re-publishes a frame
+//! - `RELOAD` -> re-parses/re-renders the page and re-publishes a frame
 //! - `QUIT` -> exits cleanly
 //! - anything else -> ignored (unrecognized commands are not an error;
 //!   real input/navigation commands aren't implemented yet)
 use std::io::{self, BufRead, Write};
 
 use css::parse_stylesheet;
-use dom::Dom;
 use layout_engine::{build_box_tree, layout_block};
 use render::{build_display_list, build_glyph_list, composite_glyphs, GpuRenderer};
 
-fn build_demo_dom() -> (Dom, dom::NodeId) {
-    let mut dom = Dom::new();
-    let root = dom.root();
-    let container = dom.create_element("div");
-    dom.append_child(root, container);
-    dom.set_attribute(container, "id", "container");
-
-    let heading = dom.create_element("p");
-    let heading_text = dom.create_text("Nimble profile worker");
-    dom.append_child(container, heading);
-    dom.append_child(heading, heading_text);
-
-    (dom, container)
-}
+const DEMO_HTML: &str = r#"
+<div id="container">
+  <p>Nimble profile worker</p>
+  <p>Rendering real HTML via html5ever.</p>
+</div>
+"#;
 
 fn render_frame(width: u32, height: u32) -> Vec<u8> {
-    let (dom, container) = build_demo_dom();
+    let (dom, html_el) = html::parse_to_html_element(DEMO_HTML);
     let sheet = parse_stylesheet(
         "#container { background-color: #1a1c2b; padding: 20px; } \
          p { color: #ffffff; font-size: 24px; }",
     );
-    let mut tree = build_box_tree(&dom, container, &sheet).expect("demo DOM always produces a box");
+    let mut tree = build_box_tree(&dom, html_el, &sheet).expect("parsed HTML always produces a box");
     layout_block(&mut tree, width as f64, 0.0, 0.0);
 
     let rects = build_display_list(&tree);

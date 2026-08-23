@@ -23,7 +23,7 @@
 
 ## APIs Web no escopo
 
-**Bloqueante (fases 2-4):** localStorage, sessionStorage, IndexedDB, Page Visibility, Web Workers, requestAnimationFrame, Notifications, performance.now(), Canvas 2D, Web Audio, Clipboard, crypto.getRandomValues, fetch/XHR, File/Blob
+**Bloqueante (fases 2-4):** localStorage, sessionStorage, IndexedDB, Page Visibility, Web Workers, requestAnimationFrame, Notifications, performance.now(), Canvas 2D, Web Audio, Clipboard, crypto.getRandomValues, fetch/XHR, File/Blob — **todas implementadas** (`js-runtime`); Web Audio via `OfflineAudioContext` real (headless, sem device de áudio — ver `crates/js-runtime/src/web_audio.rs`), Notifications sem toast de SO real ainda (permission model real, ver `notifications.rs`).
 
 **Sob demanda (fase 6):** Screen Wake Lock, formatação de números grandes (impl própria, não ICU), ResizeObserver, IntersectionObserver, Service Worker/PWA, Gamepad API, MutationObserver
 

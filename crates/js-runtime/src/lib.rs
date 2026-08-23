@@ -25,6 +25,7 @@ mod page_visibility;
 mod performance;
 mod timers;
 mod value_bridge;
+mod web_audio;
 
 #[derive(Debug)]
 pub struct EvalError(pub String);
@@ -94,6 +95,7 @@ impl<'rt> Context<'rt> {
             blob::register(ptr);
             notifications::register(ptr);
             clipboard::register(ptr);
+            web_audio::register(ptr);
         };
         Context {
             ptr,

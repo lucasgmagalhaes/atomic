@@ -123,15 +123,18 @@ fn draw_resource_overlay(ui: &egui::Ui, cell_rect: egui::Rect, monitor: &PaneMon
     ui.painter().add(egui::Shape::line(points, egui::Stroke::new(1.5_f32, egui::Color32::LIGHT_GREEN)));
 }
 
-/// Spawns one pane with the next positional id and registers it into the
-/// active workspace.
-fn spawn_pane(workspace: &mut WorkspaceManager, index: usize) -> Pane {
-    let id = format!("pane-{}", index + 1);
+/// Spawns one pane with `id` and registers it into the active workspace.
+/// `id` must be unique among every currently-live pane (see
+/// `NimbleApp::next_pane_id`) - since [`BrowserView::spawn_with_identity`]
+/// derives the shared-memory name directly from it, two live panes with the
+/// same id would fight over the same region and storage directory.
+fn spawn_pane(workspace: &mut WorkspaceManager, id: String) -> Pane {
     let active = workspace.active_index();
     workspace.add_profile(active, id.clone());
     let downloads_dir = std::env::temp_dir().join("nimble-downloads").join(&id);
+    let browser = BrowserView::spawn_with_identity(&id, PANE_WIDTH, PANE_HEIGHT, None);
     Pane {
-        browser: BrowserView::spawn(PANE_WIDTH, PANE_HEIGHT),
+        browser,
         monitor: PaneMonitor::new(),
         history: History::new(),
         downloads: Downloads::new(downloads_dir),
@@ -142,7 +145,7 @@ fn spawn_pane(workspace: &mut WorkspaceManager, index: usize) -> Pane {
 impl Default for NimbleApp {
     fn default() -> Self {
         let mut workspace = WorkspaceManager::new();
-        let panes = vec![spawn_pane(&mut workspace, 0)];
+        let panes = vec![spawn_pane(&mut workspace, "pane-1".to_string())];
 
         NimbleApp {
             panes,
@@ -177,6 +180,25 @@ impl NimbleApp {
         self.panes.iter().enumerate().filter(|(_, p)| active_ids.iter().any(|id| id == &p.id)).map(|(i, _)| i).collect()
     }
 
+    /// The next `"pane-N"` id not already held by a *currently-live* pane
+    /// (closed panes free their number back up) - unlike the old
+    /// positional `panes.len() + 1` scheme, this can't collide with a pane
+    /// that's still running after an earlier close shrank the vec (e.g.
+    /// closing pane-2 out of pane-1/2/3 then spawning would otherwise
+    /// reassign "pane-3", already in use). Collision now matters for real:
+    /// [`BrowserView::spawn_with_identity`] derives the shared-memory name
+    /// straight from the id.
+    fn next_pane_id(&self) -> String {
+        let next = self
+            .panes
+            .iter()
+            .filter_map(|p| p.id.strip_prefix("pane-").and_then(|n| n.parse::<u32>().ok()))
+            .max()
+            .unwrap_or(0)
+            + 1;
+        format!("pane-{next}")
+    }
+
     /// Grows or shrinks the *active workspace's visible* pane count to
     /// exactly `count` (the mockup's 1/2/4/6 grid toggle - see
     /// `tiling::grid_layout`'s doc for why any other count still works).
@@ -192,8 +214,8 @@ impl NimbleApp {
         let visible = self.active_workspace_pane_indices();
         if visible.len() < count {
             for _ in visible.len()..count {
-                let index = self.panes.len();
-                self.panes.push(spawn_pane(&mut self.workspace, index));
+                let id = self.next_pane_id();
+                self.panes.push(spawn_pane(&mut self.workspace, id));
             }
         } else if visible.len() > count {
             let mut to_close: Vec<usize> = visible[count..].to_vec();
@@ -222,7 +244,8 @@ impl NimbleApp {
     fn apply_proxy(&mut self) {
         let proxy = self.proxy_text.trim();
         let proxy = if proxy.is_empty() { None } else { Some(proxy) };
-        self.panes[self.selected].browser = BrowserView::spawn_with_proxy(PANE_WIDTH, PANE_HEIGHT, proxy);
+        let id = self.panes[self.selected].id.clone();
+        self.panes[self.selected].browser = BrowserView::spawn_with_identity(&id, PANE_WIDTH, PANE_HEIGHT, proxy);
         // A respawn is a new OS process (see this method's own doc) - a
         // stale monitor would diff the new process's first sample against
         // the old process's last one, reading a nonsense CPU/FPS spike.
@@ -347,8 +370,8 @@ impl NimbleApp {
     /// in.
     fn duplicate_pane(&mut self, index: usize) {
         let url = self.panes[index].browser.current_url().to_string();
-        let new_index = self.panes.len();
-        let mut pane = spawn_pane(&mut self.workspace, new_index);
+        let id = self.next_pane_id();
+        let mut pane = spawn_pane(&mut self.workspace, id);
         if !url.is_empty() {
             pane.browser.navigate(&url);
             pane.history.record(url);

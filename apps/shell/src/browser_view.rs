@@ -106,8 +106,30 @@ impl BrowserView {
         static SPAWN_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let n = SPAWN_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let shmem_name = format!("nimble-shell-{}-{n}", std::process::id());
+        Self::spawn_with_shmem_name(&shmem_name, width, height, proxy)
+    }
+
+    /// Same as [`spawn_with_proxy`](Self::spawn_with_proxy), but keyed to a
+    /// caller-chosen stable `pane_id` instead of a per-process spawn
+    /// counter - `profile-worker`'s `storage_root` is derived directly from
+    /// the shared-memory name (see that binary's `main`), so a stable name
+    /// here is what makes a pane's `document.cookie`/`localStorage`/
+    /// `indexedDB` actually survive a shell restart instead of starting
+    /// fresh every launch (closes CLAUDE.md's "doesn't persist across
+    /// separate profile-worker process launches" storage gap, for the
+    /// `apps/shell` caller specifically). Two panes with the same `pane_id`
+    /// across two concurrently-running shell processes would collide on
+    /// the same shared-memory region and storage directory - not handled
+    /// here, same as this project's existing "no per-profile identity
+    /// beyond a GUI-assigned id" scope.
+    pub fn spawn_with_identity(pane_id: &str, width: u32, height: u32, proxy: Option<&str>) -> Self {
+        let shmem_name = format!("nimble-profile-{pane_id}");
+        Self::spawn_with_shmem_name(&shmem_name, width, height, proxy)
+    }
+
+    fn spawn_with_shmem_name(shmem_name: &str, width: u32, height: u32, proxy: Option<&str>) -> Self {
         let (profile, error) = match worker_binary_path() {
-            Ok(path) => match profile::Profile::spawn_with_proxy(&path.to_string_lossy(), &shmem_name, width, height, proxy) {
+            Ok(path) => match profile::Profile::spawn_with_proxy(&path.to_string_lossy(), shmem_name, width, height, proxy) {
                 Ok(p) => (Some(p), None),
                 Err(e) => (None, Some(e.to_string())),
             },

@@ -123,6 +123,94 @@ fn spawn_with_proxy_routes_navigation_through_the_configured_proxy() {
     assert_eq!(tunneled_target, page_addr.to_string(), "the shell's profile should have tunneled through the proxy to the page's own address");
 }
 
+/// A real local server that sets a cookie on its one response, so a test
+/// can prove a cookie actually round-trips through `profile-worker`'s own
+/// `storage::cookies::CookieJar` file, not just that navigation succeeded.
+fn spawn_cookie_setting_server() -> std::net::SocketAddr {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("failed to bind a loopback test server");
+    let addr = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        if let Ok((mut stream, _)) = listener.accept() {
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf);
+            let body = "<div>set a cookie</div>";
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nSet-Cookie: identity-marker=1\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(response.as_bytes());
+        }
+    });
+    addr
+}
+
+/// The on-disk cookie jar `spawn_with_identity(pane_id, ...)`'s spawned
+/// `profile-worker` would use for `host` - mirrors
+/// `profile_worker.rs::fetch_with_cookies`'s own path construction
+/// (`storage_root/<host>/cookies.txt`) so this test can check the real
+/// file `BrowserView` never gets a handle to itself.
+fn cookie_jar_path(pane_id: &str, host: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join("nimble-profile-storage").join(format!("nimble-profile-{pane_id}")).join(host).join("cookies.txt")
+}
+
+#[test]
+fn spawn_with_identity_persists_cookies_across_a_respawn_with_the_same_id() {
+    let pane_id = format!("identity-test-{}", std::process::id());
+    let jar_path = cookie_jar_path(&pane_id, "127.0.0.1");
+    let _ = std::fs::remove_dir_all(jar_path.parent().unwrap().parent().unwrap());
+
+    let addr = spawn_cookie_setting_server();
+    {
+        let mut browser = BrowserView::spawn_with_identity(&pane_id, 64, 64, None);
+        assert!(browser.error().is_none(), "spawn_with_identity should succeed against the real workspace build");
+        browser.navigate(&format!("http://{addr}/"));
+        assert!(browser.navigation_error().is_none(), "navigating should succeed: {:?}", browser.navigation_error());
+        // profile-worker writes Set-Cookie to disk before it renders the
+        // page (see fetch_with_cookies's own doc) - give the child process
+        // a brief moment to have actually done the write before this test
+        // process reads the same file out from under it.
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    } // BrowserView::drop kills the profile-worker child - see profile::Profile's own Drop guarantee.
+
+    let jar_contents_after_first_spawn = std::fs::read_to_string(&jar_path).expect("first spawn should have written a real cookie jar file to disk");
+    assert!(jar_contents_after_first_spawn.contains("identity-marker"), "jar should contain the cookie the server actually set: {jar_contents_after_first_spawn}");
+
+    // A second spawn under the *same* pane id must reuse the same
+    // storage_root - this is the actual persistence guarantee - rather
+    // than getting a fresh empty one the way the old per-process-spawn
+    // shmem naming scheme did.
+    let _browser_again = BrowserView::spawn_with_identity(&pane_id, 64, 64, None);
+    let jar_contents_after_second_spawn = std::fs::read_to_string(&jar_path).expect("the same jar file should still exist after a second spawn with the same identity");
+    assert_eq!(jar_contents_after_second_spawn, jar_contents_after_first_spawn, "a fresh spawn with the same pane id must not wipe or replace the existing cookie jar");
+
+    let _ = std::fs::remove_dir_all(jar_path.parent().unwrap().parent().unwrap());
+}
+
+#[test]
+fn spawn_with_identity_isolates_storage_between_different_pane_ids() {
+    let a = format!("identity-a-{}", std::process::id());
+    let b = format!("identity-b-{}", std::process::id());
+    let jar_a = cookie_jar_path(&a, "127.0.0.1");
+    let jar_b = cookie_jar_path(&b, "127.0.0.1");
+    let _ = std::fs::remove_dir_all(jar_a.parent().unwrap().parent().unwrap());
+    let _ = std::fs::remove_dir_all(jar_b.parent().unwrap().parent().unwrap());
+
+    let addr = spawn_cookie_setting_server();
+    {
+        let mut browser = BrowserView::spawn_with_identity(&a, 64, 64, None);
+        browser.navigate(&format!("http://{addr}/"));
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
+
+    assert!(jar_a.exists(), "pane a's own jar should exist");
+    assert!(!jar_b.exists(), "a different pane id must get its own storage_root, not share pane a's");
+
+    let _ = std::fs::remove_dir_all(jar_a.parent().unwrap().parent().unwrap());
+    let _ = std::fs::remove_dir_all(jar_b.parent().unwrap().parent().unwrap());
+}
+
 #[test]
 fn rgba_to_color_image_preserves_dimensions_and_pixel_bytes() {
     let width = 2u32;

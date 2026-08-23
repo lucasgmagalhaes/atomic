@@ -14,6 +14,7 @@ mod events;
 mod fetch;
 mod page_visibility;
 mod performance;
+mod timers;
 
 #[derive(Debug)]
 pub struct EvalError(pub String);
@@ -75,6 +76,7 @@ impl<'rt> Context<'rt> {
             crypto::register(ptr);
             page_visibility::register(ptr);
             fetch::register(ptr);
+            timers::register(ptr);
         };
         Context {
             ptr,
@@ -137,10 +139,22 @@ impl<'rt> Context<'rt> {
 
         Ok(owned)
     }
+
+    /// Fires every due `setTimeout`/`setInterval` and every queued
+    /// `requestAnimationFrame` callback. See `timers` module doc — there's
+    /// no real event loop yet, so nothing calls this on its own; the host
+    /// (currently just tests) must pump it explicitly. Returns how many
+    /// callbacks fired.
+    pub fn run_pending_timers(&self) -> usize {
+        unsafe { timers::pump(self.ptr) }
+    }
 }
 
 impl Drop for Context<'_> {
     fn drop(&mut self) {
-        unsafe { sys::JS_FreeContext(self.ptr) };
+        unsafe {
+            timers::cleanup(self.ptr);
+            sys::JS_FreeContext(self.ptr);
+        }
     }
 }

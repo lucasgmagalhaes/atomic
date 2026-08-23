@@ -34,6 +34,7 @@ pub struct JSValue {
     pub tag: i64,
 }
 
+pub const JS_TAG_INT: i64 = 0;
 pub const JS_TAG_BOOL: i64 = 1;
 pub const JS_TAG_NULL: i64 = 2;
 pub const JS_TAG_UNDEFINED: i64 = 3;

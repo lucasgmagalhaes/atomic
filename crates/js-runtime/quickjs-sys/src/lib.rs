@@ -232,6 +232,13 @@ extern "C" {
     /// checked by this binding, see `js-runtime`'s crypto module).
     pub fn JS_GetUint8Array(ctx: *mut JSContext, psize: *mut usize, obj: JSValue) -> *mut u8;
 
+    /// Copies `buf[..len]` into a freshly allocated `Uint8Array`/
+    /// `ArrayBuffer` (unlike [`JS_GetUint8Array`], `buf` isn't borrowed
+    /// afterward - safe to free/drop the Rust-side buffer once this
+    /// returns).
+    pub fn JS_NewUint8ArrayCopy(ctx: *mut JSContext, buf: *const u8, len: usize) -> JSValue;
+    pub fn JS_NewArrayBufferCopy(ctx: *mut JSContext, buf: *const u8, len: usize) -> JSValue;
+
     pub fn JS_NewArray(ctx: *mut JSContext) -> JSValue;
     /// `true`/`false` reflect `Array.isArray`-shaped intent, but per
     /// quickjs-ng's own doc comment this no longer punches through

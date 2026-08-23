@@ -8,6 +8,7 @@ use std::path::Path;
 
 use quickjs_sys as sys;
 
+mod blob;
 mod crypto;
 mod document;
 mod document_cookie;
@@ -88,6 +89,7 @@ impl<'rt> Context<'rt> {
             document_cookie::register(ptr);
             indexed_db_bindings::register(ptr);
             local_storage_bindings::register(ptr);
+            blob::register(ptr);
         };
         Context {
             ptr,
@@ -213,6 +215,7 @@ impl Drop for Context<'_> {
         unsafe {
             timers::cleanup(self.ptr);
             fetch_async::cleanup(self.ptr);
+            blob::cleanup(self.ptr);
             sys::JS_FreeContext(self.ptr);
         }
     }

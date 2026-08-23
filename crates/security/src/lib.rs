@@ -7,15 +7,13 @@
 //! CSPRNG), the same primitive `js-runtime` uses for
 //! `crypto.getRandomValues` — one source of randomness, not two.
 //!
-//! Scoped to this one primitive. The spec's `security` crate row also
-//! calls for **per-platform process sandboxing** (Windows AppContainer/
-//! Job Objects, Linux seccomp+namespaces, macOS App Sandbox — three
-//! separate platform-specific implementations, not one shared one) and a
-//! **signed updater**, neither of which is implemented here — both are
-//! phase-5-scale efforts on their own, not a natural extension of "add a
-//! function to this module" the way encryption was.
+//! Also has real per-platform process sandboxing for a spawned
+//! `profile-worker` — see [`sandbox`]. Not covered: a **signed updater**
+//! (phase-5-scale effort on its own).
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
+
+pub mod sandbox;
 
 pub const KEY_LEN: usize = 32; // AES-256
 pub const NONCE_LEN: usize = 12; // GCM's standard nonce size

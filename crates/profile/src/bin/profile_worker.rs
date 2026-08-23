@@ -12,18 +12,21 @@
 //! published frame.
 //!
 //! `NAVIGATE <url>` now does a real fetch (`net::get`) and renders the
-//! actual response — this is no longer just a fixed demo string. Still
-//! cut down from a working browser tab: no `<style>`/`<link>` extraction
-//! (a real fetched page's own stylesheets are never applied — only the
-//! one hardcoded demo stylesheet exists, which won't match a real page's
-//! markup at all, so navigated pages render unstyled: real layout against
-//! a real parsed DOM, just with every element at its CSS initial values),
-//! no redirect following (`net::get`'s own scope), and the fetch blocks
-//! this process's render loop for its duration (a real browser fetches
-//! off the render thread and shows a loading state in the meantime; this
-//! one just misses a few frame ticks - acceptable at this scope since
-//! there's nothing animating during a fetch anyway, but a real regression
-//! if that ever changes).
+//! actual response — this is no longer just a fixed demo string. A
+//! navigated page's own `<style>` blocks and `<link rel="stylesheet"
+//! href="...">` sheets are extracted and applied too (`collect_css_sources`
+//! walks the parsed DOM in document order; each `<link>`'s href is
+//! fetched with a second real `net::get`), cascaded on top of the one
+//! hardcoded base stylesheet that used to be all any page ever got — a
+//! real page now actually looks like something, not just unstyled text.
+//! Scope cuts that remain: only absolute `http(s)://` `<link>` hrefs are
+//! fetched (no base-URL-relative resolution — this workspace has no URL
+//! join/parse library yet), no `@import`, no media queries, and every
+//! stylesheet fetch is sequential and blocking (same "the fetch blocks
+//! this process's render loop for its duration" trade-off `NAVIGATE`
+//! itself already makes — a real browser fetches off the render thread
+//! and shows a loading state meanwhile; this one just misses a few frame
+//! ticks, acceptable since nothing animates during a fetch anyway).
 //!
 //! Command protocol over stdin (newline-delimited, one command per line),
 //! read on a dedicated thread and drained non-blockingly by the render
@@ -51,7 +54,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use css::{parse_stylesheet, Stylesheet};
-use dom::NodeId;
+use dom::{Dom, NodeData, NodeId};
 use js_runtime::{Context, Runtime};
 use layout_engine::{build_box_tree, layout_block};
 use render::{build_display_list, build_glyph_list, composite_glyphs, GpuRenderer};
@@ -89,6 +92,71 @@ setTimeout(onTick, 50);
 requestAnimationFrame(onFrame);
 "#;
 
+/// Applied to every page before anything the page's own `<style>`/
+/// `<link>` sources contribute (lowest cascade priority - see
+/// `build_stylesheet`) - only meaningfully matches the built-in demo
+/// page's markup, but harmless (matches nothing) against a real one.
+const BASE_STYLESHEET_SRC: &str = "#container { background-color: #1a1c2b; padding: 20px; } \
+     p { color: #ffffff; font-size: 24px; }";
+
+/// One CSS source found while walking a page's DOM, in document order.
+enum CssSource {
+    Inline(String),
+    Link(String),
+}
+
+/// Walks `node`'s subtree collecting `<style>` text content and
+/// `<link rel="stylesheet" href="...">` hrefs, in document order (a
+/// document's later `<style>`/`<link>` should win over an earlier one at
+/// equal specificity, same as real cascade order — preserving this order
+/// is why this collects one interleaved list rather than two separate
+/// ones).
+fn collect_css_sources(dom: &Dom, node: NodeId, out: &mut Vec<CssSource>) {
+    let Some(n) = dom.get(node) else { return };
+    if let NodeData::Element { tag, attributes } = &n.data {
+        if tag == "style" {
+            out.push(CssSource::Inline(dom.text_content(node)));
+        } else if tag == "link" {
+            let is_stylesheet = attributes.get("rel").map(|r| r.eq_ignore_ascii_case("stylesheet")).unwrap_or(false);
+            if is_stylesheet {
+                if let Some(href) = attributes.get("href") {
+                    out.push(CssSource::Link(href.clone()));
+                }
+            }
+        }
+    }
+    for &child in &n.children {
+        collect_css_sources(dom, child, out);
+    }
+}
+
+/// Resolves every CSS source in `dom` (rooted at `root`) into one cascaded
+/// [`Stylesheet`]: [`BASE_STYLESHEET_SRC`] first, then each `<style>`/
+/// `<link>` source in document order — a `<link>` whose href isn't an
+/// absolute `http(s)://` URL is silently skipped (see the module doc's
+/// scope cut), matching `resolve_html`'s own "best-effort, never panics
+/// on a real page" stance rather than failing the whole page load over
+/// one bad stylesheet reference.
+fn build_stylesheet(dom: &Dom, root: NodeId) -> Stylesheet {
+    let mut sources = Vec::new();
+    collect_css_sources(dom, root, &mut sources);
+
+    let mut sheet = parse_stylesheet(BASE_STYLESHEET_SRC);
+    for source in sources {
+        let css_text = match source {
+            CssSource::Inline(text) => Some(text),
+            CssSource::Link(href) if href.starts_with("http://") || href.starts_with("https://") => {
+                net::get(&href).ok().map(|response| String::from_utf8_lossy(&response.body).into_owned())
+            }
+            CssSource::Link(_) => None,
+        };
+        if let Some(css_text) = css_text {
+            sheet.rules.extend(parse_stylesheet(&css_text).rules);
+        }
+    }
+    sheet
+}
+
 /// What the currently loaded page came from - re-resolved on `RELOAD`.
 enum PageSource {
     Demo,
@@ -121,12 +189,16 @@ fn resolve_html(source: &PageSource) -> Result<String, String> {
     }
 }
 
-/// One (re)loadable "page": the parsed DOM's root `<html>` element plus
-/// the JS context mutating it. Rebuilt from scratch on every navigation/
-/// reload, same as a real navigation resetting a page's JS state.
+/// One (re)loadable "page": the parsed DOM's root `<html>` element, its
+/// own resolved stylesheet (base + whatever `<style>`/`<link>` sources it
+/// contributed), and the JS context mutating it. Rebuilt from scratch on
+/// every navigation/reload, same as a real navigation resetting a page's
+/// JS state (and its stylesheet — a page's CSS doesn't survive its own
+/// reload any more than its JS does, matching real navigation).
 struct Page<'rt> {
     ctx: Context<'rt>,
     html_el: NodeId,
+    sheet: Stylesheet,
 }
 
 impl<'rt> Page<'rt> {
@@ -135,11 +207,12 @@ impl<'rt> Page<'rt> {
     /// `#counter` element for `DEMO_SCRIPT` to find.
     fn load(runtime: &'rt Runtime, html: &str, run_demo_script: bool) -> Self {
         let (dom, html_el) = html::parse_to_html_element(html);
+        let sheet = build_stylesheet(&dom, html_el);
         let ctx = Context::with_dom(runtime, dom);
         if run_demo_script {
             let _ = ctx.eval(DEMO_SCRIPT, "<profile-worker demo>");
         }
-        Page { ctx, html_el }
+        Page { ctx, html_el, sheet }
     }
 
     /// Re-layouts and re-rasterizes from the DOM's *current* state (which
@@ -148,9 +221,9 @@ impl<'rt> Page<'rt> {
     /// real GPU device/adapter, expensive enough that doing it every tick
     /// would itself become the vsync loop's bottleneck instead of the
     /// fixed frame interval.
-    fn render(&self, sheet: &Stylesheet, renderer: &GpuRenderer, width: u32, height: u32) -> Vec<u8> {
+    fn render(&self, renderer: &GpuRenderer, width: u32, height: u32) -> Vec<u8> {
         let dom = self.ctx.dom().expect("Page always constructs its Context via with_dom");
-        let mut tree = build_box_tree(dom, self.html_el, sheet).expect("parsed HTML always produces a box");
+        let mut tree = build_box_tree(dom, self.html_el, &self.sheet).expect("parsed HTML always produces a box");
         layout_block(&mut tree, width as f64, 0.0, 0.0);
 
         let rects = build_display_list(&tree);
@@ -192,18 +265,13 @@ fn main() {
     let width: u32 = args[2].parse().expect("width must be a positive integer");
     let height: u32 = args[3].parse().expect("height must be a positive integer");
 
-    let sheet = parse_stylesheet(
-        "#container { background-color: #1a1c2b; padding: 20px; } \
-         p { color: #ffffff; font-size: 24px; }",
-    );
-
     let runtime = Runtime::new();
     let mut current_source = PageSource::Demo;
     let (mut page, _) = load_source(&runtime, &current_source);
     let renderer = GpuRenderer::new();
 
     let mut writer = ipc::FrameWriter::new(shmem_name, width, height).expect("failed to create/open shared memory");
-    writer.publish(&page.render(&sheet, &renderer, width, height));
+    writer.publish(&page.render(&renderer, width, height));
 
     // Commands arrive on a dedicated thread so a slow/absent stdin stream
     // never blocks the render loop below - `try_recv` drains whatever's
@@ -231,7 +299,7 @@ fn main() {
             } else if line == "RELOAD" {
                 let (loaded, error) = load_source(&runtime, &current_source);
                 page = loaded;
-                writer.publish(&page.render(&sheet, &renderer, width, height));
+                writer.publish(&page.render(&renderer, width, height));
                 match error {
                     Some(message) => {
                         let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
@@ -245,7 +313,7 @@ fn main() {
                 current_source = PageSource::Url(url.trim().to_string());
                 let (loaded, error) = load_source(&runtime, &current_source);
                 page = loaded;
-                writer.publish(&page.render(&sheet, &renderer, width, height));
+                writer.publish(&page.render(&renderer, width, height));
                 match error {
                     Some(message) => {
                         let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
@@ -261,7 +329,7 @@ fn main() {
         }
 
         page.ctx.run_pending_timers();
-        writer.publish(&page.render(&sheet, &renderer, width, height));
+        writer.publish(&page.render(&renderer, width, height));
 
         // Fixed-cadence scheduling, not `sleep(FRAME_INTERVAL)` in a loop -
         // that drifts by however long each tick's own work took. If a tick

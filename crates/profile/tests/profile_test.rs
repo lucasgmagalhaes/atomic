@@ -1,4 +1,35 @@
+use std::io::{Read, Write};
+
 use profile::Profile;
+
+/// Starts a tiny real HTTP/1.1 server on loopback serving `html` to
+/// exactly one request, then shuts down - a real server (genuine
+/// `TcpListener`, genuine HTTP response bytes over a real socket), not a
+/// mock, and doesn't depend on external network content staying stable.
+fn serve_html_once(html: &str) -> std::net::SocketAddr {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("failed to bind a loopback test server");
+    let addr = listener.local_addr().unwrap();
+    let body = html.to_string();
+    std::thread::spawn(move || {
+        if let Ok((mut stream, _)) = listener.accept() {
+            // Drain the client's request before responding - writing a
+            // response without ever reading the request risks the OS
+            // resetting the connection out from under the client (seen as
+            // a "SendRequest" error on hyper's side) instead of a clean
+            // request/response exchange.
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(response.as_bytes());
+            let _ = stream.flush();
+        }
+    });
+    addr
+}
 
 fn unique_shmem_name(tag: &str) -> String {
     let nanos = std::time::SystemTime::now()
@@ -93,6 +124,56 @@ fn navigate_fetches_a_real_page_and_renders_its_content() {
     // nothing like the dark demo page - pixels should visibly differ.
     let frame_after = profile.latest_frame().unwrap();
     assert_ne!(frame_before, frame_after);
+
+    profile.quit();
+}
+
+#[test]
+fn navigate_applies_a_real_style_block_extracted_from_the_fetched_page() {
+    let html = r#"<div id="box">hi</div><style>#box { background-color: #00ff00; width: 300px; height: 150px; }</style>"#;
+    let addr = serve_html_once(html);
+    let url = format!("http://{addr}/");
+
+    let name = unique_shmem_name("style-extract");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let result = profile.navigate(&url).expect("protocol should not fail");
+    assert!(result.is_ok(), "navigate should succeed against a real local server: {result:?}");
+
+    let pixels = profile.latest_frame().unwrap();
+    let top_left = &pixels[0..4];
+    assert_eq!(
+        top_left,
+        &[0, 255, 0, 255],
+        "the extracted <style> block's background-color should have painted the div's box green, got {top_left:?}"
+    );
+
+    profile.quit();
+}
+
+#[test]
+fn navigate_fetches_a_linked_stylesheet_and_applies_it() {
+    let css_addr = serve_html_once("#box { background-color: #ff00ff; width: 300px; height: 150px; }");
+    let css_url = format!("http://{css_addr}/style.css");
+    let html = format!(r#"<div id="box">hi</div><link rel="stylesheet" href="{css_url}">"#);
+    let page_addr = serve_html_once(&html);
+    let page_url = format!("http://{page_addr}/");
+
+    let name = unique_shmem_name("link-extract");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let result = profile.navigate(&page_url).expect("protocol should not fail");
+    assert!(result.is_ok(), "navigate should succeed: {result:?}");
+
+    let pixels = profile.latest_frame().unwrap();
+    let top_left = &pixels[0..4];
+    assert_eq!(
+        top_left,
+        &[255, 0, 255, 255],
+        "the fetched <link> stylesheet's background-color should have painted the div's box magenta, got {top_left:?}"
+    );
 
     profile.quit();
 }

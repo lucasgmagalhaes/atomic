@@ -80,6 +80,9 @@ struct NimbleApp {
     /// section.
     vault_key_text: String,
     vault_value_text: String,
+    /// Set by a failed `profile::Profile::set_fps_cap` call - independent
+    /// of `vault_error`, shown in the same Settings window.
+    performance_error: Option<String>,
 }
 
 const SPARKLINE_HEIGHT: f32 = 24.0;
@@ -163,6 +166,7 @@ impl Default for NimbleApp {
             settings_open: false,
             vault_key_text: String::new(),
             vault_value_text: String::new(),
+            performance_error: None,
         }
     }
 }
@@ -217,11 +221,33 @@ impl NimbleApp {
                 let id = self.next_pane_id();
                 self.panes.push(spawn_pane(&mut self.workspace, id));
             }
+            self.apply_fps_cap_to_all_panes();
         } else if visible.len() > count {
             let mut to_close: Vec<usize> = visible[count..].to_vec();
             to_close.sort_unstable_by(|a, b| b.cmp(a)); // descending
             for index in to_close {
                 self.close_pane(index);
+            }
+        }
+    }
+
+    /// Applies `self.performance.fps_cap` (if set) to every live pane's
+    /// real worker process via `profile::Profile::set_fps_cap` - called
+    /// whenever the cap changes and after spawning any new pane, so a
+    /// newly grown/duplicated pane picks up whatever cap is already
+    /// active instead of silently running uncapped. `fps_cap: None` is a
+    /// no-op (an already-running worker keeps whatever cap it last had -
+    /// there's no `profile-worker` command to explicitly clear one back to
+    /// its default).
+    fn apply_fps_cap_to_all_panes(&mut self) {
+        let Some(fps) = self.performance.fps_cap else { return };
+        for pane in &mut self.panes {
+            if let Some(profile) = pane.browser.profile_mut() {
+                match profile.set_fps_cap(fps) {
+                    Ok(Ok(())) => self.performance_error = None,
+                    Ok(Err(message)) => self.performance_error = Some(message),
+                    Err(io_error) => self.performance_error = Some(io_error.to_string()),
+                }
             }
         }
     }
@@ -377,6 +403,7 @@ impl NimbleApp {
             pane.history.record(url);
         }
         self.panes.push(pane);
+        self.apply_fps_cap_to_all_panes();
     }
 
     /// Moves `self.panes[index]`'s id to the workspace at `workspace_index`
@@ -548,7 +575,23 @@ impl eframe::App for NimbleApp {
             egui::Window::new("Settings").open(&mut open).show(ctx, |ui| {
                 ui.heading("Performance");
                 ui.add(egui::Slider::new(&mut self.performance.max_panes, 1..=6).text("Max live panes"));
-                ui.label("Background throttling / GPU selection / per-pane frame cap: not implemented yet - profile-worker's vsync loop has no command for any of those (fixed TARGET_FPS since spawn).");
+
+                let mut capped = self.performance.fps_cap.is_some();
+                let mut fps_changed = false;
+                if ui.checkbox(&mut capped, "Cap frame rate").changed() {
+                    self.performance.fps_cap = if capped { Some(30) } else { None };
+                    fps_changed = capped; // unchecking leaves the last cap in place on the worker (see apply_fps_cap_to_all_panes's doc) - nothing to (re)apply
+                }
+                if let Some(fps) = &mut self.performance.fps_cap {
+                    fps_changed |= ui.add(egui::Slider::new(fps, 1..=60).text("Max FPS per pane")).changed();
+                }
+                if fps_changed {
+                    self.apply_fps_cap_to_all_panes();
+                }
+                if let Some(error) = &self.performance_error {
+                    ui.colored_label(egui::Color32::RED, error);
+                }
+                ui.label("Real: applies live to every running pane's own vsync loop (profile::Profile::set_fps_cap). Background throttling (pausing hidden panes) and GPU selection: not implemented yet - no equivalent command/hook exists for either.");
 
                 ui.separator();
                 ui.heading("Credentials");

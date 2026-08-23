@@ -620,7 +620,12 @@ fn main() {
     });
 
     let mut stdout = io::stdout();
-    let mut next_tick = Instant::now() + FRAME_INTERVAL;
+    // Mutable, runtime-adjustable cap for the mockup's "Settings >
+    // Performance > frame cap" knob (see `SET_FPS_CAP` below) - starts at
+    // the fixed `FRAME_INTERVAL` this loop always used before that command
+    // existed, so a caller that never sends it gets identical behavior.
+    let mut frame_interval = FRAME_INTERVAL;
+    let mut next_tick = Instant::now() + frame_interval;
 
     'render_loop: loop {
         while let Ok(line) = cmd_rx.try_recv() {
@@ -682,6 +687,17 @@ fn main() {
                     }
                 }
                 let _ = stdout.flush();
+            } else if let Some(rest) = line.strip_prefix("SET_FPS_CAP ") {
+                match rest.trim().parse::<u32>() {
+                    Ok(fps) if fps >= 1 => {
+                        frame_interval = Duration::from_nanos(1_000_000_000 / fps as u64);
+                        let _ = writeln!(stdout, "FPS_CAP_SET {fps}");
+                    }
+                    _ => {
+                        let _ = writeln!(stdout, "ERROR fps cap must be a positive integer");
+                    }
+                }
+                let _ = stdout.flush();
             } else if line == "QUIT" {
                 break 'render_loop;
             }
@@ -690,17 +706,19 @@ fn main() {
         page.ctx.run_pending_timers();
         writer.publish(&page.render(&renderer, width, height));
 
-        // Fixed-cadence scheduling, not `sleep(FRAME_INTERVAL)` in a loop -
+        // Fixed-cadence scheduling, not `sleep(frame_interval)` in a loop -
         // that drifts by however long each tick's own work took. If a tick
         // ran long enough to miss its slot entirely, resync to now rather
         // than trying to render the missed frames back-to-back (a real
         // vsync loop drops frames under load; it doesn't queue them up).
+        // `frame_interval` is read fresh each tick, not captured once, so a
+        // `SET_FPS_CAP` takes effect on the very next tick.
         let now = Instant::now();
         if next_tick > now {
             thread::sleep(next_tick - now);
-            next_tick += FRAME_INTERVAL;
+            next_tick += frame_interval;
         } else {
-            next_tick = now + FRAME_INTERVAL;
+            next_tick = now + frame_interval;
         }
     }
 }

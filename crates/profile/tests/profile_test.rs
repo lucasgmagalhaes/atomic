@@ -406,6 +406,40 @@ fn frame_generation_advances_on_its_own_without_any_reload() {
 }
 
 #[test]
+fn set_fps_cap_actually_slows_down_the_render_loops_own_cadence() {
+    let name = unique_shmem_name("fps-cap");
+    let mut profile = Profile::spawn(worker_path(), &name, 32, 32).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let result = profile.set_fps_cap(5).expect("protocol should not fail against a live worker");
+    assert!(result.is_ok(), "a positive fps cap should be accepted: {result:?}");
+
+    let gen0 = profile.frame_generation();
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    let gen1 = profile.frame_generation();
+
+    // At 5fps, 400ms should produce roughly 2 new frames, nowhere near the
+    // ~24 a real ~60fps loop would - proves SET_FPS_CAP actually reached
+    // the render loop's own scheduling, not just returned success.
+    let advanced = gen1 - gen0;
+    assert!(advanced <= 4, "capped loop should advance only a couple frames in 400ms, got {advanced} ({gen0} -> {gen1})");
+
+    profile.quit();
+}
+
+#[test]
+fn set_fps_cap_rejects_a_non_positive_value() {
+    let name = unique_shmem_name("fps-cap-invalid");
+    let mut profile = Profile::spawn(worker_path(), &name, 32, 32).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let result = profile.set_fps_cap(0).expect("protocol should not fail against a live worker");
+    assert!(result.is_err(), "a zero fps cap should be rejected, not silently accepted");
+
+    profile.quit();
+}
+
+#[test]
 fn js_timers_pumped_by_the_loop_visibly_change_rendered_pixels() {
     let name = unique_shmem_name("vsync-js");
     // Large enough that the counter paragraph's text actually lands inside

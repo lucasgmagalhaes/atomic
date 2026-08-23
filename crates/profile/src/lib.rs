@@ -259,6 +259,25 @@ impl Profile {
         }
     }
 
+    /// Caps the worker's own vsync render loop at `fps` frames per second
+    /// (the mockup's "Settings > Performance > frame cap" knob) - takes
+    /// effect on the worker's very next tick, not a respawn (unlike the
+    /// proxy/DNS settings, which are fixed at spawn time - the render loop
+    /// itself has no equivalent "set once" constraint, so this is real live
+    /// throttling of an already-running profile). `Ok(Err(message))` if
+    /// `fps` isn't a positive integer the worker accepted.
+    pub fn set_fps_cap(&mut self, fps: u32) -> std::io::Result<Result<(), String>> {
+        writeln!(self.stdin, "SET_FPS_CAP {fps}")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        let line = line.trim();
+        match line.strip_prefix("ERROR ") {
+            Some(message) => Ok(Err(message.to_string())),
+            None => Ok(Ok(())),
+        }
+    }
+
     /// The most recently published frame's raw RGBA8 pixels, or `None` if
     /// the worker hasn't published one yet.
     pub fn latest_frame(&self) -> Option<Vec<u8>> {

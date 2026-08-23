@@ -1,6 +1,8 @@
-//! `pane("name")` → a `Pane` object with `goto(url)` (real) and
-//! `fill(selector, value)`/`click(selector)` (stubbed — throw, don't
-//! no-op; see this crate's top-level doc). Mirrors `js-runtime`'s
+//! `pane("name")` → a `Pane` object with `goto(url)`, `click(selector)`,
+//! and `fill(selector, value)`, all real (see this crate's top-level doc
+//! for the two scope cuts that carry through from `profile-worker`'s own
+//! protocol: `#id`-only selectors, `fill` setting `textContent` not a real
+//! `.value`). Mirrors `js-runtime`'s
 //! `dom_bindings::Node` class pattern: a custom quickjs class whose opaque
 //! data is a boxed pane name, resolved back to a `profile::Profile` via the
 //! context's opaque slot (set once in `register`, pointing at
@@ -93,25 +95,50 @@ unsafe extern "C" fn pane_goto(
 
 unsafe extern "C" fn pane_fill(
     ctx: *mut sys::JSContext,
-    _this_val: sys::JSValue,
-    _argc: c_int,
-    _argv: *mut sys::JSValue,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-    // `profile-worker`'s stdin protocol has no form-input command yet (only
-    // PING/RELOAD/NAVIGATE/QUIT — see the spec's own gap on input sync
-    // between panes, CLAUDE.md line 252). Throwing here instead of
-    // pretending this worked, matching this repo's "no fake success"
-    // convention.
-    throw(ctx, "pane.fill: not implemented — profile-worker has no input-injection command yet")
+    if argc < 2 {
+        return throw(ctx, "pane.fill(selector, value) requires a selector and a value");
+    }
+    let Some(selector) = read_js_string(ctx, *argv) else {
+        return throw(ctx, "pane.fill(selector, value): selector must be a string");
+    };
+    let Some(value) = read_js_string(ctx, *argv.add(1)) else {
+        return throw(ctx, "pane.fill(selector, value): value must be a string");
+    };
+    let class_id = PANE_CLASS_ID.load(std::sync::atomic::Ordering::Relaxed);
+    // Only `#id` selectors and a `textContent` assignment, not a real
+    // `HTMLInputElement.value` — see `profile-worker`'s own doc on the
+    // `FILL` command for why.
+    match with_pane(ctx, class_id, this_val, |profile| profile.fill(&selector, &value)) {
+        Ok(Ok(Ok(()))) => sys::js_undefined(),
+        Ok(Ok(Err(message))) => throw(ctx, &format!("pane.fill failed: {message}")),
+        Ok(Err(io_err)) => throw(ctx, &format!("pane.fill: worker unreachable: {io_err}")),
+        Err(message) => throw(ctx, &message),
+    }
 }
 
 unsafe extern "C" fn pane_click(
     ctx: *mut sys::JSContext,
-    _this_val: sys::JSValue,
-    _argc: c_int,
-    _argv: *mut sys::JSValue,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-    throw(ctx, "pane.click: not implemented — profile-worker has no input-injection command yet")
+    if argc < 1 {
+        return throw(ctx, "pane.click(selector) requires a selector");
+    }
+    let Some(selector) = read_js_string(ctx, *argv) else {
+        return throw(ctx, "pane.click(selector): selector must be a string");
+    };
+    let class_id = PANE_CLASS_ID.load(std::sync::atomic::Ordering::Relaxed);
+    match with_pane(ctx, class_id, this_val, |profile| profile.click(&selector)) {
+        Ok(Ok(Ok(()))) => sys::js_undefined(),
+        Ok(Ok(Err(message))) => throw(ctx, &format!("pane.click failed: {message}")),
+        Ok(Err(io_err)) => throw(ctx, &format!("pane.click: worker unreachable: {io_err}")),
+        Err(message) => throw(ctx, &message),
+    }
 }
 
 /// Registers the `Pane` class on `ctx`'s runtime (if not already done for

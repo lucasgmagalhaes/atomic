@@ -52,12 +52,15 @@ fn pane_name_not_in_the_active_workspace_throws_no_pane_named() {
 }
 
 #[test]
-fn fill_and_click_still_throw_through_the_bridge() {
+fn fill_and_click_reach_the_real_demo_page_through_the_bridge() {
     let workspace = workspace_with_main_pane_registered();
     let mut browser = BrowserView::spawn(200, 150);
 
-    assert!(run_script(&workspace, &mut browser, &format!(r##"pane("{MAIN_PANE_ID}").fill("#user", "x")"##)).is_err());
-    assert!(run_script(&workspace, &mut browser, &format!(r##"pane("{MAIN_PANE_ID}").click("#submit")"##)).is_err());
+    // BrowserView's freshly spawned profile is showing profile-worker's
+    // built-in demo page, which has a real `#counter` element.
+    assert!(run_script(&workspace, &mut browser, &format!(r##"pane("{MAIN_PANE_ID}").fill("#counter", "x")"##)).is_ok());
+    assert!(run_script(&workspace, &mut browser, &format!(r##"pane("{MAIN_PANE_ID}").click("#counter")"##)).is_ok());
+    assert!(run_script(&workspace, &mut browser, &format!(r##"pane("{MAIN_PANE_ID}").fill("#does-not-exist", "x")"##)).is_err());
 }
 
 #[test]

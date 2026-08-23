@@ -174,6 +174,49 @@ impl Profile {
         }
     }
 
+    /// Dispatches a real `"click"` event at the element with id `selector`
+    /// (only `#id` is accepted — see `profile-worker`'s own doc on why).
+    /// `Ok(Ok(()))` means it dispatched (a page-attached `"click"` listener,
+    /// if any, actually ran); `Ok(Err(message))` means the worker is still
+    /// alive but the click itself failed (no such id, or `selector` wasn't
+    /// `#id`-shaped). The outer `io::Result` only covers the protocol
+    /// itself failing (a dead worker, a broken pipe) — same convention as
+    /// [`navigate`](Self::navigate).
+    pub fn click(&mut self, selector: &str) -> std::io::Result<Result<(), String>> {
+        writeln!(self.stdin, "CLICK {selector}")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        let line = line.trim();
+        match line.strip_prefix("ERROR ") {
+            Some(message) => Ok(Err(message.to_string())),
+            None => Ok(Ok(())),
+        }
+    }
+
+    /// Sets the `#id` element's `textContent` to `value` — see
+    /// `profile-worker`'s own doc on why this is a deviation from a real
+    /// `HTMLInputElement.value` assignment (this engine has no such
+    /// property), not an equivalent of one. `value` must not contain a
+    /// newline (this crate's stdin/stdout protocol is newline-delimited —
+    /// see this struct's own doc comment); a value that does never reaches
+    /// the worker, reported the same way a worker-side failure would be
+    /// rather than corrupting the command stream.
+    pub fn fill(&mut self, selector: &str, value: &str) -> std::io::Result<Result<(), String>> {
+        if value.contains('\n') {
+            return Ok(Err("fill value must not contain a newline".to_string()));
+        }
+        writeln!(self.stdin, "FILL {selector} {value}")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        let line = line.trim();
+        match line.strip_prefix("ERROR ") {
+            Some(message) => Ok(Err(message.to_string())),
+            None => Ok(Ok(())),
+        }
+    }
+
     /// The most recently published frame's raw RGBA8 pixels, or `None` if
     /// the worker hasn't published one yet.
     pub fn latest_frame(&self) -> Option<Vec<u8>> {

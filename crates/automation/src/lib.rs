@@ -6,16 +6,18 @@
 //! scripts are already JS (`pane.goto`, `pane.fill`, `pane.click`,
 //! `every()`, `on()`).
 //!
-//! Scope of this pass: wiring, not full coverage. `pane.goto` is real (maps
-//! to `profile::Profile::navigate`). `pane.fill`/`pane.click` are not —
-//! `profile-worker`'s stdin protocol only understands
-//! `PING`/`RELOAD`/`NAVIGATE`/`QUIT` (see `profile::Profile`'s doc comment
-//! and the spec's own gap on line 252, input sync between panes), so they
-//! throw a JS exception naming the missing protocol command instead of
-//! silently no-opping. `every()` is a plain alias for the already-real
-//! `setInterval` (js-runtime's `timers` module) rather than a new
-//! primitive. `on`/`emit` and `cron` are real, host-driven event/schedule
-//! primitives — see `events` and `cron` modules.
+//! `pane.goto`/`pane.click`/`pane.fill` are all real now (map to
+//! `profile::Profile::navigate`/`click`/`fill`, which drive new `NAVIGATE`/
+//! `CLICK`/`FILL` commands in `profile-worker`'s stdin protocol — see that
+//! binary's own doc comment). Two real scope cuts carried through from
+//! there, not this crate's own: only `#id` selectors are supported (this
+//! engine has no CSS selector query beyond `dom::Dom::find_by_id`), and
+//! `fill` sets `textContent` rather than a real `HTMLInputElement.value`
+//! (this engine has no such property at all). `every()` is a plain alias
+//! for the already-real `setInterval` (js-runtime's `timers` module)
+//! rather than a new primitive. `on`/`emit` and `cron` are real,
+//! host-driven event/schedule primitives — see `events` and `cron`
+//! modules.
 mod cron;
 mod events;
 mod pane;

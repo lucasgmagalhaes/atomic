@@ -78,7 +78,7 @@ fn pane_goto_reaches_a_real_profile() {
 }
 
 #[test]
-fn pane_fill_and_click_throw_instead_of_silently_succeeding() {
+fn pane_fill_and_click_reach_a_real_element_on_the_demo_page() {
     let mut profile = spawn_demo_profile("nimble-automation-test-2");
     let mut panes = HashMap::new();
     panes.insert("acc1".to_string(), &mut profile);
@@ -86,8 +86,29 @@ fn pane_fill_and_click_throw_instead_of_silently_succeeding() {
     let runtime = Runtime::new();
     let engine = AutomationEngine::new(&runtime, panes);
 
-    assert!(engine.run(r##"pane("acc1").fill("#user", "x")"##, "test.js").is_err());
-    assert!(engine.run(r##"pane("acc1").click("#submit")"##, "test.js").is_err());
+    // The built-in demo page (see `profile-worker`'s `DEMO_HTML`) has a
+    // real `#counter` element - fill sets its textContent for real, click
+    // dispatches for real (no listener attached to it, so nothing visibly
+    // happens, but dispatch still succeeds rather than throwing).
+    assert!(engine.run(r##"pane("acc1").fill("#counter", "hello from automation")"##, "test.js").is_ok());
+    assert!(engine.run(r##"pane("acc1").click("#counter")"##, "test.js").is_ok());
+}
+
+#[test]
+fn pane_fill_and_click_throw_on_an_unknown_id_or_selector() {
+    let mut profile = spawn_demo_profile("nimble-automation-test-3");
+    let mut panes = HashMap::new();
+    panes.insert("acc1".to_string(), &mut profile);
+
+    let runtime = Runtime::new();
+    let engine = AutomationEngine::new(&runtime, panes);
+
+    assert!(engine.run(r##"pane("acc1").fill("#does-not-exist", "x")"##, "test.js").is_err());
+    assert!(engine.run(r##"pane("acc1").click("#does-not-exist")"##, "test.js").is_err());
+    // Only `#id` selectors are implemented (see this crate's top-level
+    // doc) - a class/tag selector is rejected up front, not silently
+    // matched against nothing.
+    assert!(engine.run(r##"pane("acc1").click(".not-an-id-selector")"##, "test.js").is_err());
 }
 
 #[test]

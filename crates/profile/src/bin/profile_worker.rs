@@ -53,9 +53,22 @@
 //!   URL, network error, ...) — either way an in-page error message is
 //!   rendered too, not just reported over the protocol, so the frame
 //!   itself never silently goes stale
+//! - `CLICK <#id>` -> dispatches a real `"click"` event (via the existing
+//!   `Node.prototype.dispatchEvent` JS binding) at the element with that
+//!   id; replies `CLICKED` or `ERROR <message>` (no such id, or only
+//!   `#id` selectors are supported at all — this engine has no general
+//!   CSS selector query beyond `dom::Dom::find_by_id`)
+//! - `FILL <#id> <value>` -> sets that element's `textContent` to `value`
+//!   and replies `FILLED`/`ERROR <message>` the same way. A real
+//!   `<input>`'s `value` is a distinct property from its children/text -
+//!   this engine models neither `HTMLInputElement` nor a `value` property
+//!   at all yet, so `textContent` is the closest existing primitive
+//!   (`js-runtime`'s only settable DOM string), not a faithful `.value`
+//!   assignment. `value` may not contain a newline (this protocol is
+//!   newline-delimited) - `profile::Profile::fill` rejects that before it
+//!   would corrupt the stream.
 //! - `QUIT` -> exits cleanly
-//! - anything else -> ignored (unrecognized commands are not an error;
-//!   real input commands beyond navigation aren't implemented yet)
+//! - anything else -> ignored
 use std::io::{self, BufRead, Write};
 use std::sync::mpsc;
 use std::thread;
@@ -348,6 +361,73 @@ fn resolve_html(source: &PageSource, storage_root: &std::path::Path, proxy: Opti
     }
 }
 
+/// Only `#id` selectors are supported for `CLICK`/`FILL` — this engine has
+/// no CSS selector query beyond `dom::Dom::find_by_id` (no `css`-backed
+/// `querySelector`, no class/attribute/descendant matching against a live
+/// `Dom`). Rejects any other form up front rather than silently matching
+/// nothing.
+fn require_id_selector(selector: &str) -> Result<&str, String> {
+    selector
+        .strip_prefix('#')
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| format!("unsupported selector \"{selector}\" - only #id selectors are implemented"))
+}
+
+/// A valid JS double-quoted string literal for `s` - just enough escaping
+/// to safely embed an arbitrary Rust string (an id, an error message, a
+/// fill value) into the small JS snippets `dispatch_click`/`fill_element`
+/// build and eval, without a real `JS_NewStringLen`-based binding for
+/// "call this method with this string argument" existing yet (the only
+/// public entry point into a `Context` is `eval(source)` - see that
+/// method's own doc).
+fn js_string_literal(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            _ => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// Dispatches a real `"click"` event at the `#id` element via the
+/// already-real `Node.prototype.dispatchEvent` JS binding - if the page's
+/// own script attached a `"click"` listener via `addEventListener`, it
+/// actually runs. `Err` covers both "no such id" and the listener itself
+/// throwing - `js_runtime::Context::eval`'s own placeholder exception
+/// message (see its doc comment) can't currently distinguish the two, so
+/// this reports the more actionable one.
+fn dispatch_click(ctx: &Context, selector: &str) -> Result<(), String> {
+    let id = require_id_selector(selector)?;
+    let script = format!(
+        "(function(){{ var el = document.getElementById({id}); if (el === null) throw {missing}; el.dispatchEvent(\"click\"); }})();",
+        id = js_string_literal(id),
+        missing = js_string_literal(&format!("no element with id \"{id}\"")),
+    );
+    ctx.eval(&script, "<pane click>").map(|_| ()).map_err(|_| format!("no element with id \"{id}\" (or its click handler threw)"))
+}
+
+/// Sets the `#id` element's `textContent` to `value` via the existing
+/// `Node.prototype.textContent` setter — see this file's own doc comment
+/// on the `FILL` command for why that's a deviation from a real
+/// `HTMLInputElement.value` assignment, not an equivalent of one.
+fn fill_element(ctx: &Context, selector: &str, value: &str) -> Result<(), String> {
+    let id = require_id_selector(selector)?;
+    let script = format!(
+        "(function(){{ var el = document.getElementById({id}); if (el === null) throw {missing}; el.textContent = {value}; }})();",
+        id = js_string_literal(id),
+        missing = js_string_literal(&format!("no element with id \"{id}\"")),
+        value = js_string_literal(value),
+    );
+    ctx.eval(&script, "<pane fill>").map(|_| ()).map_err(|_| format!("no element with id \"{id}\""))
+}
+
 /// One (re)loadable "page": the parsed DOM's root `<html>` element, its
 /// own resolved stylesheet (base + whatever `<style>`/`<link>` sources it
 /// contributed), and the JS context mutating it. Rebuilt from scratch on
@@ -543,6 +623,33 @@ fn main() {
                     }
                     None => {
                         let _ = writeln!(stdout, "NAVIGATED");
+                    }
+                }
+                let _ = stdout.flush();
+            } else if let Some(rest) = line.strip_prefix("CLICK ") {
+                let result = dispatch_click(&page.ctx, rest.trim());
+                writer.publish(&page.render(&renderer, width, height));
+                match result {
+                    Ok(()) => {
+                        let _ = writeln!(stdout, "CLICKED");
+                    }
+                    Err(message) => {
+                        let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
+                    }
+                }
+                let _ = stdout.flush();
+            } else if let Some(rest) = line.strip_prefix("FILL ") {
+                let mut parts = rest.splitn(2, ' ');
+                let selector = parts.next().unwrap_or("").trim();
+                let value = parts.next().unwrap_or("");
+                let result = fill_element(&page.ctx, selector, value);
+                writer.publish(&page.render(&renderer, width, height));
+                match result {
+                    Ok(()) => {
+                        let _ = writeln!(stdout, "FILLED");
+                    }
+                    Err(message) => {
+                        let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
                     }
                 }
                 let _ = stdout.flush();

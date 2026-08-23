@@ -9,6 +9,7 @@ use std::path::Path;
 use quickjs_sys as sys;
 
 mod blob;
+mod clipboard;
 mod crypto;
 mod document;
 mod document_cookie;
@@ -92,6 +93,7 @@ impl<'rt> Context<'rt> {
             local_storage_bindings::register(ptr);
             blob::register(ptr);
             notifications::register(ptr);
+            clipboard::register(ptr);
         };
         Context {
             ptr,

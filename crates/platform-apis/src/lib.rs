@@ -8,9 +8,10 @@ pub fn fill_random(buf: &mut [u8]) -> Result<(), getrandom::Error> {
 }
 
 /// Real OS clipboard access via `arboard` (Win32 clipboard / X11-or-
-/// Wayland / NSPasteboard under the hood) — backs the future
-/// `navigator.clipboard` binding in `js-runtime`, not wired up yet.
-/// Text only, matching `Clipboard.readText`/`writeText`; no images/HTML.
+/// Wayland / NSPasteboard under the hood) — backs `navigator.clipboard.
+/// writeText`/`readText` in `js-runtime` (`crates/js-runtime/src/
+/// clipboard.rs`). Text only, matching `Clipboard.readText`/`writeText`;
+/// no images/HTML.
 pub fn clipboard_write_text(text: &str) -> Result<(), arboard::Error> {
     arboard::Clipboard::new()?.set_text(text)
 }

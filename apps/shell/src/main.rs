@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use shell::automation_bridge;
 use shell::browser_view::BrowserView;
+use shell::i18n::{self, Locale};
 use shell::tiling;
 use shell::workspace::WorkspaceManager;
 
@@ -42,6 +43,11 @@ struct NimbleApp {
     /// `Ok(result)` from the last automation script's top-level eval, or
     /// `Err(message)` if it raised. `None` before any script has run.
     automation_result: Option<Result<String, String>>,
+    /// The active UI language - see `shell::i18n`. Toggled via the EN/PT
+    /// buttons in the toolbar, applied immediately (every string is looked
+    /// up fresh each `update()` frame, so there's no restart/re-render step
+    /// needed).
+    locale: Locale,
 }
 
 /// Spawns one pane with the next positional id and registers it into the
@@ -66,6 +72,7 @@ impl Default for NimbleApp {
             workspace,
             automation_script: String::new(),
             automation_result: None,
+            locale: Locale::En,
         }
     }
 }
@@ -215,34 +222,41 @@ impl eframe::App for NimbleApp {
 
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.label("Panes:");
+                ui.label(i18n::t(i18n::PANES_LABEL, self.locale));
                 for count in [1, 2, 4, 6] {
                     if ui.selectable_label(self.panes.len() == count, count.to_string()).clicked() {
                         self.set_pane_count(count);
                     }
                 }
                 ui.separator();
-                ui.label(format!("Selected: {}", self.panes[self.selected].id));
-                if ui.button("Reload").clicked() {
+                if ui.selectable_label(self.locale == Locale::En, "EN").clicked() {
+                    self.locale = Locale::En;
+                }
+                if ui.selectable_label(self.locale == Locale::Pt, "PT").clicked() {
+                    self.locale = Locale::Pt;
+                }
+                ui.separator();
+                ui.label(i18n::fill(i18n::t(i18n::SELECTED_LABEL, self.locale), &[&self.panes[self.selected].id]));
+                if ui.button(i18n::t(i18n::RELOAD_BUTTON, self.locale)).clicked() {
                     self.panes[self.selected].browser.reload();
                 }
             });
             ui.horizontal(|ui| {
                 let address_bar = ui.add_sized(
                     [ui.available_width() - 8.0, ui.spacing().interact_size.y],
-                    egui::TextEdit::singleline(&mut self.address_bar_text).hint_text("Enter a URL for the selected pane and press Enter"),
+                    egui::TextEdit::singleline(&mut self.address_bar_text).hint_text(i18n::t(i18n::ADDRESS_BAR_HINT, self.locale)),
                 );
                 if address_bar.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     self.navigate_to_address_bar();
                 }
             });
             ui.horizontal(|ui| {
-                ui.label("Proxy (selected pane):");
+                ui.label(i18n::t(i18n::PROXY_LABEL, self.locale));
                 let proxy_field = ui.add_sized(
                     [220.0, ui.spacing().interact_size.y],
-                    egui::TextEdit::singleline(&mut self.proxy_text).hint_text("host:port (empty = none)"),
+                    egui::TextEdit::singleline(&mut self.proxy_text).hint_text(i18n::t(i18n::PROXY_HINT, self.locale)),
                 );
-                let apply_clicked = ui.button("Apply").clicked();
+                let apply_clicked = ui.button(i18n::t(i18n::APPLY_BUTTON, self.locale)).clicked();
                 let applied_via_enter = proxy_field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 if apply_clicked || applied_via_enter {
                     self.apply_proxy();
@@ -252,22 +266,20 @@ impl eframe::App for NimbleApp {
             if let Some(error) = selected.error() {
                 ui.colored_label(egui::Color32::RED, error);
             } else if let Some(error) = selected.navigation_error() {
-                ui.colored_label(egui::Color32::RED, format!("Failed to load {}: {error}", selected.current_url()));
+                let prefix = i18n::t(i18n::FAILED_TO_LOAD_PREFIX, self.locale);
+                ui.colored_label(egui::Color32::RED, format!("{prefix} {}: {error}", selected.current_url()));
             }
         });
 
         egui::TopBottomPanel::bottom("automation").show(ctx, |ui| {
-            ui.label(format!(
-                "Automation — pane names from the active workspace (\"{}\"): {}",
-                self.workspace.active().name,
-                self.panes.iter().map(|p| p.id.as_str()).collect::<Vec<_>>().join(", ")
-            ));
+            let pane_ids = self.panes.iter().map(|p| p.id.as_str()).collect::<Vec<_>>().join(", ");
+            ui.label(i18n::fill(i18n::t(i18n::AUTOMATION_HEADER, self.locale), &[&self.workspace.active().name, &pane_ids]));
             ui.add(
                 egui::TextEdit::multiline(&mut self.automation_script)
-                    .hint_text(r#"pane("pane-1").goto("https://example.com")"#)
+                    .hint_text(i18n::t(i18n::AUTOMATION_SCRIPT_HINT, self.locale))
                     .desired_rows(3),
             );
-            if ui.button("Run").clicked() {
+            if ui.button(i18n::t(i18n::RUN_BUTTON, self.locale)).clicked() {
                 self.run_automation_script();
             }
             match &self.automation_result {
@@ -385,7 +397,7 @@ impl eframe::App for NimbleApp {
                     let scale = (cell_rect.width() / image_size.x).min(cell_rect.height() / image_size.y).min(1.0);
                     cell_ui.put(cell_rect, egui::Image::new((texture.id(), image_size * scale)));
                 } else if pane.browser.error().is_none() {
-                    cell_ui.put(cell_rect, egui::Label::new("Starting profile process..."));
+                    cell_ui.put(cell_rect, egui::Label::new(i18n::t(i18n::STARTING_PROFILE, self.locale)));
                 }
 
                 let border_color = if index == self.selected { egui::Color32::LIGHT_BLUE } else { egui::Color32::DARK_GRAY };

@@ -1,9 +1,11 @@
 //! EN/PT string table for `apps/shell`'s UI (closes the "Interface i18n"
-//! spec gap). Standalone module: every string currently hardcoded in
-//! `main.rs`'s toolbar/panel is looked up here, but `main.rs` itself is
-//! NOT wired to call [`t`] yet - that's a deliberate follow-up pass, left
-//! out of scope here to avoid touching a file under concurrent edit
-//! elsewhere in this workspace.
+//! spec gap). `main.rs`'s toolbar/panel calls [`t`] (and [`fill`] for the
+//! two templates with `{}` placeholders) for every string listed below,
+//! selected by `NimbleApp.locale` and toggled live via EN/PT buttons in
+//! the toolbar - no restart needed, since every string is looked up fresh
+//! each frame. Still hardcoded in `main.rs`: the per-pane context menu's
+//! labels (Reload, Duplicate profile, ...) and the disabled Mute audio/Dev
+//! tools items - not migrated in this pass.
 //!
 //! No external i18n crate: the string set is small and fixed, so a plain
 //! match is both the simplest and the most idiomatic fit.
@@ -75,4 +77,16 @@ pub fn t(key: &str, locale: Locale) -> &str {
 
         (unknown, _) => unknown,
     }
+}
+
+/// Fills a `t`-style template's positional `{}` placeholders, left to
+/// right - a stand-in for `format!` (which needs a string literal, not a
+/// runtime `&str` from this table) that only needs to handle the small,
+/// fixed set of one/two-placeholder templates this table actually has.
+pub fn fill(template: &str, args: &[&str]) -> String {
+    let mut out = template.to_string();
+    for arg in args {
+        out = out.replacen("{}", arg, 1);
+    }
+    out
 }

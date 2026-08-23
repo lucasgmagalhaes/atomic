@@ -61,6 +61,65 @@ fn rect_to_vertices(rect: &Rect, viewport_width: f32, viewport_height: f32) -> [
     [tl, bl, tr, tr, bl, br]
 }
 
+/// One real GPU adapter's identity, for a caller (Settings > Performance
+/// > GPU) to show actual hardware options instead of fake ones. Mirrors
+/// the fields of `wgpu::AdapterInfo` this crate's callers actually need
+/// to display/distinguish adapters by, without leaking the `wgpu` type
+/// itself into every caller's dependency surface.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdapterInfo {
+    pub name: String,
+    /// e.g. "Vulkan", "Dx12", "Metal", "Gl" — `wgpu::Backend`'s own
+    /// `Display` impl, not reinvented here.
+    pub backend: String,
+    pub device_type: AdapterDeviceType,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdapterDeviceType {
+    DiscreteGpu,
+    IntegratedGpu,
+    VirtualGpu,
+    Cpu,
+    Other,
+}
+
+impl From<wgpu::DeviceType> for AdapterDeviceType {
+    fn from(dt: wgpu::DeviceType) -> Self {
+        match dt {
+            wgpu::DeviceType::DiscreteGpu => AdapterDeviceType::DiscreteGpu,
+            wgpu::DeviceType::IntegratedGpu => AdapterDeviceType::IntegratedGpu,
+            wgpu::DeviceType::VirtualGpu => AdapterDeviceType::VirtualGpu,
+            wgpu::DeviceType::Cpu => AdapterDeviceType::Cpu,
+            wgpu::DeviceType::Other => AdapterDeviceType::Other,
+        }
+    }
+}
+
+/// Real enumeration of every GPU adapter `wgpu` can see on this machine
+/// (`wgpu::Instance::enumerate_adapters` + each `Adapter::get_info()`) -
+/// not a fixed/fake list. Order matches what [`GpuRenderer::
+/// new_with_adapter`]'s `index` indexes into. Synchronous - enumeration
+/// itself doesn't need `request_adapter`'s async device negotiation.
+pub fn list_adapters() -> Vec<AdapterInfo> {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        backends: wgpu::Backends::PRIMARY,
+        ..Default::default()
+    });
+    instance
+        .enumerate_adapters(wgpu::Backends::PRIMARY)
+        .into_iter()
+        .map(|adapter| {
+            let info = adapter.get_info();
+            AdapterInfo {
+                name: info.name,
+                backend: info.backend.to_string(),
+                device_type: info.device_type.into(),
+            }
+        })
+        .collect()
+}
+
 pub struct GpuRenderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -69,22 +128,42 @@ pub struct GpuRenderer {
 
 impl GpuRenderer {
     pub fn new() -> Self {
-        pollster::block_on(Self::new_async())
+        pollster::block_on(Self::new_async(None))
     }
 
-    async fn new_async() -> Self {
+    /// Same as [`new`](Self::new), but opens the `index`-th adapter from
+    /// [`list_adapters`]'s own enumeration order instead of letting
+    /// `wgpu::Instance::request_adapter`'s default heuristic pick one -
+    /// the real primitive behind a GPU-selection setting. Panics (same
+    /// convention as `new`'s own `expect`s - this crate has no recovery
+    /// path for "no usable GPU" anywhere yet) if `index` is out of range
+    /// or that specific adapter fails to open a device.
+    pub fn new_with_adapter(index: usize) -> Self {
+        pollster::block_on(Self::new_async(Some(index)))
+    }
+
+    async fn new_async(adapter_index: Option<usize>) -> Self {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
             ..Default::default()
         });
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::default(),
-                compatible_surface: None,
-                force_fallback_adapter: false,
-            })
-            .await
-            .expect("no wgpu adapter available - this needs a GPU (or software fallback) on the host");
+        let adapter = match adapter_index {
+            Some(index) => {
+                let mut adapters = instance.enumerate_adapters(wgpu::Backends::PRIMARY);
+                if index >= adapters.len() {
+                    panic!("adapter index {index} out of range - only {} adapter(s) enumerated", adapters.len());
+                }
+                adapters.remove(index)
+            }
+            None => instance
+                .request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::default(),
+                    compatible_surface: None,
+                    force_fallback_adapter: false,
+                })
+                .await
+                .expect("no wgpu adapter available - this needs a GPU (or software fallback) on the host"),
+        };
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor::default(), None)
             .await

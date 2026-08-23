@@ -1,5 +1,5 @@
 use layout_engine::Color;
-use render::{GpuRenderer, Rect};
+use render::{list_adapters, GpuRenderer, Rect};
 
 fn pixel(pixels: &[u8], width: u32, x: u32, y: u32) -> [u8; 4] {
     let idx = ((y * width + x) * 4) as usize;
@@ -59,4 +59,24 @@ fn output_size_matches_requested_dimensions() {
     let pixels = renderer.render_to_rgba(&[], 5, 3, [1.0, 1.0, 1.0, 1.0]);
     assert_eq!(pixels.len(), 5 * 3 * 4);
     assert_eq!(pixel(&pixels, 5, 4, 2), [255, 255, 255, 255]);
+}
+
+#[test]
+fn list_adapters_returns_at_least_one_real_adapter_with_a_name() {
+    let adapters = list_adapters();
+    assert!(!adapters.is_empty(), "this machine should have at least one real wgpu adapter (GPU or software fallback)");
+    for adapter in &adapters {
+        assert!(!adapter.name.is_empty(), "a real adapter should report a non-empty name, got {adapter:?}");
+        assert!(!adapter.backend.is_empty(), "a real adapter should report a non-empty backend, got {adapter:?}");
+    }
+}
+
+#[test]
+fn new_with_adapter_opens_the_first_enumerated_adapter_and_renders_correctly() {
+    let adapters = list_adapters();
+    assert!(!adapters.is_empty());
+
+    let renderer = GpuRenderer::new_with_adapter(0);
+    let pixels = renderer.render_to_rgba(&[], 4, 4, [0.0, 1.0, 0.0, 1.0]);
+    assert_eq!(pixel(&pixels, 4, 0, 0), [0, 255, 0, 255], "explicit adapter selection should still render correctly");
 }

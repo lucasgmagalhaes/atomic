@@ -5,5 +5,5 @@ pub mod text;
 
 pub use canvas::Canvas2D;
 pub use display_list::{build_display_list, build_glyph_list, Rect};
-pub use gpu::GpuRenderer;
+pub use gpu::{list_adapters, AdapterDeviceType, AdapterInfo, GpuRenderer};
 pub use text::composite_glyphs;

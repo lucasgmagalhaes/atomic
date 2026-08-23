@@ -8,12 +8,13 @@
 //! `crypto.getRandomValues` — one source of randomness, not two.
 //!
 //! Also has real per-platform process sandboxing for a spawned
-//! `profile-worker` — see [`sandbox`]. Not covered: a **signed updater**
-//! (phase-5-scale effort on its own).
+//! `profile-worker` — see [`sandbox`] — and a real signed updater — see
+//! [`updater`].
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, Key, KeyInit, Nonce};
 
 pub mod sandbox;
+pub mod updater;
 
 pub const KEY_LEN: usize = 32; // AES-256
 pub const NONCE_LEN: usize = 12; // GCM's standard nonce size

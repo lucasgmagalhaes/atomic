@@ -15,11 +15,13 @@
 //! surfaces as [`BrowserView::navigation_error`] without losing the
 //! address bar's text or crashing the view.
 //!
-//! Scoped down from a real browser chrome: one profile, no tabs/
-//! workspaces UI wiring yet (`workspace::WorkspaceManager` exists and is
-//! tested as a data layer, but nothing here uses it), a fixed frame size
-//! decided at spawn time (a real implementation would re-spawn - or
-//! resize the shared-memory region - on window resize; this doesn't).
+//! Scoped down from a real browser chrome: one profile, no tabs/workspace
+//! *switcher* UI yet (`main.rs` now uses `workspace::WorkspaceManager` to
+//! name the one running profile for `automation`'s `pane(...)` — see
+//! `NimbleApp::run_automation_script` — but there's still no UI to create/
+//! switch workspaces or spawn more than one profile into one), a fixed
+//! frame size decided at spawn time (a real implementation would re-spawn
+//! - or resize the shared-memory region - on window resize; this doesn't).
 //!
 //! [`BrowserView::spawn_with_proxy`] routes the spawned profile's fetches
 //! through a real upstream proxy (`profile::Profile::spawn_with_proxy` →
@@ -125,6 +127,15 @@ impl BrowserView {
 
     pub fn current_url(&self) -> &str {
         &self.current_url
+    }
+
+    /// Lends the live profile process to a caller that needs to drive it
+    /// directly — e.g. `automation::AutomationEngine`, which borrows
+    /// (rather than owns) the panes it controls precisely so a profile can
+    /// still be displayed while a script also drives it. `None` if this
+    /// view failed to spawn (see [`error`](Self::error)).
+    pub fn profile_mut(&mut self) -> Option<&mut profile::Profile> {
+        self.profile.as_mut()
     }
 
     pub fn reload(&mut self) {

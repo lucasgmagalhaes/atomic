@@ -7,3 +7,5 @@ edition = "2021"
 eframe = "0.28"
 egui = "0.28"
 profile = { path = "../../crates/profile" }
+automation = { path = "../../crates/automation" }
+js-runtime = { path = "../../crates/js-runtime" }

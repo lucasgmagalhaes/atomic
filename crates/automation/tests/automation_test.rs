@@ -62,8 +62,9 @@ fn every_and_on_fire_through_tick() {
 
 #[test]
 fn pane_goto_reaches_a_real_profile() {
+    let mut profile = spawn_demo_profile("nimble-automation-test-1");
     let mut panes = HashMap::new();
-    panes.insert("acc1".to_string(), spawn_demo_profile("nimble-automation-test-1"));
+    panes.insert("acc1".to_string(), &mut profile);
 
     let runtime = Runtime::new();
     let engine = AutomationEngine::new(&runtime, panes);
@@ -78,8 +79,9 @@ fn pane_goto_reaches_a_real_profile() {
 
 #[test]
 fn pane_fill_and_click_throw_instead_of_silently_succeeding() {
+    let mut profile = spawn_demo_profile("nimble-automation-test-2");
     let mut panes = HashMap::new();
-    panes.insert("acc1".to_string(), spawn_demo_profile("nimble-automation-test-2"));
+    panes.insert("acc1".to_string(), &mut profile);
 
     let runtime = Runtime::new();
     let engine = AutomationEngine::new(&runtime, panes);

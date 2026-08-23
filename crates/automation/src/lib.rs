@@ -26,15 +26,22 @@ use js_runtime::{Context, EvalError, Runtime};
 use std::collections::HashMap;
 
 /// One running automation script: its own JS context, the set of panes
-/// (named `profile::Profile` handles) it's allowed to control, and the
-/// cron/event state `tick()` drives.
-pub struct AutomationEngine<'rt> {
+/// (named, *borrowed* `profile::Profile` handles — see below) it's allowed
+/// to control, and the cron/event state `tick()` drives.
+pub struct AutomationEngine<'rt, 'p> {
     ctx: Context<'rt>,
     // Boxed so the heap address stays valid for the raw pointer stashed via
     // `JS_SetContextOpaque` even though `AutomationEngine` itself may move
     // (e.g. returned out of `new`) — same convention as js-runtime's own
     // `Context::_host_state`.
-    panes: Box<HashMap<String, profile::Profile>>,
+    //
+    // Borrowed (`&'p mut Profile`), not owned: a real host (`apps/shell`)
+    // already owns each running profile for rendering/IPC — a `Profile`'s
+    // stdin/stdout pipe has exactly one writer, so it can't also be handed
+    // to this engine by value without taking it away from whatever's
+    // displaying it. Lending a `&mut` for the duration of a script run (or
+    // a `tick()`) lets the same profile serve both.
+    panes: Box<HashMap<String, &'p mut profile::Profile>>,
 }
 
 // A plain alias, not a wrapper — so `every` keeps `setInterval`'s real
@@ -46,17 +53,20 @@ pub struct AutomationEngine<'rt> {
 // assumed the other one.
 const PRELUDE: &str = r#"globalThis.every = setInterval;"#;
 
-impl<'rt> AutomationEngine<'rt> {
+impl<'rt, 'p> AutomationEngine<'rt, 'p> {
     /// `panes` are the profiles this script is allowed to name via
     /// `pane("name")` — deliberately explicit rather than "every profile in
     /// the workspace": a script's blast radius should be whatever the host
     /// (e.g. the Settings > Automation "script sandbox" scope the spec
-    /// flags as a gap on line 260) grants it, not everything running.
-    pub fn new(runtime: &'rt Runtime, panes: HashMap<String, profile::Profile>) -> Self {
+    /// flags as a gap on line 260) grants it, not everything running. A
+    /// host with a `workspace::WorkspaceManager` (`apps/shell`) would build
+    /// this from the active workspace's profile ids, keeping only the ones
+    /// it actually has a live `Profile` for.
+    pub fn new(runtime: &'rt Runtime, panes: HashMap<String, &'p mut profile::Profile>) -> Self {
         let ctx = Context::new(runtime);
         let mut panes = Box::new(panes);
         unsafe {
-            pane::register(ctx.as_raw(), panes.as_mut() as *mut HashMap<String, profile::Profile>);
+            pane::register(ctx.as_raw(), panes.as_mut() as *mut HashMap<String, &mut profile::Profile>);
             events::register(ctx.as_raw());
             cron::register(ctx.as_raw());
         }
@@ -100,7 +110,7 @@ impl<'rt> AutomationEngine<'rt> {
     }
 }
 
-impl Drop for AutomationEngine<'_> {
+impl Drop for AutomationEngine<'_, '_> {
     fn drop(&mut self) {
         // Must run before `self.ctx` itself drops (which calls
         // `JS_FreeContext`) — same ordering requirement `timers::cleanup`/

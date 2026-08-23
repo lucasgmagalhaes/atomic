@@ -24,6 +24,17 @@ fn navigate_to_a_real_url_clears_any_navigation_error_and_records_the_url() {
 }
 
 #[test]
+fn profile_mut_lends_the_real_running_profile() {
+    let mut browser = BrowserView::spawn(200, 150);
+    assert!(browser.error().is_none(), "spawn should succeed against the real workspace build");
+
+    // Real proof this is the live profile, not a stand-in: a ping through
+    // the borrowed handle actually reaches the spawned `profile-worker`.
+    let profile = browser.profile_mut().expect("a successfully spawned view should have a live profile");
+    assert!(profile.ping().expect("ping should reach the worker"));
+}
+
+#[test]
 fn navigate_to_a_bad_url_records_a_navigation_error_without_losing_the_url() {
     let mut browser = BrowserView::spawn(200, 150);
 

@@ -73,10 +73,30 @@ impl Profile {
     /// `env!("CARGO_BIN_EXE_profile-worker")`; a real shell would resolve
     /// this from its own install layout instead.
     pub fn spawn(worker_path: &str, shmem_name: &str, width: u32, height: u32) -> Result<Self, SpawnError> {
-        let mut child = Command::new(worker_path)
-            .arg(shmem_name)
-            .arg(width.to_string())
-            .arg(height.to_string())
+        Self::spawn_with_proxy(worker_path, shmem_name, width, height, None)
+    }
+
+    /// Same as [`spawn`](Self::spawn), plus a per-profile upstream HTTP/
+    /// HTTPS proxy every `NAVIGATE`/`RELOAD` fetch (page HTML, `<link>`
+    /// stylesheets, `@import`s) is routed through instead of connecting
+    /// directly — closes the spec's "proxy por perfil" requirement (`net`
+    /// itself already tunnels via a real `CONNECT`; this is what actually
+    /// picks a proxy *for this profile*). `proxy` is `"host:port"` or
+    /// `"user:pass@host:port"` (matching a `user:pass@host:port` proxy
+    /// URL's authority, minus the scheme, which this crate doesn't
+    /// interpret — it's forwarded to the worker as-is and parsed there).
+    /// `None` behaves exactly like `spawn` (connects directly, no proxy) —
+    /// the worker's own argument parsing treats a missing 5th argument the
+    /// same as this crate not passing one, so the two paths converge on
+    /// the exact same child-process invocation rather than one being a
+    /// degraded version of the other.
+    pub fn spawn_with_proxy(worker_path: &str, shmem_name: &str, width: u32, height: u32, proxy: Option<&str>) -> Result<Self, SpawnError> {
+        let mut command = Command::new(worker_path);
+        command.arg(shmem_name).arg(width.to_string()).arg(height.to_string());
+        if let Some(proxy) = proxy {
+            command.arg(proxy);
+        }
+        let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())

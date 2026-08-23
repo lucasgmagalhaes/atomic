@@ -159,7 +159,13 @@ fn collect_css_sources(dom: &Dom, node: NodeId, out: &mut Vec<CssSource>) {
 /// open/write failure (permissions, full disk) degrades to "send/store no
 /// cookies" rather than failing the fetch — matches this file's existing
 /// storage-failure fallback in `Page::load`.
-fn fetch_with_cookies(url: &str, storage_root: &std::path::Path) -> Result<net::Response, net::Error> {
+///
+/// `proxy`, when `Some`, routes the request through `net::get_via_proxy`
+/// instead of connecting directly — every fetch this worker makes
+/// (page HTML, `<link>` stylesheets, `@import`s) shares this one function,
+/// so a profile's proxy choice applies to all of them uniformly, not just
+/// the page's own HTML.
+fn fetch_with_cookies(url: &str, storage_root: &std::path::Path, proxy: Option<&net::ProxyConfig>) -> Result<net::Response, net::Error> {
     let parsed = url::Url::parse(url).ok();
     let host = parsed.as_ref().and_then(|u| u.host_str()).map(str::to_string);
     let path = parsed.as_ref().map(|u| u.path().to_string()).unwrap_or_else(|| "/".to_string());
@@ -172,7 +178,10 @@ fn fetch_with_cookies(url: &str, storage_root: &std::path::Path) -> Result<net::
     let cookie_header = jar.as_ref().zip(host.as_deref()).and_then(|(jar, h)| jar.header_value(h, &path, secure));
     let extra_headers: Vec<(&str, &str)> = cookie_header.as_deref().map(|v| vec![("Cookie", v)]).unwrap_or_default();
 
-    let response = net::get_with_headers(url, &extra_headers)?;
+    let response = match proxy {
+        Some(proxy) => net::get_via_proxy(url, &extra_headers, proxy)?,
+        None => net::get_with_headers(url, &extra_headers)?,
+    };
 
     if let (Some(jar), Some(host)) = (jar.as_mut(), host.as_deref()) {
         for (name, value) in &response.headers {
@@ -183,6 +192,35 @@ fn fetch_with_cookies(url: &str, storage_root: &std::path::Path) -> Result<net::
     }
 
     Ok(response)
+}
+
+/// Parses this worker's optional 5th CLI argument into a
+/// [`net::ProxyConfig`]: `"host:port"` (no auth) or
+/// `"user:pass@host:port"` (HTTP Basic `Proxy-Authorization`) — the
+/// authority portion of a `user:pass@host:port` proxy URL, minus the
+/// scheme (this worker only ever tunnels via `CONNECT`, so a `http://`
+/// vs `https://` proxy-facing scheme wouldn't change anything). Returns
+/// `None` for a missing argument, an empty string, or one that doesn't
+/// parse as `host:port` — an unparseable proxy argument degrades to "no
+/// proxy" rather than refusing to start, matching this file's general
+/// "best-effort, never fails the whole page load over one bad input"
+/// stance elsewhere (see `resolve_stylesheet_url`).
+fn parse_proxy_arg(arg: Option<&str>) -> Option<net::ProxyConfig> {
+    let arg = arg?;
+    if arg.is_empty() {
+        return None;
+    }
+    let (credentials, host_port) = match arg.split_once('@') {
+        Some((credentials, host_port)) => (Some(credentials), host_port),
+        None => (None, arg),
+    };
+    let (host, port) = host_port.rsplit_once(':')?;
+    let port: u16 = port.parse().ok()?;
+    let (username, password) = match credentials.and_then(|c| c.split_once(':')) {
+        Some((user, pass)) => (Some(user.to_string()), Some(pass.to_string())),
+        None => (None, None),
+    };
+    Some(net::ProxyConfig { host: host.to_string(), port, username, password })
 }
 
 /// Resolves a `<link href>` against `base_url` (the page's own URL - the
@@ -228,7 +266,14 @@ fn resolve_stylesheet_url(base_url: Option<&str>, href: &str) -> Option<String> 
 /// not the importing stylesheet's own URL (a real engine resolves
 /// relative to whichever stylesheet contains the `@import`) — a
 /// documented simplification, not a distinction this worker tracks.
-fn merge_stylesheet_text(sheet: &mut Stylesheet, css_text: &str, base_url: Option<&str>, viewport_width: f64, storage_root: &std::path::Path) {
+fn merge_stylesheet_text(
+    sheet: &mut Stylesheet,
+    css_text: &str,
+    base_url: Option<&str>,
+    viewport_width: f64,
+    storage_root: &std::path::Path,
+    proxy: Option<&net::ProxyConfig>,
+) {
     let parsed = parse_stylesheet(css_text);
     for import in &parsed.imports {
         let should_fetch = import.media.as_ref().map(|m| m.matches(viewport_width)).unwrap_or(true);
@@ -236,7 +281,7 @@ fn merge_stylesheet_text(sheet: &mut Stylesheet, css_text: &str, base_url: Optio
             continue;
         }
         if let Some(resolved) = resolve_stylesheet_url(base_url, &import.url) {
-            if let Ok(response) = fetch_with_cookies(&resolved, storage_root) {
+            if let Ok(response) = fetch_with_cookies(&resolved, storage_root, proxy) {
                 let imported_text = String::from_utf8_lossy(&response.body).into_owned();
                 sheet.rules.extend(parse_stylesheet(&imported_text).rules);
             }
@@ -245,7 +290,14 @@ fn merge_stylesheet_text(sheet: &mut Stylesheet, css_text: &str, base_url: Optio
     sheet.rules.extend(parsed.rules);
 }
 
-fn build_stylesheet(dom: &Dom, root: NodeId, base_url: Option<&str>, viewport_width: f64, storage_root: &std::path::Path) -> Stylesheet {
+fn build_stylesheet(
+    dom: &Dom,
+    root: NodeId,
+    base_url: Option<&str>,
+    viewport_width: f64,
+    storage_root: &std::path::Path,
+    proxy: Option<&net::ProxyConfig>,
+) -> Stylesheet {
     let mut sources = Vec::new();
     collect_css_sources(dom, root, &mut sources);
 
@@ -254,11 +306,11 @@ fn build_stylesheet(dom: &Dom, root: NodeId, base_url: Option<&str>, viewport_wi
         let css_text = match source {
             CssSource::Inline(text) => Some(text),
             CssSource::Link(href) => resolve_stylesheet_url(base_url, &href)
-                .and_then(|url| fetch_with_cookies(&url, storage_root).ok())
+                .and_then(|url| fetch_with_cookies(&url, storage_root, proxy).ok())
                 .map(|response| String::from_utf8_lossy(&response.body).into_owned()),
         };
         if let Some(css_text) = css_text {
-            merge_stylesheet_text(&mut sheet, &css_text, base_url, viewport_width, storage_root);
+            merge_stylesheet_text(&mut sheet, &css_text, base_url, viewport_width, storage_root, proxy);
         }
     }
     sheet
@@ -287,10 +339,10 @@ fn error_page_html(url: &str, message: &str) -> String {
 /// attempt charset detection from `Content-Type`/`<meta charset>`, real
 /// HTML often isn't UTF-8 but plenty is, and this crate doesn't have a
 /// non-UTF-8 text decoder yet).
-fn resolve_html(source: &PageSource, storage_root: &std::path::Path) -> Result<String, String> {
+fn resolve_html(source: &PageSource, storage_root: &std::path::Path, proxy: Option<&net::ProxyConfig>) -> Result<String, String> {
     match source {
         PageSource::Demo => Ok(DEMO_HTML.to_string()),
-        PageSource::Url(url) => fetch_with_cookies(url, storage_root)
+        PageSource::Url(url) => fetch_with_cookies(url, storage_root, proxy)
             .map(|response| String::from_utf8_lossy(&response.body).into_owned())
             .map_err(|e| e.to_string()),
     }
@@ -327,9 +379,10 @@ impl<'rt> Page<'rt> {
         storage_host: Option<&str>,
         viewport_width: f64,
         storage_root: &std::path::Path,
+        proxy: Option<&net::ProxyConfig>,
     ) -> Self {
         let (dom, html_el) = html::parse_to_html_element(html);
-        let sheet = build_stylesheet(&dom, html_el, base_url, viewport_width, storage_root);
+        let sheet = build_stylesheet(&dom, html_el, base_url, viewport_width, storage_root, proxy);
 
         let ctx = match storage_host {
             Some(host) => match Context::with_storage(runtime, dom, host, storage_root.join(host)) {
@@ -379,7 +432,13 @@ impl<'rt> Page<'rt> {
 /// (see `DEMO_SCRIPT`).
 const DEMO_STORAGE_HOST: &str = "demo.internal";
 
-fn load_source<'rt>(runtime: &'rt Runtime, source: &PageSource, viewport_width: f64, storage_root: &std::path::Path) -> (Page<'rt>, Option<String>) {
+fn load_source<'rt>(
+    runtime: &'rt Runtime,
+    source: &PageSource,
+    viewport_width: f64,
+    storage_root: &std::path::Path,
+    proxy: Option<&net::ProxyConfig>,
+) -> (Page<'rt>, Option<String>) {
     let base_url = match source {
         PageSource::Demo => None,
         PageSource::Url(url) => Some(url.as_str()),
@@ -388,10 +447,10 @@ fn load_source<'rt>(runtime: &'rt Runtime, source: &PageSource, viewport_width: 
         PageSource::Demo => Some(DEMO_STORAGE_HOST.to_string()),
         PageSource::Url(url) => url::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_string)),
     };
-    match resolve_html(source, storage_root) {
+    match resolve_html(source, storage_root, proxy) {
         Ok(html) => {
             let run_demo_script = matches!(source, PageSource::Demo);
-            (Page::load(runtime, &html, run_demo_script, base_url, storage_host.as_deref(), viewport_width, storage_root), None)
+            (Page::load(runtime, &html, run_demo_script, base_url, storage_host.as_deref(), viewport_width, storage_root, proxy), None)
         }
         Err(message) => {
             let url = match source {
@@ -403,20 +462,24 @@ fn load_source<'rt>(runtime: &'rt Runtime, source: &PageSource, viewport_width: 
             // still gets real storage scoped to the same host though, so
             // a subsequent successful load/reload of that host sees
             // consistent state.
-            (Page::load(runtime, &error_page_html(url, &message), false, None, storage_host.as_deref(), viewport_width, storage_root), Some(message))
+            (
+                Page::load(runtime, &error_page_html(url, &message), false, None, storage_host.as_deref(), viewport_width, storage_root, proxy),
+                Some(message),
+            )
         }
     }
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    if args.len() != 4 {
-        eprintln!("usage: profile-worker <shmem-name> <width> <height>");
+    if args.len() != 4 && args.len() != 5 {
+        eprintln!("usage: profile-worker <shmem-name> <width> <height> [proxy: host:port or user:pass@host:port]");
         std::process::exit(2);
     }
     let shmem_name = &args[1];
     let width: u32 = args[2].parse().expect("width must be a positive integer");
     let height: u32 = args[3].parse().expect("height must be a positive integer");
+    let proxy = parse_proxy_arg(args.get(4).map(String::as_str));
 
     // One storage root per worker process, keyed by shmem name (already
     // unique per spawned profile) so two profiles never share cookies/
@@ -427,7 +490,7 @@ fn main() {
 
     let runtime = Runtime::new();
     let mut current_source = PageSource::Demo;
-    let (mut page, _) = load_source(&runtime, &current_source, width as f64, &storage_root);
+    let (mut page, _) = load_source(&runtime, &current_source, width as f64, &storage_root, proxy.as_ref());
     let renderer = GpuRenderer::new();
 
     let mut writer = ipc::FrameWriter::new(shmem_name, width, height).expect("failed to create/open shared memory");
@@ -457,7 +520,7 @@ fn main() {
                 let _ = writeln!(stdout, "PONG");
                 let _ = stdout.flush();
             } else if line == "RELOAD" {
-                let (loaded, error) = load_source(&runtime, &current_source, width as f64, &storage_root);
+                let (loaded, error) = load_source(&runtime, &current_source, width as f64, &storage_root, proxy.as_ref());
                 page = loaded;
                 writer.publish(&page.render(&renderer, width, height));
                 match error {
@@ -471,7 +534,7 @@ fn main() {
                 let _ = stdout.flush();
             } else if let Some(url) = line.strip_prefix("NAVIGATE ") {
                 current_source = PageSource::Url(url.trim().to_string());
-                let (loaded, error) = load_source(&runtime, &current_source, width as f64, &storage_root);
+                let (loaded, error) = load_source(&runtime, &current_source, width as f64, &storage_root, proxy.as_ref());
                 page = loaded;
                 writer.publish(&page.render(&renderer, width, height));
                 match error {

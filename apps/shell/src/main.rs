@@ -2,6 +2,8 @@ use std::time::Duration;
 
 use shell::automation_bridge;
 use shell::browser_view::BrowserView;
+use shell::downloads::Downloads;
+use shell::history::History;
 use shell::i18n::{self, Locale};
 use shell::resource_monitor::PaneMonitor;
 use shell::tiling;
@@ -25,6 +27,13 @@ struct Pane {
     /// `Vec` NimbleApp would have to keep in sync with `panes`) so it
     /// naturally follows spawn/close/duplicate without extra bookkeeping.
     monitor: PaneMonitor,
+    /// Real, in-memory (see `history`'s own doc on why not persisted)
+    /// browsing history - one entry per real navigation this pane's
+    /// `BrowserView` was actually asked to perform.
+    history: History,
+    /// Real per-pane download list - see `downloads`'s own doc. Files
+    /// land under `%TEMP%/nimble-downloads/<pane-id>/`.
+    downloads: Downloads,
 }
 
 struct NimbleApp {
@@ -54,6 +63,10 @@ struct NimbleApp {
     /// up fresh each `update()` frame, so there's no restart/re-render step
     /// needed).
     locale: Locale,
+    /// The download-URL text box in the Downloads & History side panel -
+    /// targets the selected pane on submit, same "selected pane" scoping
+    /// the address bar/proxy box already use.
+    download_url_text: String,
 }
 
 const SPARKLINE_HEIGHT: f32 = 24.0;
@@ -103,7 +116,14 @@ fn spawn_pane(workspace: &mut WorkspaceManager, index: usize) -> Pane {
     let id = format!("pane-{}", index + 1);
     let active = workspace.active_index();
     workspace.add_profile(active, id.clone());
-    Pane { id, browser: BrowserView::spawn(PANE_WIDTH, PANE_HEIGHT), monitor: PaneMonitor::new() }
+    let downloads_dir = std::env::temp_dir().join("nimble-downloads").join(&id);
+    Pane {
+        browser: BrowserView::spawn(PANE_WIDTH, PANE_HEIGHT),
+        monitor: PaneMonitor::new(),
+        history: History::new(),
+        downloads: Downloads::new(downloads_dir),
+        id,
+    }
 }
 
 impl Default for NimbleApp {
@@ -120,6 +140,7 @@ impl Default for NimbleApp {
             automation_script: String::new(),
             automation_result: None,
             locale: Locale::En,
+            download_url_text: String::new(),
         }
     }
 }
@@ -167,7 +188,9 @@ impl NimbleApp {
     fn navigate_to_address_bar(&mut self) {
         let url = self.address_bar_text.trim().to_string();
         if !url.is_empty() {
-            self.panes[self.selected].browser.navigate(&url);
+            let pane = &mut self.panes[self.selected];
+            pane.browser.navigate(&url);
+            pane.history.record(url);
         }
     }
 
@@ -195,6 +218,21 @@ impl NimbleApp {
     fn run_automation_script(&mut self) {
         let panes = self.panes.iter_mut().map(|p| (p.id.as_str(), &mut p.browser));
         self.automation_result = Some(automation_bridge::run_script(&self.workspace, panes, &self.automation_script));
+    }
+
+    /// Downloads `self.download_url_text` (real `net::download`, see
+    /// `downloads::Downloads`) into the *selected* pane's own download
+    /// directory, recording a real entry - success or failure - and
+    /// clears the text box on submit either way (the failed attempt is
+    /// still visible in the list below, no need to keep the URL sitting
+    /// in the box).
+    fn download_to_selected_pane(&mut self) {
+        let url = self.download_url_text.trim().to_string();
+        if url.is_empty() {
+            return;
+        }
+        self.panes[self.selected].downloads.download(&url);
+        self.download_url_text.clear();
     }
 
     /// The context menu's "Run auto login" stand-in: runs
@@ -249,6 +287,7 @@ impl NimbleApp {
         let mut pane = spawn_pane(&mut self.workspace, new_index);
         if !url.is_empty() {
             pane.browser.navigate(&url);
+            pane.history.record(url);
         }
         self.panes.push(pane);
     }
@@ -412,6 +451,57 @@ impl eframe::App for NimbleApp {
             }
         });
 
+        egui::SidePanel::right("downloads_history").resizable(true).default_width(260.0).show(ctx, |ui| {
+            let visible = self.active_workspace_pane_indices();
+            if visible.is_empty() {
+                ui.label("No panes in this workspace.");
+                return;
+            }
+            ui.heading(format!("Downloads & History — {}", self.panes[self.selected].id));
+
+            ui.horizontal(|ui| {
+                let url_box = ui.add_sized(
+                    [ui.available_width() - 70.0, ui.spacing().interact_size.y],
+                    egui::TextEdit::singleline(&mut self.download_url_text).hint_text("URL to download"),
+                );
+                let clicked = ui.button("Download").clicked();
+                if clicked || (url_box.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+                    self.download_to_selected_pane();
+                }
+            });
+
+            ui.separator();
+            ui.label("Downloads");
+            egui::ScrollArea::vertical().id_source("downloads_list").max_height(160.0).show(ui, |ui| {
+                let pane = &self.panes[self.selected];
+                if pane.downloads.is_empty() {
+                    ui.weak("No downloads yet.");
+                }
+                for record in pane.downloads.entries() {
+                    match &record.result {
+                        Ok(bytes) => {
+                            ui.label(format!("{} ({bytes} bytes) <- {}", record.dest.display(), record.url));
+                        }
+                        Err(error) => {
+                            ui.colored_label(egui::Color32::RED, format!("{} failed: {error}", record.url));
+                        }
+                    }
+                }
+            });
+
+            ui.separator();
+            ui.label("History");
+            egui::ScrollArea::vertical().id_source("history_list").show(ui, |ui| {
+                let pane = &self.panes[self.selected];
+                if pane.history.is_empty() {
+                    ui.weak("No history yet.");
+                }
+                for entry in pane.history.entries() {
+                    ui.label(&entry.url);
+                }
+            });
+        });
+
         egui::CentralPanel::default().show(ctx, |ui| {
             let available = ui.available_rect_before_wrap();
             let container = tiling::Rect { x: available.min.x, y: available.min.y, width: available.width(), height: available.height() };
@@ -460,11 +550,14 @@ impl eframe::App for NimbleApp {
                         run_here_clicked = true;
                         ui.close_menu();
                     }
-                    // No audio pipeline exists anywhere in this engine (no
-                    // `<audio>`/`<video>`/Web Audio - see the phase notes
-                    // in CLAUDE.md) - disabled rather than faking a mute
-                    // toggle that would have nothing to actually mute.
-                    ui.add_enabled(false, egui::Button::new("Mute audio")).on_disabled_hover_text("not implemented - this engine has no audio pipeline yet");
+                    // Web Audio exists now (js_runtime::web_audio -
+                    // real OfflineAudioContext synthesis/mixing), but
+                    // there's still no live AudioContext or OS audio
+                    // output device anywhere in this engine - only
+                    // headless rendering into an in-memory buffer. A
+                    // "mute" toggle needs something actually playing
+                    // sound to mute; still disabled, not faked.
+                    ui.add_enabled(false, egui::Button::new("Mute audio")).on_disabled_hover_text("not implemented - no live audio output exists yet (only OfflineAudioContext's headless rendering)");
                     ui.menu_button("Move to workspace", |ui| {
                         for (workspace_index, workspace) in workspaces.iter().enumerate() {
                             if ui.button(&workspace.name).clicked() {

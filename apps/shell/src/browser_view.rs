@@ -20,6 +20,12 @@
 //! tested as a data layer, but nothing here uses it), a fixed frame size
 //! decided at spawn time (a real implementation would re-spawn - or
 //! resize the shared-memory region - on window resize; this doesn't).
+//!
+//! [`BrowserView::spawn_with_proxy`] routes the spawned profile's fetches
+//! through a real upstream proxy (`profile::Profile::spawn_with_proxy` →
+//! `net::get_via_proxy`, a genuine `CONNECT` tunnel - see that crate's own
+//! docs) - a proxy is fixed for a profile's process lifetime, so changing
+//! it means spawning a fresh `BrowserView`, not mutating a running one.
 use std::path::PathBuf;
 
 /// Locates the `profile-worker` binary that should already exist next to
@@ -72,13 +78,34 @@ pub struct BrowserView {
 }
 
 impl BrowserView {
-    /// Spawns a fresh profile at `width` x `height`. Failure (missing
-    /// binary, shared-memory setup failure, ...) is stored rather than
-    /// propagated - the GUI shows it inline instead of failing to start.
+    /// Spawns a fresh profile at `width` x `height` with no proxy - see
+    /// [`spawn_with_proxy`](Self::spawn_with_proxy).
     pub fn spawn(width: u32, height: u32) -> Self {
-        let shmem_name = format!("nimble-shell-{}", std::process::id());
+        Self::spawn_with_proxy(width, height, None)
+    }
+
+    /// Same as [`spawn`](Self::spawn), routing every fetch the spawned
+    /// profile makes through `proxy` (`"host:port"` or
+    /// `"user:pass@host:port"` - see `profile::Profile::spawn_with_proxy`
+    /// and `profile-worker`'s `parse_proxy_arg` for the exact grammar and
+    /// what an unparseable value degrades to). Failure (missing binary,
+    /// shared-memory setup failure, ...) is stored rather than propagated
+    /// - the GUI shows it inline instead of failing to start.
+    ///
+    /// A profile's proxy is fixed for its process's lifetime (matches
+    /// `profile-worker`'s own "set once at spawn" scope) - changing it
+    /// means spawning a new `BrowserView`, which is why this constructor
+    /// exists separately from a settable field on an existing one; the
+    /// shared-memory name includes a counter so a shell that respawns more
+    /// than once per process (e.g. to change the proxy) never collides
+    /// with the region a still-shutting-down previous profile might still
+    /// hold.
+    pub fn spawn_with_proxy(width: u32, height: u32, proxy: Option<&str>) -> Self {
+        static SPAWN_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = SPAWN_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let shmem_name = format!("nimble-shell-{}-{n}", std::process::id());
         let (profile, error) = match worker_binary_path() {
-            Ok(path) => match profile::Profile::spawn(&path.to_string_lossy(), &shmem_name, width, height) {
+            Ok(path) => match profile::Profile::spawn_with_proxy(&path.to_string_lossy(), &shmem_name, width, height, proxy) {
                 Ok(p) => (Some(p), None),
                 Err(e) => (None, Some(e.to_string())),
             },

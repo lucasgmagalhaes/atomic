@@ -32,6 +32,86 @@ fn navigate_to_a_bad_url_records_a_navigation_error_without_losing_the_url() {
     assert!(browser.navigation_error().is_some());
 }
 
+/// A real forward proxy for tests: answers `CONNECT host:port HTTP/1.1`
+/// with `200 Connection Established`, then splices raw bytes between the
+/// client and `host:port` - a genuine tunnel, not a stand-in. Reports
+/// each `CONNECT` target it handled on `seen`, so a test can prove
+/// traffic actually went through it.
+fn spawn_connect_proxy(seen: std::sync::mpsc::Sender<String>) -> u16 {
+    use std::io::{BufRead, BufReader, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("proxy should bind");
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut client) = stream else { continue };
+            let seen = seen.clone();
+            std::thread::spawn(move || {
+                let mut reader = BufReader::new(client.try_clone().expect("clone client stream"));
+                let mut request_line = String::new();
+                if reader.read_line(&mut request_line).is_err() || request_line.is_empty() {
+                    return;
+                }
+                let target = request_line.trim_start_matches("CONNECT ").split(' ').next().unwrap_or("").to_string();
+                loop {
+                    let mut line = String::new();
+                    match reader.read_line(&mut line) {
+                        Ok(0) | Err(_) => return,
+                        Ok(_) if line == "\r\n" => break,
+                        Ok(_) => {}
+                    }
+                }
+                let Ok(mut upstream) = std::net::TcpStream::connect(&target) else {
+                    let _ = client.write_all(b"HTTP/1.1 502 Bad Gateway\r\n\r\n");
+                    return;
+                };
+                let _ = seen.send(target);
+                let _ = client.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n");
+
+                let mut upstream_reader = upstream.try_clone().expect("clone upstream stream");
+                let mut client_writer = client.try_clone().expect("clone client stream");
+                let client_to_upstream = std::thread::spawn(move || {
+                    let _ = std::io::copy(&mut reader, &mut upstream);
+                });
+                let upstream_to_client = std::thread::spawn(move || {
+                    let _ = std::io::copy(&mut upstream_reader, &mut client_writer);
+                });
+                let _ = client_to_upstream.join();
+                let _ = upstream_to_client.join();
+            });
+        }
+    });
+    port
+}
+
+#[test]
+fn spawn_with_proxy_routes_navigation_through_the_configured_proxy() {
+    use std::io::{Read, Write};
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("failed to bind a loopback test server");
+    let page_addr = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        if let Ok((mut stream, _)) = listener.accept() {
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf);
+            let body = "<div>via shell proxy</div>";
+            let response = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
+            let _ = stream.write_all(response.as_bytes());
+        }
+    });
+
+    let (seen_tx, seen_rx) = std::sync::mpsc::channel();
+    let proxy_port = spawn_connect_proxy(seen_tx);
+
+    let mut browser = BrowserView::spawn_with_proxy(64, 64, Some(&format!("127.0.0.1:{proxy_port}")));
+    assert!(browser.error().is_none(), "spawn_with_proxy should succeed against the real workspace build");
+
+    browser.navigate(&format!("http://{page_addr}/"));
+    assert!(browser.navigation_error().is_none(), "navigating through the proxy should succeed: {:?}", browser.navigation_error());
+
+    let tunneled_target = seen_rx.recv_timeout(std::time::Duration::from_secs(5)).expect("proxy should have handled a CONNECT for the page fetch");
+    assert_eq!(tunneled_target, page_addr.to_string(), "the shell's profile should have tunneled through the proxy to the page's own address");
+}
+
 #[test]
 fn rgba_to_color_image_preserves_dimensions_and_pixel_bytes() {
     let width = 2u32;

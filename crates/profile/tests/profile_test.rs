@@ -440,6 +440,30 @@ fn set_fps_cap_rejects_a_non_positive_value() {
 }
 
 #[test]
+fn pause_actually_stops_frame_generation_and_resume_restarts_it() {
+    let name = unique_shmem_name("pause");
+    let mut profile = Profile::spawn(worker_path(), &name, 32, 32).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    profile.pause().expect("pause should reach a live worker");
+    let gen_paused_start = profile.frame_generation();
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let gen_paused_end = profile.frame_generation();
+    assert_eq!(gen_paused_start, gen_paused_end, "a paused loop must not publish new frames at all, got {gen_paused_start} -> {gen_paused_end}");
+
+    // Still responsive to PING while paused - not a hung/dead process.
+    assert!(profile.ping().expect("ping should still reach a paused worker"));
+
+    profile.resume().expect("resume should reach a live worker");
+    let gen_resumed_start = profile.frame_generation();
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let gen_resumed_end = profile.frame_generation();
+    assert!(gen_resumed_end > gen_resumed_start, "resuming should restart real frame generation, got {gen_resumed_start} -> {gen_resumed_end}");
+
+    profile.quit();
+}
+
+#[test]
 fn js_timers_pumped_by_the_loop_visibly_change_rendered_pixels() {
     let name = unique_shmem_name("vsync-js");
     // Large enough that the counter paragraph's text actually lands inside

@@ -20,12 +20,14 @@ Do not assume one name is canonical. If you need to pick one for new code/docs, 
 The spec has a **"Features do mockup (UI) — mapeamento pra spec"** section that cross-references every mockup feature against the spec/roadmap. Known gaps not yet covered by any crate/phase as of the last review:
 
 - ~~Automation scripting~~ — now owned by `crates/automation`: `pane.goto/click/fill`, `every()`, `on()`/`emit()`, and `cron()` are all real (`profile-worker` gained `CLICK`/`FILL` stdin commands alongside `NAVIGATE`, both real JS calls into the existing `dispatchEvent`/`textContent` bindings — no new native FFI needed). Two real scope cuts: only `#id` selectors (no CSS selector query beyond `dom::Dom::find_by_id`), and `fill` sets `textContent` since this engine has no `HTMLInputElement.value` property. Still no persistent scheduler — `AutomationEngine` is ephemeral per run (see `apps/shell`'s `automation_bridge::run_script` doc), so a script's `every`/`on`/`cron` callbacks never fire after that one call returns; wiring a long-lived engine into `apps/shell`'s GUI event loop is the remaining half of this gap.
-- Resource monitor (per-profile CPU/RAM/FPS telemetry + UI)
-- Workspaces (named groups of profiles) — directory scaffolded (`apps/shell/src/workspace`) but no functional spec
-- Downloads & history UI per profile
-- Interface i18n (EN/PT toggle)
-- "Import from Chrome" onboarding flow — conflicts with the "no fingerprint spoofing" isolation requirement, needs a decision
-- Settings: Performance throttling knobs, credential vault UX, dev tools panel
+- ~~Resource monitor~~ — real per-pane CPU/RAM/FPS telemetry (`apps/shell/src/resource_monitor.rs`, on top of `platform_apis::process_stats`'s real Windows syscalls) + a sparkline overlay drawn on every pane in the grid.
+- ~~Workspaces~~ — `apps/shell/src/workspace::WorkspaceManager` is wired into the GUI now: real create/switch/move, the grid only shows the active workspace's panes (others keep running, hidden and now background-throttled — see the Settings bullet below).
+- ~~Downloads & history UI per profile~~ — `apps/shell/src/downloads.rs`/`history.rs`, real `net::download` transfers and real navigation log, shown in a side panel. Not persisted to disk (no stable per-profile identity existed for a file to key off — see the storage-persistence note below, since resolved for cookies/localStorage/indexedDB but not yet extended to these two).
+- ~~Interface i18n~~ — `apps/shell/src/i18n.rs`, real EN/PT toggle applied live to every toolbar/panel string.
+- "Import from Chrome" onboarding flow — conflicts with the "no fingerprint spoofing" isolation requirement, needs a decision. Not started.
+- Settings: Performance — max live panes (real, clamps the grid) and per-pane frame cap (real, `profile-worker`'s `SET_FPS_CAP` command + `apps/shell`'s slider) are done; background throttling is real too now (`PAUSE`/`RESUME` commands genuinely idle a hidden-workspace pane's vsync loop — no timer pumping/render/publish at all while paused — `apps/shell` calls it on every workspace switch/pane move). GPU selection remains unimplemented (no `wgpu` adapter-selection hook exists). Credential vault UX is real (`apps/shell/src/vault_ui.rs` + Settings window), OS keychain backing still in progress. Dev tools panel: no implementation planned — this engine has no inspector/devtools protocol anywhere to back one.
+
+Also closed since the last review: per-profile stable identity (`BrowserView::spawn_with_identity`) makes cookies/localStorage/indexedDB actually survive a shell restart — previously every relaunch got a fresh random storage root.
 
 Two prior conflicts (proxy support, 5 vs 6 simultaneous accounts) were resolved in favor of the mockup — see Requisitos and the `net` crate row in the spec's crate table.
 

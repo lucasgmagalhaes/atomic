@@ -415,6 +415,7 @@ impl NimbleApp {
     /// lists" scoping).
     fn move_pane_to_workspace(&mut self, index: usize, workspace_index: usize) {
         self.workspace.move_profile(&self.panes[index].id, workspace_index);
+        self.apply_visibility_throttling();
     }
 
     /// Creates a new workspace (named positionally, "Workspace 2", "Workspace
@@ -440,6 +441,26 @@ impl NimbleApp {
         self.workspace.set_active(index);
         let visible = self.active_workspace_pane_indices();
         self.selected = visible.first().copied().unwrap_or(0);
+        self.apply_visibility_throttling();
+    }
+
+    /// Real "background throttling" (mockup's Settings/Performance knob):
+    /// pauses every pane not in the *active* workspace's own real vsync
+    /// loop (`profile::Profile::pause` - see that method's doc) and
+    /// resumes whichever ones are - a hidden pane's process keeps running
+    /// (still killable/movable/inspectable) but stops burning CPU on
+    /// timers/rendering nobody can see. Idempotent, so calling it whenever
+    /// workspace membership might have changed is cheap and safe.
+    fn apply_visibility_throttling(&mut self) {
+        let visible = self.active_workspace_pane_indices();
+        for (index, pane) in self.panes.iter_mut().enumerate() {
+            let Some(profile) = pane.browser.profile_mut() else { continue };
+            if visible.contains(&index) {
+                let _ = profile.resume();
+            } else {
+                let _ = profile.pause();
+            }
+        }
     }
 
     /// The toolbar's "+ New" workspace button: creates an empty workspace

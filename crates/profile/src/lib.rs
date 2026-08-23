@@ -278,6 +278,31 @@ impl Profile {
         }
     }
 
+    /// Pauses the worker's own vsync render loop entirely (no JS timer
+    /// pumping, no re-render, no frame publish - genuinely idle, see
+    /// `profile-worker`'s own `paused` doc) - the mockup's "background
+    /// throttling" knob for a pane that isn't currently visible. `PING`/
+    /// `SET_FPS_CAP`/`QUIT` still work while paused. No failure mode
+    /// beyond the protocol itself, unlike `click`/`fill`/`navigate` -
+    /// there's nothing about "pause" that can be rejected.
+    pub fn pause(&mut self) -> std::io::Result<()> {
+        writeln!(self.stdin, "PAUSE")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        Ok(())
+    }
+
+    /// Resumes a paused profile's render loop - a no-op (still answers
+    /// `RESUMED`) if it wasn't paused.
+    pub fn resume(&mut self) -> std::io::Result<()> {
+        writeln!(self.stdin, "RESUME")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        Ok(())
+    }
+
     /// The most recently published frame's raw RGBA8 pixels, or `None` if
     /// the worker hasn't published one yet.
     pub fn latest_frame(&self) -> Option<Vec<u8>> {

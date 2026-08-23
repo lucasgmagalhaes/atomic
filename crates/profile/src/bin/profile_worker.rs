@@ -626,12 +626,29 @@ fn main() {
     // existed, so a caller that never sends it gets identical behavior.
     let mut frame_interval = FRAME_INTERVAL;
     let mut next_tick = Instant::now() + frame_interval;
+    // Real "background throttling" (mockup's Settings > Performance knob):
+    // while `true`, the tick below skips JS timer pumping and re-rendering
+    // entirely instead of just rendering an unchanged page - a genuinely
+    // idle loop, not a disguised zero-work render. `PING`/`SET_FPS_CAP`/
+    // `QUIT` still work while paused (a hidden pane should still answer
+    // liveness checks and settings changes), only the vsync work itself
+    // stops.
+    let mut paused = false;
 
     'render_loop: loop {
         while let Ok(line) = cmd_rx.try_recv() {
             let line = line.trim();
             if line == "PING" {
                 let _ = writeln!(stdout, "PONG");
+                let _ = stdout.flush();
+            } else if line == "PAUSE" {
+                paused = true;
+                let _ = writeln!(stdout, "PAUSED");
+                let _ = stdout.flush();
+            } else if line == "RESUME" {
+                paused = false;
+                next_tick = Instant::now() + frame_interval;
+                let _ = writeln!(stdout, "RESUMED");
                 let _ = stdout.flush();
             } else if line == "RELOAD" {
                 let (loaded, error) = load_source(&runtime, &current_source, width as f64, &storage_root, proxy.as_ref(), dns_server);
@@ -701,6 +718,16 @@ fn main() {
             } else if line == "QUIT" {
                 break 'render_loop;
             }
+        }
+
+        if paused {
+            // No timer pumping, no render, no publish - genuinely idle,
+            // not "render the same frame every tick". A short fixed sleep
+            // (not `frame_interval`, which could be very large under a low
+            // fps cap) keeps `PING`/`RESUME`/`QUIT` responsive without
+            // busy-spinning the command-drain loop above.
+            thread::sleep(Duration::from_millis(50));
+            continue 'render_loop;
         }
 
         page.ctx.run_pending_timers();

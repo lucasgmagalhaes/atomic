@@ -17,3 +17,21 @@ fn plain_http_works_too() {
     let response = net::get("http://example.com/").expect("plain HTTP request should succeed");
     assert_eq!(response.status, 200);
 }
+
+#[test]
+fn captures_response_headers() {
+    let response = net::get("https://example.com/").expect("request should succeed");
+    assert!(
+        response.headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-type")),
+        "expected a content-type header, got: {:?}",
+        response.headers
+    );
+}
+
+#[test]
+fn sends_extra_request_headers() {
+    let response = net::get_with_headers("https://httpbin.org/headers", &[("X-Nimble-Test", "hello-nimble")])
+        .expect("request should succeed");
+    let body = String::from_utf8_lossy(&response.body);
+    assert!(body.contains("hello-nimble"), "expected the custom header echoed back, got: {body}");
+}

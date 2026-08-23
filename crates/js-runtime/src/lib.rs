@@ -11,6 +11,7 @@ mod crypto;
 mod document;
 mod dom_bindings;
 mod events;
+mod fetch;
 mod page_visibility;
 mod performance;
 
@@ -73,6 +74,7 @@ impl<'rt> Context<'rt> {
             performance::register(ptr);
             crypto::register(ptr);
             page_visibility::register(ptr);
+            fetch::register(ptr);
         };
         Context {
             ptr,

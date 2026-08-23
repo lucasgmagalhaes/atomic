@@ -7,3 +7,4 @@ edition = "2021"
 quickjs-sys = { path = "quickjs-sys" }
 dom = { path = "../dom" }
 platform-apis = { path = "../platform-apis" }
+net = { path = "../net" }

@@ -143,10 +143,20 @@ impl<'rt> Context<'rt> {
     /// Fires every due `setTimeout`/`setInterval` and every queued
     /// `requestAnimationFrame` callback. See `timers` module doc — there's
     /// no real event loop yet, so nothing calls this on its own; the host
-    /// (currently just tests) must pump it explicitly. Returns how many
-    /// callbacks fired.
+    /// (`profile-worker`'s per-frame loop, or tests) must pump it
+    /// explicitly. Returns how many callbacks fired.
     pub fn run_pending_timers(&self) -> usize {
         unsafe { timers::pump(self.ptr) }
+    }
+
+    /// The DOM this context was constructed with via
+    /// [`Context::with_dom`], or `None` for a plain [`Context::new`]. Lets
+    /// a host that mutated the DOM through JS (e.g. a `setInterval`
+    /// callback calling `textContent = ...`) read it back to re-run
+    /// layout/render against the live state — see `profile-worker`'s
+    /// per-frame loop.
+    pub fn dom(&self) -> Option<&dom::Dom> {
+        self._dom.as_deref()
     }
 }
 

@@ -4,5 +4,7 @@ pub mod downloads;
 pub mod history;
 pub mod i18n;
 pub mod resource_monitor;
+pub mod settings;
 pub mod tiling;
+pub mod vault_ui;
 pub mod workspace;

@@ -6,7 +6,9 @@ use shell::downloads::Downloads;
 use shell::history::History;
 use shell::i18n::{self, Locale};
 use shell::resource_monitor::PaneMonitor;
+use shell::settings::PerformanceSettings;
 use shell::tiling;
+use shell::vault_ui;
 use shell::workspace::WorkspaceManager;
 
 const PANE_WIDTH: u32 = 512;
@@ -67,6 +69,17 @@ struct NimbleApp {
     /// targets the selected pane on submit, same "selected pane" scoping
     /// the address bar/proxy box already use.
     download_url_text: String,
+    performance: PerformanceSettings,
+    /// `Some` once the Settings window has actually opened the real vault
+    /// (`vault_ui::open`) - not eagerly at startup, so a session that
+    /// never opens Settings never touches the filesystem for it.
+    vault: Option<security::vault::CredentialVault>,
+    vault_error: Option<String>,
+    settings_open: bool,
+    /// New-credential form fields in the Settings window's Credentials
+    /// section.
+    vault_key_text: String,
+    vault_value_text: String,
 }
 
 const SPARKLINE_HEIGHT: f32 = 24.0;
@@ -141,6 +154,12 @@ impl Default for NimbleApp {
             automation_result: None,
             locale: Locale::En,
             download_url_text: String::new(),
+            performance: PerformanceSettings::new(),
+            vault: None,
+            vault_error: None,
+            settings_open: false,
+            vault_key_text: String::new(),
+            vault_value_text: String::new(),
         }
     }
 }
@@ -169,7 +188,7 @@ impl NimbleApp {
     /// out from under this loop) - panes belonging to other workspaces
     /// are never touched by this, regardless of count.
     fn set_pane_count(&mut self, count: usize) {
-        let count = count.max(1);
+        let count = self.performance.clamp_pane_count(count);
         let visible = self.active_workspace_pane_indices();
         if visible.len() < count {
             for _ in visible.len()..count {
@@ -233,6 +252,51 @@ impl NimbleApp {
         }
         self.panes[self.selected].downloads.download(&url);
         self.download_url_text.clear();
+    }
+
+    /// Opens the real on-disk vault (`vault_ui::open`) if it isn't open
+    /// yet - lazy, so a session that never opens Settings never touches
+    /// the filesystem for this. A failure (permissions, corrupted vault
+    /// file) is stored in `self.vault_error` and shown in the Settings
+    /// window rather than silently leaving the Credentials section blank.
+    fn ensure_vault_open(&mut self) {
+        if self.vault.is_some() {
+            return;
+        }
+        match vault_ui::open(&vault_ui::default_vault_dir()) {
+            Ok(vault) => {
+                self.vault = Some(vault);
+                self.vault_error = None;
+            }
+            Err(e) => self.vault_error = Some(e.to_string()),
+        }
+    }
+
+    /// Adds `self.vault_key_text` -> `self.vault_value_text` to the real
+    /// vault (encrypts + flushes to disk immediately, see
+    /// `CredentialVault::set`'s own doc) and clears both fields on
+    /// success.
+    fn add_credential(&mut self) {
+        let key = self.vault_key_text.trim().to_string();
+        if key.is_empty() {
+            return;
+        }
+        let Some(vault) = self.vault.as_mut() else { return };
+        match vault.set(&key, &self.vault_value_text) {
+            Ok(()) => {
+                self.vault_key_text.clear();
+                self.vault_value_text.clear();
+                self.vault_error = None;
+            }
+            Err(e) => self.vault_error = Some(e.to_string()),
+        }
+    }
+
+    fn remove_credential(&mut self, key: &str) {
+        let Some(vault) = self.vault.as_mut() else { return };
+        if let Err(e) = vault.remove(key) {
+            self.vault_error = Some(e.to_string());
+        }
     }
 
     /// The context menu's "Run auto login" stand-in: runs
@@ -370,9 +434,13 @@ impl eframe::App for NimbleApp {
             ui.horizontal(|ui| {
                 ui.label(i18n::t(i18n::PANES_LABEL, self.locale));
                 for count in [1, 2, 4, 6] {
-                    if ui.selectable_label(visible.len() == count, count.to_string()).clicked() {
+                    let allowed = count <= self.performance.max_panes;
+                    if ui.add_enabled(allowed, egui::SelectableLabel::new(visible.len() == count, count.to_string())).clicked() {
                         self.set_pane_count(count);
                     }
+                }
+                if ui.button("⚙ Settings").clicked() {
+                    self.settings_open = !self.settings_open;
                 }
                 ui.separator();
                 if ui.selectable_label(self.locale == Locale::En, "EN").clicked() {
@@ -450,6 +518,50 @@ impl eframe::App for NimbleApp {
                 None => {}
             }
         });
+
+        if self.settings_open {
+            self.ensure_vault_open();
+            let mut open = self.settings_open;
+            egui::Window::new("Settings").open(&mut open).show(ctx, |ui| {
+                ui.heading("Performance");
+                ui.add(egui::Slider::new(&mut self.performance.max_panes, 1..=6).text("Max live panes"));
+                ui.label("Background throttling / GPU selection / per-pane frame cap: not implemented yet - profile-worker's vsync loop has no command for any of those (fixed TARGET_FPS since spawn).");
+
+                ui.separator();
+                ui.heading("Credentials");
+                ui.label("Real AES-256-GCM encrypted vault (security::CredentialVault) - not the real OS keychain yet, see that module's doc.");
+                if let Some(error) = &self.vault_error {
+                    ui.colored_label(egui::Color32::RED, error);
+                }
+                ui.horizontal(|ui| {
+                    ui.add(egui::TextEdit::singleline(&mut self.vault_key_text).hint_text("key (e.g. login.email)"));
+                    ui.add(egui::TextEdit::singleline(&mut self.vault_value_text).hint_text("value").password(true));
+                    if ui.button("Add").clicked() {
+                        self.add_credential();
+                    }
+                });
+                ui.separator();
+                let mut to_remove: Option<String> = None;
+                if let Some(vault) = &self.vault {
+                    let keys: Vec<String> = vault.keys().map(str::to_string).collect();
+                    if keys.is_empty() {
+                        ui.weak("No stored credentials.");
+                    }
+                    for key in keys {
+                        ui.horizontal(|ui| {
+                            ui.label(&key);
+                            if ui.small_button("Remove").clicked() {
+                                to_remove = Some(key);
+                            }
+                        });
+                    }
+                }
+                if let Some(key) = to_remove {
+                    self.remove_credential(&key);
+                }
+            });
+            self.settings_open = open;
+        }
 
         egui::SidePanel::right("downloads_history").resizable(true).default_width(260.0).show(ctx, |ui| {
             let visible = self.active_workspace_pane_indices();

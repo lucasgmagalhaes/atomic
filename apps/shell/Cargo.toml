@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 eframe = "0.28"
 egui = "0.28"
+profile = { path = "../../crates/profile" }

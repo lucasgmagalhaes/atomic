@@ -105,6 +105,23 @@ fn attributes_on_created_nodes_are_bounded_and_visible_to_selectors() {
 }
 
 #[test]
+fn scripts_can_insert_text_before_a_sibling_and_remove_children() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let parent = d.create_element("main");
+    let tail = d.create_element("span");
+    d.set_attribute(parent, "id", "parent");
+    d.set_attribute(tail, "id", "tail");
+    d.append_child(root, parent);
+    d.append_child(parent, tail);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const parent = document.getElementById('parent'); const tail = document.getElementById('tail'); const text = document.createTextNode('before'); const inserted = parent.insertBefore(text, tail); const removed = parent.removeChild(tail); return `${inserted === text},${parent.textContent},${removed === tail},${document.getElementById('tail')}`; })()", "<test>").unwrap();
+    assert_eq!(result, "true,before,true,null");
+}
+
+#[test]
 fn query_selector_uses_the_existing_css_selector_subset_in_document_order() {
     let mut d = dom::Dom::new();
     let root = d.root();

@@ -32,6 +32,7 @@ const MAX_SELECTOR_RESULTS: usize = 2048;
 const MAX_TAG_NAME_LENGTH: usize = 64;
 const MAX_ATTRIBUTE_NAME_LENGTH: usize = 64;
 const MAX_ATTRIBUTE_VALUE_LENGTH: usize = 4096;
+const MAX_TEXT_NODE_LENGTH: usize = 16 * 1024;
 
 thread_local! {
     static NODE_OBJECTS: RefCell<HashMap<usize, HashMap<dom::NodeId, sys::JSValue>>> = RefCell::new(HashMap::new());
@@ -606,6 +607,43 @@ unsafe extern "C" fn node_get_attribute(
         .unwrap_or_else(sys::js_null)
 }
 
+unsafe extern "C" fn node_insert_before(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 2 {
+        return throw_type_error(ctx, "new node and reference node are required");
+    }
+    let Some(parent) = node_id(ctx, this_val) else {
+        return throw_type_error(ctx, "insert target must be a node");
+    };
+    let new_value = *argv;
+    let reference_value = *argv.add(1);
+    let (Some(new_node), Some(reference_node)) =
+        (node_id(ctx, new_value), node_id(ctx, reference_value))
+    else {
+        return throw_type_error(ctx, "insert arguments must be nodes");
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null()
+        || (*dom).get(parent).is_none()
+        || (*dom).get(new_node).is_none()
+        || (*dom).get(reference_node).is_none()
+    {
+        return throw_type_error(ctx, "node is no longer attached to this document");
+    }
+    if (*dom).get(reference_node).and_then(|node| node.parent) != Some(parent) {
+        return throw_type_error(ctx, "reference node is not a child of this parent");
+    }
+    if is_ancestor(&*dom, new_node, parent) {
+        return throw_type_error(ctx, "cannot insert an ancestor into its descendant");
+    }
+    (*dom).insert_before(reference_node, new_node);
+    sys::JS_DupValue(ctx, new_value)
+}
+
 unsafe extern "C" fn node_set_attribute(
     ctx: *mut sys::JSContext,
     this_val: sys::JSValue,
@@ -655,11 +693,41 @@ unsafe extern "C" fn node_remove(
     sys::js_undefined()
 }
 
+unsafe extern "C" fn node_remove_child(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 1 {
+        return throw_type_error(ctx, "child node is required");
+    }
+    let Some(parent) = node_id(ctx, this_val) else {
+        return throw_type_error(ctx, "remove target must be a node");
+    };
+    let child_value = *argv;
+    let Some(child) = node_id(ctx, child_value) else {
+        return throw_type_error(ctx, "child must be a node");
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() || (*dom).get(parent).is_none() || (*dom).get(child).is_none() {
+        return throw_type_error(ctx, "node is no longer attached to this document");
+    }
+    if (*dom).get(child).and_then(|node| node.parent) != Some(parent) {
+        return throw_type_error(ctx, "node is not a child of this parent");
+    }
+    evict_subtree(ctx, &*dom, child);
+    (*dom).remove(child);
+    sys::JS_DupValue(ctx, child_value)
+}
+
 unsafe fn define_mutation_methods(ctx: *mut sys::JSContext, proto: sys::JSValue) {
     for (name, function, arity) in [
         ("appendChild", node_append_child as sys::JSCFunction, 1),
         ("getAttribute", node_get_attribute as sys::JSCFunction, 1),
         ("setAttribute", node_set_attribute as sys::JSCFunction, 2),
+        ("insertBefore", node_insert_before as sys::JSCFunction, 2),
+        ("removeChild", node_remove_child as sys::JSCFunction, 1),
         ("remove", node_remove as sys::JSCFunction, 0),
     ] {
         let name = CString::new(name).unwrap();
@@ -829,6 +897,33 @@ unsafe extern "C" fn document_create_element(
     )
 }
 
+unsafe extern "C" fn document_create_text_node(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 1 {
+        return throw_type_error(ctx, "text content is required");
+    }
+    let Some(text) = read_js_string(ctx, *argv) else {
+        return throw_type_error(ctx, "text content must be a string");
+    };
+    if text.len() > MAX_TEXT_NODE_LENGTH {
+        return throw_type_error(ctx, "text node exceeds the maximum length");
+    }
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return throw_type_error(ctx, "document is unavailable");
+    }
+    let id = (*dom).create_text(&text);
+    node_object(
+        ctx,
+        crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NODE_CLASS_KIND),
+        id,
+    )
+}
+
 unsafe extern "C" fn document_query_selector(
     ctx: *mut sys::JSContext,
     _this_val: sys::JSValue,
@@ -953,6 +1048,16 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
         0,
     );
     sys::JS_SetPropertyStr(ctx, document, name.as_ptr(), create_element);
+    let name = CString::new("createTextNode").unwrap();
+    let create_text_node = sys::JS_NewCFunction2(
+        ctx,
+        document_create_text_node,
+        name.as_ptr(),
+        1,
+        sys::JS_CFUNC_GENERIC,
+        0,
+    );
+    sys::JS_SetPropertyStr(ctx, document, name.as_ptr(), create_text_node);
     for (name, function) in [
         ("querySelector", document_query_selector as sys::JSCFunction),
         (

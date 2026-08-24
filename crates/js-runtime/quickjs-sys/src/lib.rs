@@ -192,6 +192,8 @@ extern "C" {
     ) -> JSValue;
 
     pub fn JS_IsFunction(ctx: *mut JSContext, val: JSValue) -> bool;
+    pub fn JS_GetException(ctx: *mut JSContext) -> JSValue;
+    pub fn JS_HasException(ctx: *mut JSContext) -> bool;
 
     pub fn JS_GetRuntime(ctx: *mut JSContext) -> *mut JSRuntime;
 
@@ -344,6 +346,15 @@ pub const fn js_undefined() -> JSValue {
     JSValue {
         u: JSValueUnion { int32: 0 },
         tag: JS_TAG_UNDEFINED,
+    }
+}
+
+/// `JS_EXCEPTION` — return this from a native binding after an exception was
+/// placed on the context with `JS_Throw`.
+pub const fn js_exception() -> JSValue {
+    JSValue {
+        u: JSValueUnion { int32: 0 },
+        tag: JS_TAG_EXCEPTION,
     }
 }
 

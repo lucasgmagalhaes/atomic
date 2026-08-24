@@ -298,6 +298,20 @@ fn nested_dispatch_is_bounded_without_leaking_depth_between_events() {
 }
 
 #[test]
+fn listener_exceptions_are_rethrown_after_later_listeners_run() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let button = d.create_element("button");
+    d.append_child(root, button);
+    d.set_attribute(button, "id", "button");
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const button = document.getElementById('button'); let log = ''; button.addEventListener('click', () => { throw new Error('expected'); }); button.addEventListener('click', () => { log += 'later'; }); try { button.dispatchEvent('click'); } catch (_) { log += ':caught'; } return log; })()", "<test>").unwrap();
+    assert_eq!(result, "later:caught");
+}
+
+#[test]
 fn remove_event_listener_stops_future_dispatch() {
     let mut d = dom::Dom::new();
     let root = d.root();

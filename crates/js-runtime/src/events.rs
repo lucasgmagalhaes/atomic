@@ -332,7 +332,12 @@ unsafe extern "C" fn remove(
     sys::JS_FreeValue(ctx, all);
     sys::js_undefined()
 }
-unsafe fn dispatch_at(ctx: *mut sys::JSContext, node: sys::JSValue, event: sys::JSValue) {
+unsafe fn dispatch_at(
+    ctx: *mut sys::JSContext,
+    node: sys::JSValue,
+    event: sys::JSValue,
+    first_exception: &mut Option<sys::JSValue>,
+) {
     let p = state(ctx, event);
     let all = listeners(ctx, node);
     let name = CString::new((*p).event_type.as_str()).unwrap_or_default();
@@ -357,6 +362,14 @@ unsafe fn dispatch_at(ctx: *mut sys::JSContext, node: sys::JSValue, event: sys::
     for f in snapshot {
         let mut args = [sys::JS_DupValue(ctx, event)];
         let r = sys::JS_Call(ctx, f, node, 1, args.as_mut_ptr());
+        if sys::js_is_exception(&r) {
+            let exception = sys::JS_GetException(ctx);
+            if first_exception.is_none() {
+                *first_exception = Some(exception);
+            } else {
+                sys::JS_FreeValue(ctx, exception);
+            }
+        }
         sys::JS_FreeValue(ctx, r);
         sys::JS_FreeValue(ctx, args[0]);
         sys::JS_FreeValue(ctx, f)
@@ -374,6 +387,7 @@ pub(crate) unsafe fn dispatch(ctx: *mut sys::JSContext, node: sys::JSValue, kind
         return false;
     }
     let mut current = Some(target_id);
+    let mut first_exception = None;
     for _ in 0..MAX_BUBBLE_DEPTH {
         let Some(id) = current else { break };
         let p = state(ctx, event);
@@ -386,12 +400,16 @@ pub(crate) unsafe fn dispatch(ctx: *mut sys::JSContext, node: sys::JSValue, kind
             crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), "Node"),
             id,
         );
-        dispatch_at(ctx, current_node, event);
+        dispatch_at(ctx, current_node, event, &mut first_exception);
         sys::JS_FreeValue(ctx, current_node);
         current = crate::dom_bindings::parent_node_id(ctx, id);
     }
     let canceled = (*state(ctx, event)).default_prevented;
     sys::JS_FreeValue(ctx, event);
+    if let Some(exception) = first_exception {
+        sys::JS_Throw(ctx, exception);
+        return false;
+    }
     !canceled
 }
 unsafe extern "C" fn dispatch_event(
@@ -406,7 +424,12 @@ unsafe extern "C" fn dispatch_event(
     let Some(kind) = read_string(ctx, *argv) else {
         return type_error(ctx, "event type must be a string");
     };
-    sys::js_bool(dispatch(ctx, node, &kind))
+    let result = dispatch(ctx, node, &kind);
+    if sys::JS_HasException(ctx) {
+        sys::js_exception()
+    } else {
+        sys::js_bool(result)
+    }
 }
 pub(crate) unsafe fn define_event_target(ctx: *mut sys::JSContext, proto: sys::JSValue) {
     for (name, func, arity) in [

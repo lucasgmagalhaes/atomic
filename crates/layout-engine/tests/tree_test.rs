@@ -128,3 +128,71 @@ fn dimensions_default_to_zero_before_layout_runs() {
     assert_eq!(tree.dimensions.height, 0.0);
     assert_eq!(tree.style.display, Display::Block);
 }
+
+#[test]
+fn style_and_script_elements_are_never_rendered_even_with_explicit_display_block() {
+    let mut d = Dom::new();
+    let root = d.root();
+    let container = d.create_element("html");
+    d.append_child(root, container);
+    let style_el = d.create_element("style");
+    let text = d.create_text("div { color: red; }");
+    d.append_child(style_el, text);
+    let script_el = d.create_element("script");
+    let script_text = d.create_text("doSomething();");
+    d.append_child(script_el, script_text);
+    d.append_child(container, style_el);
+    d.append_child(container, script_el);
+
+    // A page's own stylesheet trying to force these visible must not
+    // override the unconditional UA-level "never rendered" rule.
+    let sheet = parse_stylesheet("style, script { display: block; width: 100px; height: 100px; }");
+    let tree = build_box_tree(&d, container, &sheet).unwrap();
+
+    assert!(tree.children.is_empty(), "style/script must not produce a box");
+}
+
+#[test]
+fn a_style_element_placed_before_content_does_not_push_it_down() {
+    let mut d = Dom::new();
+    let root = d.root();
+    let container = d.create_element("html");
+    d.append_child(root, container);
+    let style_el = d.create_element("style");
+    let style_text = d.create_text("#box { width: 10px; height: 10px; }");
+    d.append_child(style_el, style_text);
+    let div = d.create_element("div");
+    d.set_attribute(div, "id", "box");
+    d.append_child(container, style_el);
+    d.append_child(container, div);
+
+    let sheet = parse_stylesheet("#box { width: 10px; height: 10px; }");
+    let tree = build_box_tree(&d, container, &sheet).unwrap();
+
+    assert_eq!(tree.children.len(), 1, "the <style> element must not produce a sibling box");
+    assert_eq!(tree.children[0].node, div);
+}
+
+#[test]
+fn head_metadata_elements_are_pruned_from_the_box_tree() {
+    let mut d = Dom::new();
+    let root = d.root();
+    let container = d.create_element("html");
+    d.append_child(root, container);
+    let head = d.create_element("head");
+    let title = d.create_element("title");
+    let title_text = d.create_text("Page Title");
+    d.append_child(title, title_text);
+    let meta = d.create_element("meta");
+    d.append_child(head, title);
+    d.append_child(head, meta);
+    let body = d.create_element("body");
+    d.append_child(container, head);
+    d.append_child(container, body);
+
+    let sheet = parse_stylesheet("");
+    let tree = build_box_tree(&d, container, &sheet).unwrap();
+
+    assert_eq!(tree.children.len(), 1);
+    assert_eq!(tree.children[0].node, body);
+}

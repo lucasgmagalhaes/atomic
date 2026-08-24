@@ -103,6 +103,26 @@ pub struct LayoutBox {
     pub image: Option<std::rc::Rc<image_decode::DecodedImage>>,
 }
 
+/// Tags a real browser's UA stylesheet gives `display: none` unconditionally
+/// (their content is metadata/source text, never part of the rendered
+/// page) — this engine has no UA stylesheet/tag-based default table at all
+/// (see this module's other docs on that same gap for `display: inline`),
+/// so without this check `<script>`/`<style>` source text and `<head>`
+/// metadata would otherwise lay out and paint as ordinary visible content,
+/// a real bug this closes (surfaced by a `profile-worker` test where a
+/// `<style>` block placed before the element it styled visibly pushed that
+/// element down the page). A page's own stylesheet can't override this by
+/// setting `display: block` on one of these tags — real browsers don't
+/// allow that either for `<head>`/`<script>`/`<style>` position in the
+/// rendering process (a `<script>` unconditionally never renders, `display`
+/// or not).
+fn is_never_rendered(tag: &str) -> bool {
+    matches!(
+        tag,
+        "head" | "style" | "script" | "title" | "meta" | "link" | "base" | "noscript"
+    )
+}
+
 fn classes_of(attributes: &std::collections::HashMap<String, String>) -> Vec<String> {
     attributes
         .get("class")
@@ -217,6 +237,9 @@ fn collect_inline_spans(
             }
         }
         NodeData::Element { tag, attributes, .. } => {
+            if is_never_rendered(tag) {
+                return;
+            }
             let style = resolve_element_style(dom, node, tag, attributes, sheet, viewport_width, chain, parent_font_size, parent_color);
             if style.display != Display::None {
                 for &child in &n.children {
@@ -248,6 +271,9 @@ fn is_inline_level(
     match dom.get(node).map(|n| &n.data) {
         Some(NodeData::Text(text)) => !text.trim().is_empty(),
         Some(NodeData::Element { tag, attributes, .. }) => {
+            if is_never_rendered(tag) {
+                return false;
+            }
             let style = resolve_element_style(dom, node, tag, attributes, sheet, viewport_width, chain, parent_font_size, parent_color);
             chain.pop();
             style.display == Display::Inline
@@ -367,9 +393,12 @@ fn build(
         });
     }
 
-    let NodeData::Element { .. } = &n.data else {
+    let NodeData::Element { tag, .. } = &n.data else {
         return None;
     };
+    if is_never_rendered(tag) {
+        return None;
+    }
 
     chain.push(build_element_snapshot(dom, node));
     let style = resolve_style(&matching_declarations(sheet, chain, viewport_width), parent_font_size, parent_color);

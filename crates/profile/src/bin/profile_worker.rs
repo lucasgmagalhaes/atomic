@@ -20,7 +20,7 @@
 //! hardcoded base stylesheet that used to be all any page ever got — a
 //! real page now actually looks like something, not just unstyled text.
 //! `<link>` hrefs are resolved against the page's own URL via the real
-//! `url` crate (`resolve_stylesheet_url` — relative, root-relative, and
+//! `url` crate (`resolve_url` — relative, root-relative, and
 //! scheme-relative hrefs all work now, not just already-absolute ones),
 //! then fetched only if the result is `http(s)://` (skips `data:` etc.).
 //! `@import` and `@media` are real now too (`css`'s own parser handles
@@ -35,6 +35,19 @@
 //! itself already makes — a real browser fetches off the render thread
 //! and shows a loading state meanwhile; this one just misses a few frame
 //! ticks, acceptable since nothing animates during a fetch anyway).
+//!
+//! Real `<img>` painting now too (`load_images`/`collect_image_sources`,
+//! called from `Page::load` the same way `build_stylesheet` fetches
+//! `<link>`s): each `<img src>` is resolved against the page's own URL,
+//! fetched via `fetch_with_cookies`, and decoded via `image_decode`. The
+//! decode/sizing/painting primitives themselves (`image_decode`,
+//! `layout_engine::apply_image_sizes`, `render::build_image_list`/
+//! `composite_images`) already existed and were crate-tested — this
+//! worker just never called any of them, so a real navigated page's
+//! `<img>` rendered as an empty box regardless. `Page::render`/
+//! `hit_test_at` now share one `Page::layout` helper (previously each
+//! rebuilt its own box tree independently) so both agree on the same
+//! image-sized boxes.
 //!
 //! Command protocol over stdin (newline-delimited, one command per line),
 //! read on a dedicated thread and drained non-blockingly by the render
@@ -67,16 +80,19 @@
 //!   that before it would corrupt the stream.
 //! - `QUIT` -> exits cleanly
 //! - anything else -> ignored
+use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
+use std::rc::Rc;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use css::{parse_stylesheet, Stylesheet};
 use dom::{Dom, NodeData, NodeId};
+use image_decode::DecodedImage;
 use js_runtime::{Context, Runtime};
-use layout_engine::{build_box_tree_with_viewport, layout_block};
-use render::{build_display_list, build_glyph_list, composite_glyphs, GpuRenderer};
+use layout_engine::{apply_image_sizes, build_box_tree_with_viewport, layout_block, LayoutBox};
+use render::{build_display_list, build_glyph_list, build_image_list, composite_glyphs, composite_images, GpuRenderer};
 
 const TARGET_FPS: u32 = 60;
 const FRAME_INTERVAL: Duration = Duration::from_nanos(1_000_000_000 / TARGET_FPS as u64);
@@ -184,6 +200,62 @@ fn collect_script_sources(dom: &Dom, node: NodeId, out: &mut Vec<String>) {
     }
 }
 
+/// Walks `node`'s subtree collecting every `<img src="...">`'s own
+/// `NodeId` and raw (not yet resolved) `src`, in document order. Feeds
+/// [`load_images`] — the real decode/sizing/painting primitives
+/// (`image_decode`, `layout_engine::apply_image_sizes`, `render`'s
+/// `build_image_list`/`composite_images`) already existed and were tested
+/// at the crate level, but nothing in this worker ever called any of
+/// them: a real navigated page's `<img>` rendered as an empty box, same
+/// as `mockup/rendering-engine-gaps.md` §5 originally documented as a
+/// "gap total" — this closes the missing wiring, not new primitives.
+fn collect_image_sources(dom: &Dom, node: NodeId, out: &mut Vec<(NodeId, String)>) {
+    let Some(n) = dom.get(node) else { return };
+    if let NodeData::Element { tag, attributes, .. } = &n.data {
+        if tag == "img" {
+            if let Some(src) = attributes.get("src") {
+                out.push((node, src.clone()));
+            }
+        }
+    }
+    for &child in &n.children {
+        collect_image_sources(dom, child, out);
+    }
+}
+
+/// Fetches and decodes every real `<img src>` in `dom` (rooted at `root`),
+/// same "one real GET per resource, at load time" convention
+/// `build_stylesheet` already uses for `<link>` stylesheets — `src`
+/// resolved against `base_url` via [`resolve_url`], fetched through
+/// [`fetch_with_cookies`] (so a profile's proxy/DNS/cookie jar apply to
+/// images exactly like every other request this worker makes), decoded
+/// via `image_decode::decode`. An unresolvable URL, a failed fetch, or
+/// undecodable bytes (an unsupported format, corrupt data, an HTML error
+/// page served with an `.jpg` extension) simply gets no entry — the same
+/// "best-effort, never fail the whole page load over one bad resource"
+/// stance `build_stylesheet` already takes, and `apply_image_sizes`
+/// itself already documents as its contract for a missing entry.
+fn load_images(
+    dom: &Dom,
+    root: NodeId,
+    base_url: Option<&str>,
+    storage_root: &std::path::Path,
+    proxy: Option<&net::ProxyConfig>,
+    dns_server: Option<std::net::SocketAddr>,
+) -> HashMap<NodeId, Rc<DecodedImage>> {
+    let mut sources = Vec::new();
+    collect_image_sources(dom, root, &mut sources);
+
+    let mut images = HashMap::new();
+    for (node, src) in sources {
+        let Some(url) = resolve_url(base_url, &src) else { continue };
+        let Ok(response) = fetch_with_cookies(&url, storage_root, proxy, dns_server) else { continue };
+        let Some(decoded) = image_decode::decode(&response.body) else { continue };
+        images.insert(node, Rc::new(decoded));
+    }
+    images
+}
+
 /// Fetches `url` with a `Cookie` header built from the jar at
 /// `storage_root/<host>/cookies.txt` (the same file
 /// `js_runtime::Context::with_storage` opens for `document.cookie` — see
@@ -247,7 +319,7 @@ fn fetch_with_cookies(url: &str, storage_root: &std::path::Path, proxy: Option<&
 /// parse as `host:port` — an unparseable proxy argument degrades to "no
 /// proxy" rather than refusing to start, matching this file's general
 /// "best-effort, never fails the whole page load over one bad input"
-/// stance elsewhere (see `resolve_stylesheet_url`).
+/// stance elsewhere (see `resolve_url`).
 fn parse_proxy_arg(arg: Option<&str>) -> Option<net::ProxyConfig> {
     let arg = arg?;
     if arg.is_empty() {
@@ -292,7 +364,7 @@ fn parse_dns_arg(arg: Option<&str>) -> Option<std::net::SocketAddr> {
 /// result (e.g. `data:`), a malformed href, or a relative href with no
 /// `base_url` to resolve against (the built-in demo page has no URL of
 /// its own).
-fn resolve_stylesheet_url(base_url: Option<&str>, href: &str) -> Option<String> {
+fn resolve_url(base_url: Option<&str>, href: &str) -> Option<String> {
     let resolved = match base_url {
         Some(base) => url::Url::parse(base).ok()?.join(href).ok()?,
         None => url::Url::parse(href).ok()?,
@@ -307,7 +379,7 @@ fn resolve_stylesheet_url(base_url: Option<&str>, href: &str) -> Option<String> 
 /// Resolves every CSS source in `dom` (rooted at `root`) into one cascaded
 /// [`Stylesheet`]: [`BASE_STYLESHEET_SRC`] first, then each `<style>`/
 /// `<link>` source in document order, `<link>` hrefs resolved against
-/// `base_url` via [`resolve_stylesheet_url`] — a `<link>` that doesn't
+/// `base_url` via [`resolve_url`] — a `<link>` that doesn't
 /// resolve to a fetchable `http(s)://` URL is silently skipped, matching
 /// `resolve_html`'s own "best-effort, never panics on a real page" stance
 /// rather than failing the whole page load over one bad stylesheet
@@ -341,7 +413,7 @@ fn merge_stylesheet_text(
         if !should_fetch {
             continue;
         }
-        if let Some(resolved) = resolve_stylesheet_url(base_url, &import.url) {
+        if let Some(resolved) = resolve_url(base_url, &import.url) {
             if let Ok(response) = fetch_with_cookies(&resolved, storage_root, proxy, dns_server) {
                 let imported_text = String::from_utf8_lossy(&response.body).into_owned();
                 sheet.rules.extend(parse_stylesheet(&imported_text).rules);
@@ -367,7 +439,7 @@ fn build_stylesheet(
     for source in sources {
         let css_text = match source {
             CssSource::Inline(text) => Some(text),
-            CssSource::Link(href) => resolve_stylesheet_url(base_url, &href)
+            CssSource::Link(href) => resolve_url(base_url, &href)
                 .and_then(|url| fetch_with_cookies(&url, storage_root, proxy, dns_server).ok())
                 .map(|response| String::from_utf8_lossy(&response.body).into_owned()),
         };
@@ -500,6 +572,12 @@ struct Page<'rt> {
     ctx: Context<'rt>,
     html_el: NodeId,
     sheet: Stylesheet,
+    /// Real fetched/decoded `<img>` images, keyed by the `<img>` element's
+    /// own `NodeId` — see `load_images`. Fixed for this `Page`'s lifetime
+    /// (fetched once at load time, same "a page's resources don't change
+    /// underneath it without a fresh navigation" convention its
+    /// stylesheet already follows).
+    images: HashMap<NodeId, Rc<DecodedImage>>,
 }
 
 impl<'rt> Page<'rt> {
@@ -526,6 +604,7 @@ impl<'rt> Page<'rt> {
     ) -> Self {
         let (dom, html_el) = html::parse_to_html_element(html);
         let sheet = build_stylesheet(&dom, html_el, base_url, viewport_width, storage_root, proxy, dns_server);
+        let images = load_images(&dom, html_el, base_url, storage_root, proxy, dns_server);
         let mut scripts = Vec::new();
         collect_script_sources(&dom, html_el, &mut scripts);
 
@@ -554,7 +633,23 @@ impl<'rt> Page<'rt> {
         for (index, script) in scripts.iter().enumerate() {
             let _ = ctx.eval(script, &format!("<script {index}>"));
         }
-        Page { ctx, html_el, sheet }
+        Page { ctx, html_el, sheet, images }
+    }
+
+    /// Builds and lays out this page's real box tree against `width` —
+    /// shared by `render` and `hit_test_at` so they always agree on
+    /// exactly the same box positions/sizes (previously each rebuilt its
+    /// own tree independently, which would have silently disagreed once
+    /// `<img>` intrinsic sizing entered the picture - `apply_image_sizes`
+    /// must run after box-tree construction and before layout, so both
+    /// callers need it applied identically). `None` only if the parse/
+    /// box-tree-construction step itself fails.
+    fn layout(&self, width: u32) -> Option<LayoutBox> {
+        let dom = self.ctx.dom()?;
+        let mut tree = build_box_tree_with_viewport(dom, self.html_el, &self.sheet, width as f64)?;
+        apply_image_sizes(dom, &mut tree, &self.images);
+        layout_block(&mut tree, width as f64, 0.0, 0.0);
+        Some(tree)
     }
 
     /// Re-layouts and re-rasterizes from the DOM's *current* state (which
@@ -562,34 +657,36 @@ impl<'rt> Page<'rt> {
     /// already-initialized `renderer` — creating a `GpuRenderer` opens a
     /// real GPU device/adapter, expensive enough that doing it every tick
     /// would itself become the vsync loop's bottleneck instead of the
-    /// fixed frame interval.
+    /// fixed frame interval. Composites real decoded `<img>` pixels
+    /// (`self.images`, via `build_image_list`/`composite_images`) between
+    /// the background-rect pass and the text pass — closest to real paint
+    /// order (background, then replaced content, then inline text) this
+    /// worker's existing two-pass (GPU rects, then CPU glyphs) pipeline
+    /// can give without a bigger repaint-ordering rework.
     fn render(&self, renderer: &GpuRenderer, width: u32, height: u32) -> Vec<u8> {
-        let dom = self.ctx.dom().expect("Page always constructs its Context via with_dom");
-        let mut tree =
-            build_box_tree_with_viewport(dom, self.html_el, &self.sheet, width as f64).expect("parsed HTML always produces a box");
-        layout_block(&mut tree, width as f64, 0.0, 0.0);
+        let tree = self.layout(width).expect("parsed HTML always produces a box");
 
         let rects = build_display_list(&tree);
+        let images = build_image_list(&tree);
         let glyphs = build_glyph_list(&tree);
 
         let mut pixels = renderer.render_to_rgba(&rects, width, height, [0.08, 0.09, 0.13, 1.0]);
+        composite_images(&mut pixels, width, height, &images);
         composite_glyphs(&mut pixels, width, height, &glyphs);
         pixels
     }
 
-    /// Real coordinate-to-DOM-node hit test — rebuilds and lays out the
-    /// same box tree `render` does (against `width`, the pane's own real
-    /// frame width, so the caller's `(x, y)` must already be in that same
-    /// pixel space) and walks it via `layout_engine::hit_test`. `None`
-    /// covers both "point is outside every box" and "the parse/layout
-    /// step itself failed" — a caller can't distinguish those from this
-    /// return value alone, matching this method's only real use
+    /// Real coordinate-to-DOM-node hit test — lays out the same box tree
+    /// `render` does (via `self.layout`, against `width`, the pane's own
+    /// real frame width, so the caller's `(x, y)` must already be in that
+    /// same pixel space) and walks it via `layout_engine::hit_test`.
+    /// `None` covers both "point is outside every box" and "the parse/
+    /// layout step itself failed" — a caller can't distinguish those from
+    /// this return value alone, matching this method's only real use
     /// (`CLICK_AT`, where both cases report the same "nothing there"
     /// outcome anyway).
     fn hit_test_at(&self, width: u32, x: f64, y: f64) -> Option<NodeId> {
-        let dom = self.ctx.dom()?;
-        let mut tree = build_box_tree_with_viewport(dom, self.html_el, &self.sheet, width as f64)?;
-        layout_block(&mut tree, width as f64, 0.0, 0.0);
+        let tree = self.layout(width)?;
         layout_engine::hit_test(&tree, x, y)
     }
 }

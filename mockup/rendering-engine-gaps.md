@@ -101,12 +101,12 @@ Campos reais: `display`, `width`, `height`, `margin`, `padding`, `flex_direction
 
 ## 5. Imagens
 
-**Gap total, não parcial.** Zero código em qualquer lugar do workspace:
-- Sem dependência de crate de decodificação (`image`, `png`, `jpeg`) em nenhum `Cargo.toml`
-- Sem tratamento de `<img>` em `dom`/`html`/`layout-engine`
-- Sem `HTMLImageElement`
-- Sem textura-a-partir-de-imagem em `render`/`webgl`
-- Consequência: nenhuma página com imagem real renderiza a imagem — o `<img>` vira um elemento genérico sem conteúdo visual
+**Fechado (2026-08-24), real, ponta a ponta.** `image_decode` (PNG+JPEG via a crate `image`), `layout_engine::apply_image_sizes` (sizing intrínseco real) e `render::build_image_list`/`composite_images` (compositing real, nearest-neighbor) já existiam e eram testados isoladamente por crate — mas nada em `profile-worker`, o único processo que realmente renderiza uma página navegada, jamais chamava nenhum dos três. Uma página real com `<img>` continuava sem pintar nada, apesar de cada peça individual já ser real. Fechado agora: `profile-worker`'s `load_images`/`collect_image_sources` buscam (via `fetch_with_cookies` — mesmo proxy/DNS/cookie jar de qualquer outro fetch deste worker) e decodificam cada `<img src>` no carregamento da página (mesma convenção "um GET real por recurso, no load" que `build_stylesheet` já usa pra `<link>`), e `Page::render`/`hit_test_at` agora compartilham um `Page::layout` único que aplica `apply_image_sizes` antes do layout — antes cada um reconstruía sua própria árvore de boxes de forma independente, o que teria discordado silenciosamente assim que o sizing intrínseco de imagem entrasse em cena.
+
+- FALTANDO: `HTMLImageElement` como tipo de nó dedicado (`onload`/`onerror`/`naturalWidth`/`naturalHeight` em JS) — `dom::NodeData::Element` continua genérico, sem hierarquia de classe por tag
+- FALTANDO: GIF/WebP/AVIF/SVG (a feature-set da crate `image` habilitada aqui é só PNG+JPEG), imagens animadas (só o primeiro frame), perfil de cor ICC
+- FALTANDO: `srcset`/`<picture>`/`loading="lazy"`
+- Uma falha de fetch/decode (URL não resolve, 404, bytes corrompidos) deixa a box vazia (mesmo comportamento de um `<img>` sem `src`), sem erro reportado
 
 ## 6. Input real (mouse/teclado → DOM)
 

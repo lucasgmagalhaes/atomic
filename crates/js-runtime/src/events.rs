@@ -1,7 +1,8 @@
 //! `addEventListener`/`removeEventListener`/`dispatchEvent` on `Node`.
 //! Deliberate cuts from the real EventTarget spec:
-//! - one listener per (node, event type), last registered wins — no
-//!   listener list, no capture/bubble phases, no `once`/`passive` options.
+//! - listeners are stored in registration-order arrays per `(node, event
+//!   type)`; capture/bubble phases and `once`/`passive` options remain out
+//!   of scope for this first EventTarget slice.
 //! - `dispatchEvent(type)` takes a plain string, not a real `Event` object
 //!   (no `Event`/`CustomEvent` class exists yet) — the listener is called
 //!   with no arguments, so it can't read `event.type` or anything else.
@@ -15,6 +16,7 @@ use std::os::raw::c_int;
 use quickjs_sys as sys;
 
 const LISTENERS_PROP: &[u8] = b"__listeners\0";
+const MAX_LISTENERS_PER_TYPE: i64 = 64;
 
 unsafe fn read_js_string(ctx: *mut sys::JSContext, val: sys::JSValue) -> Option<String> {
     let mut len: usize = 0;
@@ -30,7 +32,10 @@ unsafe fn read_js_string(ctx: *mut sys::JSContext, val: sys::JSValue) -> Option<
 
 /// Gets (creating if absent) the `__listeners` object own to `this_val`.
 /// Returns an owned reference.
-unsafe fn get_or_create_listeners(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue {
+unsafe fn get_or_create_listeners(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
     let prop = LISTENERS_PROP.as_ptr() as *const std::os::raw::c_char;
     let existing = sys::JS_GetPropertyStr(ctx, this_val, prop);
     if existing.tag != sys::JS_TAG_UNDEFINED {
@@ -58,7 +63,31 @@ unsafe extern "C" fn add_event_listener(
 
     let listeners = get_or_create_listeners(ctx, this_val);
     let type_name = CString::new(event_type).unwrap_or_default();
-    sys::JS_SetPropertyStr(ctx, listeners, type_name.as_ptr(), sys::JS_DupValue(ctx, callback));
+    let existing = sys::JS_GetPropertyStr(ctx, listeners, type_name.as_ptr());
+    let callbacks = if sys::JS_IsArray(existing) {
+        existing
+    } else {
+        sys::JS_FreeValue(ctx, existing);
+        let created = sys::JS_NewArray(ctx);
+        sys::JS_SetPropertyStr(
+            ctx,
+            listeners,
+            type_name.as_ptr(),
+            sys::JS_DupValue(ctx, created),
+        );
+        created
+    };
+    let mut length = 0i64;
+    sys::JS_GetLength(ctx, callbacks, &mut length);
+    if length < MAX_LISTENERS_PER_TYPE {
+        sys::JS_SetPropertyUint32(
+            ctx,
+            callbacks,
+            length as u32,
+            sys::JS_DupValue(ctx, callback),
+        );
+    }
+    sys::JS_FreeValue(ctx, callbacks);
     sys::JS_FreeValue(ctx, listeners);
 
     sys::js_undefined()
@@ -79,9 +108,28 @@ unsafe extern "C" fn remove_event_listener(
 
     let listeners = get_or_create_listeners(ctx, this_val);
     let type_name = CString::new(event_type).unwrap_or_default();
-    // No JS_DeleteProperty binding - overwriting with undefined is
-    // equivalent for dispatch_event's purposes (it checks the tag).
-    sys::JS_SetPropertyStr(ctx, listeners, type_name.as_ptr(), sys::js_undefined());
+    if argc < 2 {
+        // Backward compatibility for the original single-argument binding:
+        // remove all listeners for this event type.
+        sys::JS_SetPropertyStr(ctx, listeners, type_name.as_ptr(), sys::js_undefined());
+    } else {
+        let callbacks = sys::JS_GetPropertyStr(ctx, listeners, type_name.as_ptr());
+        if sys::JS_IsArray(callbacks) {
+            let callback = *argv.add(1);
+            let mut length = 0i64;
+            sys::JS_GetLength(ctx, callbacks, &mut length);
+            for index in 0..length as u32 {
+                let registered = sys::JS_GetPropertyUint32(ctx, callbacks, index);
+                if sys::JS_IsStrictEqual(ctx, registered, callback) {
+                    sys::JS_SetPropertyUint32(ctx, callbacks, index, sys::js_undefined());
+                    sys::JS_FreeValue(ctx, registered);
+                    break;
+                }
+                sys::JS_FreeValue(ctx, registered);
+            }
+        }
+        sys::JS_FreeValue(ctx, callbacks);
+    }
     sys::JS_FreeValue(ctx, listeners);
 
     sys::js_undefined()
@@ -94,21 +142,34 @@ unsafe extern "C" fn remove_event_listener(
 /// call — e.g. `dom_bindings`'s native `.focus()`/`.blur()`/`.value =`
 /// implementations, which already hold `ctx`/`this_val` in scope. Returns
 /// whether a listener was found and called.
-pub(crate) unsafe fn dispatch(ctx: *mut sys::JSContext, this_val: sys::JSValue, event_type: &str) -> bool {
+pub(crate) unsafe fn dispatch(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    event_type: &str,
+) -> bool {
     let listeners = get_or_create_listeners(ctx, this_val);
     let type_name = CString::new(event_type).unwrap_or_default();
-    let listener = sys::JS_GetPropertyStr(ctx, listeners, type_name.as_ptr());
+    let callbacks = sys::JS_GetPropertyStr(ctx, listeners, type_name.as_ptr());
     sys::JS_FreeValue(ctx, listeners);
 
-    if listener.tag == sys::JS_TAG_UNDEFINED {
-        sys::JS_FreeValue(ctx, listener);
+    if !sys::JS_IsArray(callbacks) {
+        sys::JS_FreeValue(ctx, callbacks);
         return false;
     }
-
-    let result = sys::JS_Call(ctx, listener, this_val, 0, std::ptr::null_mut());
-    sys::JS_FreeValue(ctx, result);
-    sys::JS_FreeValue(ctx, listener);
-    true
+    let mut length = 0i64;
+    sys::JS_GetLength(ctx, callbacks, &mut length);
+    let mut called = false;
+    for index in 0..length as u32 {
+        let listener = sys::JS_GetPropertyUint32(ctx, callbacks, index);
+        if listener.tag != sys::JS_TAG_UNDEFINED {
+            let result = sys::JS_Call(ctx, listener, this_val, 0, std::ptr::null_mut());
+            sys::JS_FreeValue(ctx, result);
+            called = true;
+        }
+        sys::JS_FreeValue(ctx, listener);
+    }
+    sys::JS_FreeValue(ctx, callbacks);
+    called
 }
 
 unsafe extern "C" fn dispatch_event(
@@ -139,7 +200,8 @@ pub(crate) unsafe fn define_event_target(ctx: *mut sys::JSContext, proto: sys::J
     ];
     for (name, func, arity) in methods {
         let cname = CString::new(*name).unwrap();
-        let value = sys::JS_NewCFunction2(ctx, *func, cname.as_ptr(), *arity, sys::JS_CFUNC_GENERIC, 0);
+        let value =
+            sys::JS_NewCFunction2(ctx, *func, cname.as_ptr(), *arity, sys::JS_CFUNC_GENERIC, 0);
         sys::JS_SetPropertyStr(ctx, proto, cname.as_ptr(), value);
     }
 }

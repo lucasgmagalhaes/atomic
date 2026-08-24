@@ -26,6 +26,10 @@ use std::os::raw::{c_int, c_void};
 
 use quickjs_sys as sys;
 
+const MAX_SELECTOR_LENGTH: usize = 1024;
+const MAX_SELECTOR_VISITS: usize = 4096;
+const MAX_SELECTOR_RESULTS: usize = 2048;
+
 thread_local! {
     static NODE_OBJECTS: RefCell<HashMap<usize, HashMap<dom::NodeId, sys::JSValue>>> = RefCell::new(HashMap::new());
 }
@@ -37,9 +41,17 @@ thread_local! {
 /// own "caller owns what it gets back" convention — the cache itself
 /// holds one reference for as long as the `Context` lives, freed by
 /// [`cleanup`].
-unsafe fn get_or_create_node_object(ctx: *mut sys::JSContext, class_id: sys::JSClassID, id: dom::NodeId) -> sys::JSValue {
+unsafe fn get_or_create_node_object(
+    ctx: *mut sys::JSContext,
+    class_id: sys::JSClassID,
+    id: dom::NodeId,
+) -> sys::JSValue {
     let ctx_key = ctx as usize;
-    let cached = NODE_OBJECTS.with(|reg| reg.borrow().get(&ctx_key).and_then(|nodes| nodes.get(&id).copied()));
+    let cached = NODE_OBJECTS.with(|reg| {
+        reg.borrow()
+            .get(&ctx_key)
+            .and_then(|nodes| nodes.get(&id).copied())
+    });
     if let Some(obj) = cached {
         return sys::JS_DupValue(ctx, obj);
     }
@@ -49,7 +61,10 @@ unsafe fn get_or_create_node_object(ctx: *mut sys::JSContext, class_id: sys::JSC
         return obj;
     }
     NODE_OBJECTS.with(|reg| {
-        reg.borrow_mut().entry(ctx_key).or_default().insert(id, sys::JS_DupValue(ctx, obj));
+        reg.borrow_mut()
+            .entry(ctx_key)
+            .or_default()
+            .insert(id, sys::JS_DupValue(ctx, obj));
     });
     obj
 }
@@ -86,9 +101,21 @@ unsafe fn new_js_string(ctx: *mut sys::JSContext, s: &str) -> sys::JSValue {
     sys::JS_NewStringLen(ctx, s.as_ptr() as *const std::os::raw::c_char, s.len())
 }
 
+unsafe fn throw_type_error(ctx: *mut sys::JSContext, message: &str) -> sys::JSValue {
+    sys::JS_Throw(ctx, new_js_string(ctx, message))
+}
+
 unsafe fn node_opaque(rt: *mut sys::JSRuntime, this_val: sys::JSValue) -> *mut dom::NodeId {
     let class_id = crate::class_registry::class_id_for(rt, NODE_CLASS_KIND);
     sys::JS_GetOpaque(this_val, class_id) as *mut dom::NodeId
+}
+
+pub(crate) unsafe fn node_id(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> Option<dom::NodeId> {
+    let ptr = node_opaque(sys::JS_GetRuntime(ctx), this_val);
+    (!ptr.is_null()).then(|| *ptr)
 }
 
 unsafe fn dom_opaque(ctx: *mut sys::JSContext) -> *mut dom::Dom {
@@ -104,6 +131,143 @@ unsafe fn dom_opaque(ctx: *mut sys::JSContext) -> *mut dom::Dom {
     std::ptr::addr_of_mut!((*state).dom)
 }
 
+fn element_snapshot(dom: &dom::Dom, id: dom::NodeId) -> Option<css::ElementSnapshot> {
+    let node = dom.get(id)?;
+    let dom::NodeData::Element {
+        tag, attributes, ..
+    } = &node.data
+    else {
+        return None;
+    };
+    Some(css::ElementSnapshot {
+        tag: tag.clone(),
+        id: attributes.get("id").cloned(),
+        classes: attributes
+            .get("class")
+            .map(|value| value.split_ascii_whitespace().map(str::to_owned).collect())
+            .unwrap_or_default(),
+        attributes: attributes
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect(),
+        preceding_siblings: Vec::new(),
+        has_following_sibling: false,
+    })
+}
+
+/// Builds the finite left-sibling chain needed by `+`/`~` matching. A
+/// sibling snapshot never recursively includes following siblings, avoiding
+/// a `first -> second -> first` cycle while retaining `a + b + c` support.
+fn preceding_snapshot(dom: &dom::Dom, id: dom::NodeId) -> Option<css::ElementSnapshot> {
+    let mut result = element_snapshot(dom, id)?;
+    let parent = dom.get(id)?.parent?;
+    let siblings = &dom.get(parent)?.children;
+    let position = siblings.iter().position(|&sibling| sibling == id)?;
+    result.preceding_siblings = siblings[..position]
+        .iter()
+        .filter_map(|&sibling| preceding_snapshot(dom, sibling))
+        .collect();
+    Some(result)
+}
+
+fn snapshot(dom: &dom::Dom, id: dom::NodeId) -> Option<css::ElementSnapshot> {
+    let mut result = preceding_snapshot(dom, id)?;
+    let parent = dom.get(id)?.parent?;
+    let siblings = &dom.get(parent)?.children;
+    let position = siblings.iter().position(|&sibling| sibling == id)?;
+    result.has_following_sibling = siblings[position + 1..]
+        .iter()
+        .any(|&sibling| element_snapshot(dom, sibling).is_some());
+    Some(result)
+}
+
+fn selector_chain(dom: &dom::Dom, id: dom::NodeId) -> Option<Vec<css::ElementSnapshot>> {
+    let mut ids = Vec::new();
+    let mut current = Some(id);
+    while let Some(node_id) = current {
+        if matches!(dom.get(node_id)?.data, dom::NodeData::Element { .. }) {
+            ids.push(node_id);
+        }
+        current = dom.get(node_id)?.parent;
+    }
+    ids.reverse();
+    ids.into_iter()
+        .map(|node_id| snapshot(dom, node_id))
+        .collect()
+}
+
+fn matching_nodes(
+    dom: &dom::Dom,
+    start: dom::NodeId,
+    selector: &str,
+    include_start: bool,
+) -> Result<Vec<dom::NodeId>, &'static str> {
+    if selector.is_empty() || selector.len() > MAX_SELECTOR_LENGTH {
+        return Err("selector is empty or exceeds the maximum length");
+    }
+    let stylesheet = css::parse_stylesheet(&format!("{selector} {{}}"));
+    let Some(rule) = stylesheet.rules.first() else {
+        return Err("unsupported selector syntax");
+    };
+    if stylesheet.rules.len() != 1 || rule.selectors.0.is_empty() {
+        return Err("unsupported selector syntax");
+    }
+    let mut result = Vec::new();
+    let mut stack = vec![start];
+    let mut visits = 0usize;
+    while let Some(node_id) = stack.pop() {
+        visits += 1;
+        if visits > MAX_SELECTOR_VISITS {
+            return Err("selector traversal limit exceeded");
+        }
+        let node = dom.get(node_id).ok_or("invalid DOM node")?;
+        if (include_start || node_id != start) && matches!(node.data, dom::NodeData::Element { .. })
+        {
+            let chain = selector_chain(dom, node_id).ok_or("invalid DOM ancestry")?;
+            if rule
+                .selectors
+                .0
+                .iter()
+                .any(|candidate| css::selector_matches(candidate, &chain))
+            {
+                result.push(node_id);
+                if result.len() > MAX_SELECTOR_RESULTS {
+                    return Err("selector result limit exceeded");
+                }
+            }
+        }
+        stack.extend(node.children.iter().rev().copied());
+    }
+    Ok(result)
+}
+
+unsafe fn query_selector_all(
+    ctx: *mut sys::JSContext,
+    start: dom::NodeId,
+    selector: &str,
+    include_start: bool,
+) -> sys::JSValue {
+    let dom_ptr = dom_opaque(ctx);
+    if dom_ptr.is_null() {
+        return sys::JS_NewArray(ctx);
+    }
+    let nodes = match matching_nodes(&*dom_ptr, start, selector, include_start) {
+        Ok(nodes) => nodes,
+        Err(message) => return throw_type_error(ctx, message),
+    };
+    let array = sys::JS_NewArray(ctx);
+    let class_id = crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NODE_CLASS_KIND);
+    for (index, node_id) in nodes.into_iter().enumerate() {
+        sys::JS_SetPropertyUint32(
+            ctx,
+            array,
+            index as u32,
+            get_or_create_node_object(ctx, class_id, node_id),
+        );
+    }
+    array
+}
+
 unsafe extern "C" fn node_finalizer(rt: *mut sys::JSRuntime, val: sys::JSValue) {
     let ptr = node_opaque(rt, val);
     if !ptr.is_null() {
@@ -111,7 +275,8 @@ unsafe extern "C" fn node_finalizer(rt: *mut sys::JSRuntime, val: sys::JSValue) 
     }
 }
 
-type Getter = unsafe extern "C" fn(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue;
+type Getter =
+    unsafe extern "C" fn(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue;
 type Setter = unsafe extern "C" fn(
     ctx: *mut sys::JSContext,
     this_val: sys::JSValue,
@@ -175,7 +340,10 @@ unsafe fn define_text_content(ctx: *mut sys::JSContext, proto: sys::JSValue) {
         atom,
         getter,
         setter,
-        sys::JS_PROP_HAS_GET | sys::JS_PROP_HAS_SET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE,
+        sys::JS_PROP_HAS_GET
+            | sys::JS_PROP_HAS_SET
+            | sys::JS_PROP_CONFIGURABLE
+            | sys::JS_PROP_ENUMERABLE,
     );
     sys::JS_FreeAtom(ctx, atom);
 }
@@ -245,7 +413,10 @@ unsafe fn define_value(ctx: *mut sys::JSContext, proto: sys::JSValue) {
         atom,
         getter,
         setter,
-        sys::JS_PROP_HAS_GET | sys::JS_PROP_HAS_SET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE,
+        sys::JS_PROP_HAS_GET
+            | sys::JS_PROP_HAS_SET
+            | sys::JS_PROP_CONFIGURABLE
+            | sys::JS_PROP_ENUMERABLE,
     );
     sys::JS_FreeAtom(ctx, atom);
 }
@@ -292,12 +463,88 @@ unsafe extern "C" fn node_blur(
 /// `document_active_element_get` below).
 unsafe fn define_focus_methods(ctx: *mut sys::JSContext, proto: sys::JSValue) {
     let focus_name = CString::new("focus").unwrap();
-    let focus_fn = sys::JS_NewCFunction2(ctx, node_focus, focus_name.as_ptr(), 0, sys::JS_CFUNC_GENERIC, 0);
+    let focus_fn = sys::JS_NewCFunction2(
+        ctx,
+        node_focus,
+        focus_name.as_ptr(),
+        0,
+        sys::JS_CFUNC_GENERIC,
+        0,
+    );
     sys::JS_SetPropertyStr(ctx, proto, focus_name.as_ptr(), focus_fn);
 
     let blur_name = CString::new("blur").unwrap();
-    let blur_fn = sys::JS_NewCFunction2(ctx, node_blur, blur_name.as_ptr(), 0, sys::JS_CFUNC_GENERIC, 0);
+    let blur_fn = sys::JS_NewCFunction2(
+        ctx,
+        node_blur,
+        blur_name.as_ptr(),
+        0,
+        sys::JS_CFUNC_GENERIC,
+        0,
+    );
     sys::JS_SetPropertyStr(ctx, proto, blur_name.as_ptr(), blur_fn);
+}
+
+unsafe extern "C" fn node_query_selector(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 1 {
+        return throw_type_error(ctx, "selector is required");
+    }
+    let Some(selector) = read_js_string(ctx, *argv) else {
+        return throw_type_error(ctx, "selector must be a string");
+    };
+    let Some(start) = node_id(ctx, this_val) else {
+        return sys::js_null();
+    };
+    let all = query_selector_all(ctx, start, &selector, false);
+    if sys::js_is_exception(&all) {
+        return all;
+    }
+    let first = sys::JS_GetPropertyUint32(ctx, all, 0);
+    sys::JS_FreeValue(ctx, all);
+    if first.tag == sys::JS_TAG_UNDEFINED {
+        sys::JS_FreeValue(ctx, first);
+        sys::js_null()
+    } else {
+        first
+    }
+}
+
+unsafe extern "C" fn node_query_selector_all(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 1 {
+        return throw_type_error(ctx, "selector is required");
+    }
+    let Some(selector) = read_js_string(ctx, *argv) else {
+        return throw_type_error(ctx, "selector must be a string");
+    };
+    let Some(start) = node_id(ctx, this_val) else {
+        return sys::JS_NewArray(ctx);
+    };
+    query_selector_all(ctx, start, &selector, false)
+}
+
+unsafe fn define_selector_methods(ctx: *mut sys::JSContext, proto: sys::JSValue) {
+    for (name, function) in [
+        ("querySelector", node_query_selector as sys::JSCFunction),
+        (
+            "querySelectorAll",
+            node_query_selector_all as sys::JSCFunction,
+        ),
+    ] {
+        let name = CString::new(name).unwrap();
+        let value =
+            sys::JS_NewCFunction2(ctx, function, name.as_ptr(), 1, sys::JS_CFUNC_GENERIC, 0);
+        sys::JS_SetPropertyStr(ctx, proto, name.as_ptr(), value);
+    }
 }
 
 /// Registers the `Node` class on `ctx`'s runtime (if not already done for
@@ -318,13 +565,18 @@ unsafe fn ensure_node_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
     define_text_content(ctx, proto);
     define_value(ctx, proto);
     define_focus_methods(ctx, proto);
+    define_selector_methods(ctx, proto);
     crate::events::define_event_target(ctx, proto);
     sys::JS_SetClassProto(ctx, class_id, proto);
 
     class_id
 }
 
-unsafe fn make_node_object(ctx: *mut sys::JSContext, class_id: sys::JSClassID, id: dom::NodeId) -> sys::JSValue {
+unsafe fn make_node_object(
+    ctx: *mut sys::JSContext,
+    class_id: sys::JSClassID,
+    id: dom::NodeId,
+) -> sys::JSValue {
     let obj = sys::JS_NewObjectClass(ctx, class_id);
     if sys::js_is_exception(&obj) {
         return obj;
@@ -350,9 +602,62 @@ unsafe extern "C" fn document_get_element_by_id(
         return sys::js_null();
     }
     match (*dom_ptr).find_by_id(&id) {
-        Some(node_id) => get_or_create_node_object(ctx, crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NODE_CLASS_KIND), node_id),
+        Some(node_id) => get_or_create_node_object(
+            ctx,
+            crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NODE_CLASS_KIND),
+            node_id,
+        ),
         None => sys::js_null(),
     }
+}
+
+unsafe extern "C" fn document_query_selector(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 1 {
+        return throw_type_error(ctx, "selector is required");
+    }
+    let Some(selector) = read_js_string(ctx, *argv) else {
+        return throw_type_error(ctx, "selector must be a string");
+    };
+    let dom_ptr = dom_opaque(ctx);
+    if dom_ptr.is_null() {
+        return sys::js_null();
+    }
+    let all = query_selector_all(ctx, (*dom_ptr).root(), &selector, true);
+    if sys::js_is_exception(&all) {
+        return all;
+    }
+    let first = sys::JS_GetPropertyUint32(ctx, all, 0);
+    sys::JS_FreeValue(ctx, all);
+    if first.tag == sys::JS_TAG_UNDEFINED {
+        sys::JS_FreeValue(ctx, first);
+        sys::js_null()
+    } else {
+        first
+    }
+}
+
+unsafe extern "C" fn document_query_selector_all(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 1 {
+        return throw_type_error(ctx, "selector is required");
+    }
+    let Some(selector) = read_js_string(ctx, *argv) else {
+        return throw_type_error(ctx, "selector must be a string");
+    };
+    let dom_ptr = dom_opaque(ctx);
+    if dom_ptr.is_null() {
+        return sys::JS_NewArray(ctx);
+    }
+    query_selector_all(ctx, (*dom_ptr).root(), &selector, true)
 }
 
 unsafe extern "C" fn document_active_element_get(
@@ -364,7 +669,11 @@ unsafe extern "C" fn document_active_element_get(
         return sys::js_null();
     }
     match (*dom_ptr).active_element() {
-        Some(node_id) => get_or_create_node_object(ctx, crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NODE_CLASS_KIND), node_id),
+        Some(node_id) => get_or_create_node_object(
+            ctx,
+            crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NODE_CLASS_KIND),
+            node_id,
+        ),
         None => sys::js_null(),
     }
 }
@@ -384,7 +693,14 @@ unsafe fn define_active_element(ctx: *mut sys::JSContext, document: sys::JSValue
         0,
     );
     let atom = sys::JS_NewAtom(ctx, name.as_ptr());
-    sys::JS_DefinePropertyGetSet(ctx, document, atom, getter, sys::js_undefined(), sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE);
+    sys::JS_DefinePropertyGetSet(
+        ctx,
+        document,
+        atom,
+        getter,
+        sys::js_undefined(),
+        sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE,
+    );
     sys::JS_FreeAtom(ctx, atom);
 }
 
@@ -408,6 +724,18 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
         0,
     );
     sys::JS_SetPropertyStr(ctx, document, name.as_ptr(), get_by_id);
+    for (name, function) in [
+        ("querySelector", document_query_selector as sys::JSCFunction),
+        (
+            "querySelectorAll",
+            document_query_selector_all as sys::JSCFunction,
+        ),
+    ] {
+        let name = CString::new(name).unwrap();
+        let value =
+            sys::JS_NewCFunction2(ctx, function, name.as_ptr(), 1, sys::JS_CFUNC_GENERIC, 0);
+        sys::JS_SetPropertyStr(ctx, document, name.as_ptr(), value);
+    }
     define_active_element(ctx, document);
 
     sys::JS_FreeValue(ctx, document);

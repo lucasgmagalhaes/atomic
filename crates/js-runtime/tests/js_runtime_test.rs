@@ -41,7 +41,9 @@ fn get_element_by_id_returns_a_node_with_text_content() {
         .unwrap();
     assert_eq!(read, "hello");
 
-    let missing = ctx.eval("document.getElementById('nope')", "<test>").unwrap();
+    let missing = ctx
+        .eval("document.getElementById('nope')", "<test>")
+        .unwrap();
     assert_eq!(missing, "null");
 
     let wrote = ctx
@@ -55,6 +57,56 @@ fn get_element_by_id_returns_a_node_with_text_content() {
         )
         .unwrap();
     assert_eq!(wrote, "bye");
+}
+
+#[test]
+fn query_selector_uses_the_existing_css_selector_subset_in_document_order() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let section = d.create_element("section");
+    d.append_child(root, section);
+    let first = d.create_element("button");
+    d.set_attribute(first, "class", "claim");
+    d.set_attribute(first, "id", "first");
+    d.append_child(section, first);
+    let second = d.create_element("button");
+    d.set_attribute(second, "class", "claim");
+    d.set_attribute(second, "id", "second");
+    d.append_child(section, second);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+
+    let result = ctx
+        .eval(
+            "(() => { const all = document.querySelectorAll('section > button.claim'); return all.length + ',' + all[0].textContent + ',' + (document.querySelector('#second') === all[1]) + ',' + (all[0] === document.getElementById('first')); })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "2,,true,true");
+}
+
+#[test]
+fn element_query_selector_excludes_the_receiver_and_invalid_selectors_throw() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let container = d.create_element("div");
+    d.set_attribute(container, "id", "container");
+    d.append_child(root, container);
+    let child = d.create_element("div");
+    d.set_attribute(child, "class", "child");
+    d.append_child(container, child);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+
+    let result = ctx
+        .eval(
+            "(() => { const container = document.getElementById('container'); const found = container.querySelectorAll('div'); let invalid = false; try { document.querySelector(':not(div)'); } catch (_) { invalid = true; } return found.length + ',' + (found[0] !== container) + ',' + invalid; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "1,true,true");
 }
 
 #[test]
@@ -111,10 +163,20 @@ fn a_listener_attached_in_one_eval_call_survives_to_dispatch_in_a_later_separate
     )
     .expect("attaching the listener should eval cleanly");
 
-    let dispatched = ctx.eval("document.getElementById('greeting').dispatchEvent('click')", "<dispatch>").expect("dispatching should eval cleanly");
-    assert_eq!(dispatched, "true", "a real listener attached in an earlier eval call should still be found and called");
+    let dispatched = ctx
+        .eval(
+            "document.getElementById('greeting').dispatchEvent('click')",
+            "<dispatch>",
+        )
+        .expect("dispatching should eval cleanly");
+    assert_eq!(
+        dispatched, "true",
+        "a real listener attached in an earlier eval call should still be found and called"
+    );
 
-    let text_after = ctx.eval("document.getElementById('greeting').textContent", "<check>").expect("reading textContent should eval cleanly");
+    let text_after = ctx
+        .eval("document.getElementById('greeting').textContent", "<check>")
+        .expect("reading textContent should eval cleanly");
     assert_eq!(text_after, "clicked", "the listener's real mutation should be visible through yet another fresh getElementById call");
 }
 
@@ -142,6 +204,26 @@ fn add_event_listener_and_dispatch_event_calls_the_listener() {
         )
         .unwrap();
     assert_eq!(result, "true,clicked");
+}
+
+#[test]
+fn event_listeners_run_in_registration_order_and_can_be_removed_individually() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let p = d.create_element("p");
+    d.append_child(root, p);
+    d.set_attribute(p, "id", "target");
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+
+    let result = ctx
+        .eval(
+            "(() => { const el = document.getElementById('target'); let log = ''; const first = () => { log += 'a'; }; const second = () => { log += 'b'; }; el.addEventListener('click', first); el.addEventListener('click', second); el.removeEventListener('click', first); el.dispatchEvent('click'); return log; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "b");
 }
 
 #[test]
@@ -236,10 +318,7 @@ fn page_visibility_and_dom_bindings_coexist_on_shared_document() {
     let ctx = Context::with_dom(&rt, d);
 
     let visibility = ctx
-        .eval(
-            "document.visibilityState + ',' + document.hidden",
-            "<test>",
-        )
+        .eval("document.visibilityState + ',' + document.hidden", "<test>")
         .unwrap();
     assert_eq!(visibility, "visible,false");
 
@@ -254,10 +333,7 @@ fn page_visibility_reports_visible() {
     let rt = Runtime::new();
     let ctx = Context::new(&rt);
     let result = ctx
-        .eval(
-            "document.visibilityState + ',' + document.hidden",
-            "<test>",
-        )
+        .eval("document.visibilityState + ',' + document.hidden", "<test>")
         .unwrap();
     assert_eq!(result, "visible,false");
 }
@@ -266,9 +342,17 @@ fn page_visibility_reports_visible() {
 fn performance_now_advances() {
     let rt = Runtime::new();
     let ctx = Context::new(&rt);
-    let first: f64 = ctx.eval("performance.now()", "<test>").unwrap().parse().unwrap();
+    let first: f64 = ctx
+        .eval("performance.now()", "<test>")
+        .unwrap()
+        .parse()
+        .unwrap();
     std::thread::sleep(std::time::Duration::from_millis(5));
-    let second: f64 = ctx.eval("performance.now()", "<test>").unwrap().parse().unwrap();
+    let second: f64 = ctx
+        .eval("performance.now()", "<test>")
+        .unwrap()
+        .parse()
+        .unwrap();
     assert!(second > first);
 }
 
@@ -283,7 +367,9 @@ fn node_value_is_real_and_independent_of_text_content() {
     let rt = Runtime::new();
     let ctx = Context::with_dom(&rt, d);
 
-    let initial = ctx.eval("document.getElementById('field').value", "<test>").unwrap();
+    let initial = ctx
+        .eval("document.getElementById('field').value", "<test>")
+        .unwrap();
     assert_eq!(initial, "");
 
     let result = ctx
@@ -311,7 +397,9 @@ fn textarea_value_falls_back_to_text_content_until_set() {
     let rt = Runtime::new();
     let ctx = Context::with_dom(&rt, d);
 
-    let value = ctx.eval("document.getElementById('notes').value", "<test>").unwrap();
+    let value = ctx
+        .eval("document.getElementById('notes').value", "<test>")
+        .unwrap();
     assert_eq!(value, "seeded");
 }
 

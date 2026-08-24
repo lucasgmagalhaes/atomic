@@ -245,6 +245,7 @@ extern "C" {
     /// proxies - fine for this crate's use (only ever called on values it
     /// itself constructed or received as plain arguments, never a proxy).
     pub fn JS_IsArray(val: JSValue) -> bool;
+    pub fn JS_IsStrictEqual(ctx: *mut JSContext, op1: JSValue, op2: JSValue) -> bool;
 
     pub fn JS_GetProperty(ctx: *mut JSContext, this_obj: JSValue, prop: JSAtom) -> JSValue;
     pub fn JS_GetPropertyUint32(ctx: *mut JSContext, this_obj: JSValue, idx: u32) -> JSValue;

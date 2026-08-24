@@ -100,6 +100,22 @@ pub enum BorderStyle {
     Solid,
 }
 
+/// `hidden`/`auto`/`scroll` all resolve to `Hidden` here - real CSS clips
+/// content against the box's own border box for all three (only
+/// `visible` doesn't), and that clipping is what this crate models (see
+/// `render::build_display_list`/`build_image_list`/`build_glyph_list`).
+/// What's *not* modeled is the difference between them: no scrollbar is
+/// ever drawn, and there's no independent inner scroll offset for an
+/// `auto`/`scroll` container (only the whole-viewport scroll
+/// `profile-worker`'s `SCROLL` command already has) - a real, narrower
+/// scope cut of the same gap `mockup/rendering-engine-gaps.md`'s Scroll
+/// section already documents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Overflow {
+    Visible,
+    Hidden,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlexDirection {
     Row,
@@ -173,6 +189,9 @@ pub struct ComputedStyle {
     /// `None` — see `layout::layout_block`.
     pub border_width: EdgeSizes,
     pub border_style: BorderStyle,
+    /// Real content clipping - see [`Overflow`]'s own doc for the
+    /// `hidden`/`auto`/`scroll` scope cut.
+    pub overflow: Overflow,
     /// One color for all four sides - real per-side colors
     /// (`border-top-color`, ...) aren't modeled. Initial value is black,
     /// not the spec's `currentColor` (which would need reading back
@@ -217,6 +236,7 @@ impl ComputedStyle {
             left: Length::Auto,
             border_width: EdgeSizes::zero(),
             border_style: BorderStyle::None,
+            overflow: Overflow::Visible,
             border_color: Color { r: 0, g: 0, b: 0, a: 255 },
             flex_direction: FlexDirection::Row,
             justify_content: JustifyContent::Start,
@@ -519,6 +539,15 @@ fn apply_declaration(style: &mut ComputedStyle, decl: &Declaration) {
             }
         }
         "border" => apply_border_shorthand(style, &decl.value),
+        "overflow" => {
+            if let Some(Token::Ident(v)) = decl.value.first() {
+                style.overflow = match v.as_str() {
+                    "visible" => Overflow::Visible,
+                    "hidden" | "auto" | "scroll" => Overflow::Hidden,
+                    _ => return,
+                };
+            }
+        }
         _ => {}
     }
 }

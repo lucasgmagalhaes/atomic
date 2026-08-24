@@ -11,7 +11,7 @@ pub use flex::layout_flex_children;
 pub use layout::layout_block;
 pub use style::{
     resolve_style, AlignItems, BorderStyle, Color, ComputedStyle, Display, EdgeSizes,
-    FlexDirection, JustifyContent, Length, Position,
+    FlexDirection, JustifyContent, Length, Overflow, Position,
 };
 pub use text::{layout_inline, layout_text, rasterize_glyph, GlyphBitmap, InlineSpan, PositionedGlyph, TextLayout};
 pub use tree::{apply_image_sizes, build_box_tree, build_box_tree_with_viewport, Dimensions, InlineSpanSource, LayoutBox, ResolvedBorder, DEFAULT_VIEWPORT_WIDTH};

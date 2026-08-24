@@ -5,14 +5,17 @@
 //! the readback buffer. Simpler to get right than a glyph-atlas texture
 //! pipeline, and correct rendering matters more than throughput at this
 //! stage; revisit if/when text becomes a performance bottleneck.
-use layout_engine::PositionedGlyph;
+use crate::display_list::{ClipRect, ClippedGlyph};
 
 /// Alpha-blends (source-over) every glyph in `glyphs` onto `pixels`
 /// (tightly-packed RGBA8, row-major, `width` × `height`). Glyphs (or the
 /// parts of them) outside the buffer bounds are clipped silently, same as
-/// a real canvas would clip off-screen drawing.
-pub fn composite_glyphs(pixels: &mut [u8], width: u32, height: u32, glyphs: &[PositionedGlyph]) {
-    for glyph in glyphs {
+/// a real canvas would clip off-screen drawing - and, now, also clipped
+/// against each glyph's own `ClippedGlyph::clip` (real `overflow: hidden`
+/// content clipping, see `display_list`'s own doc), exactly, since this
+/// already checks per-pixel bounds.
+pub fn composite_glyphs(pixels: &mut [u8], width: u32, height: u32, glyphs: &[ClippedGlyph]) {
+    for ClippedGlyph { glyph, clip } in glyphs {
         let Some(bitmap) = layout_engine::rasterize_glyph(glyph) else {
             continue;
         };
@@ -32,6 +35,9 @@ pub fn composite_glyphs(pixels: &mut [u8], width: u32, height: u32, glyphs: &[Po
                 if px < 0 || px >= width as i32 {
                     continue;
                 }
+                if !in_clip(px, py, clip) {
+                    continue;
+                }
 
                 let coverage = bitmap.coverage[(row as u32 * bitmap.width + col as u32) as usize];
                 if coverage == 0 {
@@ -48,6 +54,16 @@ pub fn composite_glyphs(pixels: &mut [u8], width: u32, height: u32, glyphs: &[Po
             }
         }
     }
+}
+
+/// Whether pixel `(px, py)` (integer buffer coordinates) falls inside
+/// `clip` - `None` means unclipped, always `true`. Real `overflow`
+/// clipping check, shared by every pixel this function writes.
+fn in_clip(px: i32, py: i32, clip: &Option<ClipRect>) -> bool {
+    let Some(clip) = clip else { return true };
+    let x = px as f32;
+    let y = py as f32;
+    x >= clip.x && x < clip.x + clip.width && y >= clip.y && y < clip.y + clip.height
 }
 
 /// `dst = src over dst`, both straight (non-premultiplied) RGBA8.

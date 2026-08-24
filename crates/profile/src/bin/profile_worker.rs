@@ -99,7 +99,10 @@ use dom::{Dom, NodeData, NodeId};
 use image_decode::DecodedImage;
 use js_runtime::{Context, Runtime};
 use layout_engine::{apply_image_sizes, build_box_tree_with_viewport, layout_block, LayoutBox, PositionedGlyph};
-use render::{build_display_list, build_glyph_list, build_image_list, composite_glyphs, composite_images, GpuRenderer, ImageQuad, Rect};
+use render::{
+    build_display_list, build_glyph_list, build_image_list, composite_glyphs, composite_images, ClipRect, ClippedGlyph, GpuRenderer,
+    ImageQuad, Rect,
+};
 
 const TARGET_FPS: u32 = 60;
 const FRAME_INTERVAL: Duration = Duration::from_nanos(1_000_000_000 / TARGET_FPS as u64);
@@ -720,14 +723,33 @@ impl<'rt> Page<'rt> {
     /// already clip anything outside `[0, height)` silently (real
     /// clipping, not new for this), so a shifted rect above or below the
     /// viewport is simply not drawn - no separate clip step needed here.
+    /// Real `overflow: hidden`/`auto`/`scroll` clipping (per-element, see
+    /// `layout_engine::Overflow`) rides along the same shift: an
+    /// `ImageQuad`/`ClippedGlyph`'s own `clip` region is in the same
+    /// absolute document space as everything else, so it needs the same
+    /// `-offset`/`-scroll_top` shift applied as the quad/glyph it clips,
+    /// or a scrolled page would clip against a stale, unscrolled region.
     fn render(&self, renderer: &GpuRenderer, width: u32, height: u32, scroll_top: f64) -> Vec<u8> {
         let tree = self.layout(width).expect("parsed HTML always produces a box");
         let offset = scroll_top as f32;
+        let shift_clip = |clip: Option<ClipRect>, dy: f32| clip.map(|c| ClipRect { y: c.y - dy, ..c });
 
         let rects: Vec<Rect> = build_display_list(&tree).into_iter().map(|r| Rect { y: r.y - offset, ..r }).collect();
-        let images: Vec<ImageQuad> = build_image_list(&tree).into_iter().map(|q| ImageQuad { y: q.y - offset, ..q }).collect();
-        let glyphs: Vec<PositionedGlyph> =
-            build_glyph_list(&tree).into_iter().map(|g| PositionedGlyph { y: g.y - scroll_top as i32, ..g }).collect();
+        let images: Vec<ImageQuad> = build_image_list(&tree)
+            .into_iter()
+            .map(|q| ImageQuad {
+                y: q.y - offset,
+                clip: shift_clip(q.clip, offset),
+                ..q
+            })
+            .collect();
+        let glyphs: Vec<ClippedGlyph> = build_glyph_list(&tree)
+            .into_iter()
+            .map(|g| ClippedGlyph {
+                glyph: PositionedGlyph { y: g.glyph.y - scroll_top as i32, ..g.glyph },
+                clip: shift_clip(g.clip, offset),
+            })
+            .collect();
 
         let mut pixels = renderer.render_to_rgba(&rects, width, height, [0.08, 0.09, 0.13, 1.0]);
         composite_images(&mut pixels, width, height, &images);

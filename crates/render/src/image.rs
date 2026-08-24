@@ -13,13 +13,18 @@
 //! filtering. Real, not a stub: an image scaled up or down samples real
 //! source pixels at the nearest matching source coordinate, not a
 //! flat/average color.
-use crate::display_list::ImageQuad;
+use crate::display_list::{ClipRect, ImageQuad};
 
 /// Alpha-blends (source-over) every image in `quads` onto `pixels`
 /// (tightly-packed RGBA8, row-major, `width` × `height`), nearest-
 /// neighbor scaled to each quad's destination rect. Pixels (or the parts
 /// of a quad) outside the buffer bounds are clipped silently, same as
-/// [`crate::text::composite_glyphs`].
+/// [`crate::text::composite_glyphs`] - and, now, also clipped against
+/// each quad's own `ImageQuad::clip` (real `overflow: hidden` content
+/// clipping, see `display_list`'s own doc): only the destination bounds
+/// checked here shrink, `scale_x`/`scale_y` still divide by the quad's
+/// full, unclipped `width`/`height`, so a partially clipped image isn't
+/// distorted - it's a real crop, not a squeeze.
 pub fn composite_images(pixels: &mut [u8], width: u32, height: u32, quads: &[ImageQuad]) {
     for quad in quads {
         if quad.width <= 0.0 || quad.height <= 0.0 || quad.image.width == 0 || quad.image.height == 0 {
@@ -29,10 +34,11 @@ pub fn composite_images(pixels: &mut [u8], width: u32, height: u32, quads: &[Ima
         let scale_x = src.width as f32 / quad.width;
         let scale_y = src.height as f32 / quad.height;
 
-        let dest_x0 = quad.x.floor().max(0.0) as i32;
-        let dest_y0 = quad.y.floor().max(0.0) as i32;
-        let dest_x1 = (quad.x + quad.width).ceil().min(width as f32) as i32;
-        let dest_y1 = (quad.y + quad.height).ceil().min(height as f32) as i32;
+        let (clip_x0, clip_y0, clip_x1, clip_y1) = clip_bounds(&quad.clip);
+        let dest_x0 = quad.x.floor().max(0.0).max(clip_x0) as i32;
+        let dest_y0 = quad.y.floor().max(0.0).max(clip_y0) as i32;
+        let dest_x1 = (quad.x + quad.width).ceil().min(width as f32).min(clip_x1) as i32;
+        let dest_y1 = (quad.y + quad.height).ceil().min(height as f32).min(clip_y1) as i32;
 
         for py in dest_y0..dest_y1 {
             let rel_y = py as f32 - quad.y;
@@ -57,6 +63,15 @@ pub fn composite_images(pixels: &mut [u8], width: u32, height: u32, quads: &[Ima
                 blend_over(&mut pixels[dst_idx..dst_idx + 4], src_px);
             }
         }
+    }
+}
+
+/// `clip` as an `(x0, y0, x1, y1)` bounding box - `(-inf, -inf, +inf,
+/// +inf)` (effectively no-op against a `min`/`max` chain) when `None`.
+fn clip_bounds(clip: &Option<ClipRect>) -> (f32, f32, f32, f32) {
+    match clip {
+        Some(c) => (c.x, c.y, c.x + c.width, c.y + c.height),
+        None => (f32::NEG_INFINITY, f32::NEG_INFINITY, f32::INFINITY, f32::INFINITY),
     }
 }
 

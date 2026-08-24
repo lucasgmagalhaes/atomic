@@ -100,6 +100,40 @@ fn encode_png(width: u32, height: u32, color: [u8; 4]) -> Vec<u8> {
     bytes
 }
 
+/// Like [`serve_routes`], but each route also carries extra *response*
+/// headers (name, value pairs) — needed to deliver a real
+/// `Content-Security-Policy` header on the document response, which is
+/// exactly what `resolve_document` extracts and `Page::load` enforces.
+type RouteWithHeaders = (&'static str, &'static [(&'static str, &'static str)], String);
+
+fn serve_routes_with_headers(routes: Vec<RouteWithHeaders>) -> std::net::SocketAddr {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("failed to bind a loopback test server");
+    let addr = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut buf = [0u8; 4096];
+            let n = stream.read(&mut buf).unwrap_or(0);
+            let request = String::from_utf8_lossy(&buf[..n]);
+            let path = request.lines().next().and_then(|line| line.split_whitespace().nth(1)).unwrap_or("/").to_string();
+            let (extra_headers, body) = routes
+                .iter()
+                .find(|(route, _, _)| *route == path)
+                .map(|(_, headers, body)| (*headers, body.clone()))
+                .unwrap_or((&[], String::new()));
+            let mut response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n", body.len());
+            for (name, value) in extra_headers {
+                response.push_str(&format!("{name}: {value}\r\n"));
+            }
+            response.push_str("\r\n");
+            response.push_str(&body);
+            let _ = stream.write_all(response.as_bytes());
+            let _ = stream.flush();
+        }
+    });
+    addr
+}
+
 fn unique_shmem_name(tag: &str) -> String {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1169,4 +1203,84 @@ fn spawn_with_an_out_of_range_gpu_adapter_index_never_publishes_a_frame() {
     std::thread::sleep(std::time::Duration::from_millis(500));
     assert_eq!(profile.frame_generation(), 0, "a worker that panicked opening the adapter should never publish a frame");
     assert!(profile.latest_frame().is_none());
+}
+
+/// Shared page fixture for the CSP delivery tests: #marker fills the
+/// whole 300x150 frame and a page script fetchSync's a same-origin
+/// `/data` route (same-origin, so CORS/mixed-content can't be what
+/// blocks it) before swapping the marker green (`ok`) or red
+/// (`blocked`). `fetchSync` is synchronous, so by the first paint - the
+/// only one this test reads - the swap has already happened, exactly
+/// like the load-event test above relies on.
+fn csp_marker_html() -> String {
+    r#"<div id="marker" class="idle"></div>
+    <style>.idle { width: 300px; height: 150px; } .ok { background-color: #00ff00; width: 300px; height: 150px; } .blocked { background-color: #ff0000; width: 300px; height: 150px; }</style>
+    <script>const r = fetchSync(location.origin + '/data'); document.getElementById('marker').className = r.ok ? 'ok' : 'blocked';</script>"#
+        .to_string()
+}
+
+#[test]
+fn a_content_security_policy_response_header_on_the_document_blocks_the_pages_own_fetch() {
+    let page_addr = serve_routes_with_headers(vec![
+        ("/", &[("Content-Security-Policy", "connect-src 'none'")], csp_marker_html()),
+        ("/data", &[], "hello".to_string()),
+    ]);
+    let page_url = format!("http://{page_addr}/");
+
+    let name = unique_shmem_name("csp-header");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+    profile.navigate(&page_url).unwrap().unwrap();
+
+    let pixels = profile.latest_frame().unwrap();
+    assert_eq!(
+        &pixels[0..4],
+        &[255, 0, 0, 255],
+        "the document's Content-Security-Policy response header should have blocked the page's own same-origin fetchSync"
+    );
+
+    profile.quit();
+}
+
+#[test]
+fn a_meta_http_equiv_content_security_policy_tag_blocks_the_pages_own_fetch() {
+    // Same enforcement, delivered the other real way: a <meta> tag in the
+    // parsed HTML instead of a response header.
+    let html = format!("<meta http-equiv=\"Content-Security-Policy\" content=\"connect-src 'none'\">{}", csp_marker_html());
+    let page_addr = serve_routes_with_headers(vec![("/", &[], html), ("/data", &[], "hello".to_string())]);
+    let page_url = format!("http://{page_addr}/");
+
+    let name = unique_shmem_name("csp-meta");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+    profile.navigate(&page_url).unwrap().unwrap();
+
+    let pixels = profile.latest_frame().unwrap();
+    assert_eq!(
+        &pixels[0..4],
+        &[255, 0, 0, 255],
+        "a <meta http-equiv=Content-Security-Policy> tag should have blocked the page's own same-origin fetchSync"
+    );
+
+    profile.quit();
+}
+
+#[test]
+fn without_any_csp_delivery_the_same_fetch_succeeds_and_paints_green() {
+    // The control for the two tests above: identical page, no CSP header
+    // and no meta tag - proving those tests fail because of CSP
+    // enforcement, not because fetchSync itself is broken on navigated
+    // pages or the marker logic always paints red.
+    let page_addr = serve_routes_with_headers(vec![("/", &[], csp_marker_html()), ("/data", &[], "hello".to_string())]);
+    let page_url = format!("http://{page_addr}/");
+
+    let name = unique_shmem_name("csp-control");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+    profile.navigate(&page_url).unwrap().unwrap();
+
+    let pixels = profile.latest_frame().unwrap();
+    assert_eq!(&pixels[0..4], &[0, 255, 0, 255], "without any delivered CSP the page's own same-origin fetchSync should succeed");
+
+    profile.quit();
 }

@@ -1,7 +1,7 @@
 use css::{matching_declarations, parse_stylesheet, ElementSnapshot};
 
 fn el(tag: &str) -> ElementSnapshot {
-    ElementSnapshot { tag: tag.to_string(), id: None, classes: Vec::new() }
+    ElementSnapshot { tag: tag.to_string(), ..Default::default() }
 }
 
 #[test]

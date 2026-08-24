@@ -5,6 +5,7 @@ fn el(tag: &str, id: Option<&str>, classes: &[&str]) -> ElementSnapshot {
         tag: tag.to_string(),
         id: id.map(str::to_string),
         classes: classes.iter().map(|s| s.to_string()).collect(),
+        ..Default::default()
     }
 }
 

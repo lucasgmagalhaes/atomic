@@ -289,6 +289,34 @@ fn dataset_reflects_live_data_attributes_by_camel_case_key() {
 }
 
 #[test]
+fn attributes_collection_is_stable_iterable_and_supports_get_named_item() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let element = d.create_element("div");
+    d.set_attribute(element, "id", "panel");
+    d.set_attribute(element, "data-role", "admin");
+    d.append_child(root, element);
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { \
+                const el = document.querySelector('div'); \
+                const attrs = el.attributes; \
+                const stable = attrs === el.attributes; \
+                const pairs = [...attrs].map(a => `${a.name}=${a.value}`).join(','); \
+                const named = attrs.getNamedItem('id').value; \
+                const missing = attrs.getNamedItem('nope'); \
+                el.removeAttribute('data-role'); \
+                return `${stable},${pairs},${named},${missing},${el.attributes.length}`; \
+            })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "true,data-role=admin,id=panel,panel,null,1");
+}
+
+#[test]
 fn attribute_presence_and_names_follow_live_dom_attributes() {
     let mut d = dom::Dom::new();
     let root = d.root();

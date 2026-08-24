@@ -49,6 +49,8 @@ thread_local! {
     /// before" need `CLASS_LIST_LENGTHS` has, just keyed by name instead of
     /// a plain trailing count since dataset keys aren't densely indexed).
     static DATASET_KEYS: RefCell<HashMap<usize, HashMap<dom::NodeId, Vec<String>>>> = RefCell::new(HashMap::new());
+    static ATTRS_OBJECTS: RefCell<HashMap<usize, HashMap<dom::NodeId, sys::JSValue>>> = RefCell::new(HashMap::new());
+    static ATTRS_LENGTHS: RefCell<HashMap<usize, HashMap<dom::NodeId, usize>>> = RefCell::new(HashMap::new());
 }
 
 /// Returns a real, identity-stable `Node` JS object for `id` — the same
@@ -114,6 +116,9 @@ unsafe fn evict_node_object(ctx: *mut sys::JSContext, id: dom::NodeId) {
     let cached = DATASET_OBJECTS.with(|reg| reg.borrow_mut().get_mut(&(ctx as usize)).and_then(|nodes| nodes.remove(&id)));
     if let Some(object) = cached { sys::JS_FreeValue(ctx, object); }
     DATASET_KEYS.with(|reg| { if let Some(nodes) = reg.borrow_mut().get_mut(&(ctx as usize)) { nodes.remove(&id); } });
+    let cached = ATTRS_OBJECTS.with(|reg| reg.borrow_mut().get_mut(&(ctx as usize)).and_then(|nodes| nodes.remove(&id)));
+    if let Some(object) = cached { sys::JS_FreeValue(ctx, object); }
+    ATTRS_LENGTHS.with(|reg| { if let Some(nodes) = reg.borrow_mut().get_mut(&(ctx as usize)) { nodes.remove(&id); } });
 }
 
 /// Frees every cached `Node` object for `ctx` — must run before
@@ -134,6 +139,10 @@ pub(crate) unsafe fn cleanup(ctx: *mut sys::JSContext) {
         for (_, obj) in objects { sys::JS_FreeValue(ctx, obj); }
     }
     DATASET_KEYS.with(|reg| { reg.borrow_mut().remove(&(ctx as usize)); });
+    if let Some(objects) = ATTRS_OBJECTS.with(|reg| reg.borrow_mut().remove(&(ctx as usize))) {
+        for (_, obj) in objects { sys::JS_FreeValue(ctx, obj); }
+    }
+    ATTRS_LENGTHS.with(|reg| { reg.borrow_mut().remove(&(ctx as usize)); });
 }
 
 /// See `crate::class_registry` - one registry entry per `JSRuntime`, not
@@ -778,6 +787,87 @@ unsafe extern "C" fn node_dataset_get(ctx: *mut sys::JSContext, this_val: sys::J
 unsafe fn define_dataset(ctx: *mut sys::JSContext, proto: sys::JSValue) {
     let name = CString::new("dataset").unwrap();
     let getter = sys::JS_NewCFunction2(ctx, std::mem::transmute::<Getter, sys::JSCFunction>(node_dataset_get), name.as_ptr(), 0, sys::JS_CFUNC_GETTER, 0);
+    let atom = sys::JS_NewAtom(ctx, name.as_ptr());
+    sys::JS_DefinePropertyGetSet(ctx, proto, atom, getter, sys::js_undefined(), sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE);
+    sys::JS_FreeAtom(ctx, atom);
+}
+
+unsafe fn attrs_owner(ctx: *mut sys::JSContext, value: sys::JSValue) -> Option<dom::NodeId> {
+    let name = CString::new("__nimbleAttributesOwner").unwrap();
+    let owner = sys::JS_GetPropertyStr(ctx, value, name.as_ptr());
+    let id = node_id(ctx, owner);
+    sys::JS_FreeValue(ctx, owner);
+    id
+}
+
+unsafe fn make_attr_entry(ctx: *mut sys::JSContext, name: &str, value: &str) -> sys::JSValue {
+    let entry = sys::JS_NewObject(ctx);
+    let name_key = CString::new("name").unwrap();
+    sys::JS_SetPropertyStr(ctx, entry, name_key.as_ptr(), new_js_string(ctx, name));
+    let value_key = CString::new("value").unwrap();
+    sys::JS_SetPropertyStr(ctx, entry, value_key.as_ptr(), new_js_string(ctx, value));
+    entry
+}
+
+/// Refreshes an `attributes`/`NamedNodeMap` object's indexed `{name, value}`
+/// entries and `length` from every live attribute on `id`, same
+/// "diff against the last sync, clear trailing indices" convention
+/// `sync_class_list` already uses for a shrinking token list.
+unsafe fn sync_attributes(ctx: *mut sys::JSContext, dom: *mut dom::Dom, id: dom::NodeId, object: sys::JSValue) {
+    let Some(dom::NodeData::Element { attributes, .. }) = (*dom).get(id).map(|node| &node.data) else {
+        return;
+    };
+    let mut names: Vec<_> = attributes.keys().cloned().collect();
+    names.sort_unstable();
+    for (index, name) in names.iter().enumerate() {
+        let value = attributes.get(name).cloned().unwrap_or_default();
+        let entry = make_attr_entry(ctx, name, &value);
+        sys::JS_SetPropertyUint32(ctx, object, index as u32, entry);
+    }
+    let old_len = ATTRS_LENGTHS.with(|reg| {
+        reg.borrow().get(&(ctx as usize)).and_then(|nodes| nodes.get(&id).copied())
+    }).unwrap_or(0);
+    for index in names.len()..old_len {
+        sys::JS_SetPropertyUint32(ctx, object, index as u32, sys::js_undefined());
+    }
+    let length_name = CString::new("length").unwrap();
+    sys::JS_SetPropertyStr(ctx, object, length_name.as_ptr(), sys::js_float64(names.len() as f64));
+    ATTRS_LENGTHS.with(|reg| reg.borrow_mut().entry(ctx as usize).or_default().insert(id, names.len()));
+}
+
+unsafe extern "C" fn attrs_get_named_item(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
+    if argc < 1 { return throw_type_error(ctx, "attribute name is required"); }
+    let Some(name) = read_js_string(ctx, *argv) else { return throw_type_error(ctx, "attribute name must be a string"); };
+    let Some(id) = attrs_owner(ctx, this_val) else { return sys::js_null(); };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() { return sys::js_null(); }
+    (*dom).attribute(id, &name).map(|value| make_attr_entry(ctx, &name, value)).unwrap_or_else(sys::js_null)
+}
+
+unsafe extern "C" fn node_attributes_get(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else { return sys::js_undefined(); };
+    if let Some(value) = ATTRS_OBJECTS.with(|reg| reg.borrow().get(&(ctx as usize)).and_then(|objects| objects.get(&id).copied())) {
+        let dom = dom_opaque(ctx);
+        if !dom.is_null() { sync_attributes(ctx, dom, id, value); }
+        return sys::JS_DupValue(ctx, value);
+    }
+    let object = sys::JS_NewObject(ctx);
+    let proto = array_prototype(ctx);
+    sys::JS_SetPrototype(ctx, object, proto);
+    sys::JS_FreeValue(ctx, proto);
+    let owner = CString::new("__nimbleAttributesOwner").unwrap();
+    sys::JS_SetPropertyStr(ctx, object, owner.as_ptr(), sys::JS_DupValue(ctx, this_val));
+    let method_name = CString::new("getNamedItem").unwrap();
+    sys::JS_SetPropertyStr(ctx, object, method_name.as_ptr(), sys::JS_NewCFunction2(ctx, attrs_get_named_item, method_name.as_ptr(), 1, sys::JS_CFUNC_GENERIC, 0));
+    let dom = dom_opaque(ctx);
+    if !dom.is_null() { sync_attributes(ctx, dom, id, object); }
+    ATTRS_OBJECTS.with(|reg| reg.borrow_mut().entry(ctx as usize).or_default().insert(id, sys::JS_DupValue(ctx, object)));
+    object
+}
+
+unsafe fn define_attributes_collection(ctx: *mut sys::JSContext, proto: sys::JSValue) {
+    let name = CString::new("attributes").unwrap();
+    let getter = sys::JS_NewCFunction2(ctx, std::mem::transmute::<Getter, sys::JSCFunction>(node_attributes_get), name.as_ptr(), 0, sys::JS_CFUNC_GETTER, 0);
     let atom = sys::JS_NewAtom(ctx, name.as_ptr());
     sys::JS_DefinePropertyGetSet(ctx, proto, atom, getter, sys::js_undefined(), sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE);
     sys::JS_FreeAtom(ctx, atom);
@@ -1566,6 +1656,7 @@ unsafe fn ensure_node_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
     define_attribute_properties(ctx, proto);
     define_class_list(ctx, proto);
     define_dataset(ctx, proto);
+    define_attributes_collection(ctx, proto);
     define_navigation(ctx, proto);
     define_value(ctx, proto);
     define_focus_methods(ctx, proto);

@@ -1,15 +1,23 @@
 //! Layout orchestration: box-model resolution shared by every display type,
 //! dispatching to block-stacking or flex for how children get arranged.
 //! Block formatting context: children stack vertically, no inline flow, no
-//! floats, no positioning (`position`/`top`/`left`/... aren't modeled at
-//! all). `auto` margins resolve to `0.0`, not CSS's actual auto-margin
+//! floats. `auto` margins resolve to `0.0`, not CSS's actual auto-margin
 //! centering. No margin collapsing: adjacent margins both take full effect
 //! instead of collapsing to the larger one.
 //!
-//! `Dimensions` stores the padding box (content + padding, no border since
-//! border isn't modeled) — the box a renderer would actually paint.
+//! `position: relative`/`absolute` are real now (`static` is still every
+//! box's default and behaves exactly as before) - see
+//! `layout_block`/`layout_children`'s own docs for exactly what's
+//! modeled. `fixed`/`sticky` aren't.
+//!
+//! `border-width`/`border-style`/`border-color` are real now too: a
+//! bordered box's `border-width` genuinely grows `Dimensions` (real
+//! box-model space, not just a paint-time decoration) — `Dimensions` is
+//! the border box (content + padding + border) rather than the padding
+//! box it used to be. `border-radius`/per-side border colors/styles
+//! aren't modeled (see `style::ComputedStyle::border_color`'s own doc).
 use crate::flex::layout_flex_children;
-use crate::style::{Display, Length};
+use crate::style::{BorderStyle, Display, Length, Position};
 use crate::text::{layout_inline, layout_text, InlineSpan};
 use crate::tree::LayoutBox;
 
@@ -54,6 +62,50 @@ fn layout_inline_box(box_: &mut LayoutBox, containing_width: f64, x: f64, y: f64
     box_.dimensions.height
 }
 
+/// A single `top`/`right`/`bottom`/`left` offset value in pixels.
+/// `Percent` falls back to `0.0` — see `style::ComputedStyle::top`'s own
+/// doc on why a spec-correct resolution isn't attempted here.
+fn resolve_offset(length: Length) -> f64 {
+    match length {
+        Length::Px(px) => px,
+        Length::Percent(_) | Length::Auto => 0.0,
+    }
+}
+
+/// Resolves `style`'s `top`/`right`/`bottom`/`left` into one `(dx, dy)`
+/// pixel offset, real CSS's own precedence: `left` wins over `right`
+/// (used as `-right` only when `left` is `Auto`), same for `top`/`bottom`.
+/// `(0.0, 0.0)` if every edge is `Auto`.
+///
+/// Shared by both real uses `position` gets in this crate: for
+/// `Relative`, the caller adds this to the box's already-flow-determined
+/// `(x, y)` (a purely visual shift, see `layout_block`). For `Absolute`,
+/// the caller uses this *as* the box's `(x, y)` directly instead of its
+/// normal-flow position (see `layout_children`) — real in that an
+/// absolutely positioned box genuinely leaves the flow and lands at a
+/// real, independently-computed position, narrower than the spec in
+/// exactly one way: it's always resolved against the page's own origin
+/// `(0, 0)`, not the padding box of the nearest ancestor with
+/// `position != static` (this crate's single top-down layout pass has no
+/// "revisit once an ancestor's box is known" second pass to find one).
+fn offset_from_edges(style: &crate::style::ComputedStyle) -> (f64, f64) {
+    let dx = match style.left {
+        Length::Auto => match style.right {
+            Length::Auto => 0.0,
+            other => -resolve_offset(other),
+        },
+        other => resolve_offset(other),
+    };
+    let dy = match style.top {
+        Length::Auto => match style.bottom {
+            Length::Auto => 0.0,
+            other => -resolve_offset(other),
+        },
+        other => resolve_offset(other),
+    };
+    (dx, dy)
+}
+
 pub(crate) fn resolve_edge(length: Length, containing_width: f64) -> f64 {
     match length {
         Length::Px(px) => px,
@@ -82,6 +134,20 @@ pub fn layout_block(box_: &mut LayoutBox, containing_width: f64, x: f64, y: f64)
         return layout_inline_box(box_, containing_width, x, y);
     }
 
+    // Real `position: relative`: a purely visual shift applied to where
+    // this box (and, since everything below derives `content_x`/
+    // `content_y` from `box_.dimensions.x`/`y`, its whole subtree) actually
+    // paints — the space it occupies in its parent's flow is untouched,
+    // since the return value below is computed from `margin`/`height`
+    // alone, never from `x`/`y`. Matches the real spec's own "as if
+    // position were static, then offset visually" behavior.
+    let (x, y) = if box_.style.position == Position::Relative {
+        let (dx, dy) = offset_from_edges(&box_.style);
+        (x + dx, y + dy)
+    } else {
+        (x, y)
+    };
+
     let margin_top = resolve_edge(box_.style.margin.top, containing_width);
     let margin_right = resolve_edge(box_.style.margin.right, containing_width);
     let margin_bottom = resolve_edge(box_.style.margin.bottom, containing_width);
@@ -90,24 +156,40 @@ pub fn layout_block(box_: &mut LayoutBox, containing_width: f64, x: f64, y: f64)
     let padding_right = resolve_edge(box_.style.padding.right, containing_width);
     let padding_bottom = resolve_edge(box_.style.padding.bottom, containing_width);
     let padding_left = resolve_edge(box_.style.padding.left, containing_width);
+    // `border_width` is `0` on every side whose `border-style` is `None`
+    // (the real spec's own rule: a border with no style renders as if its
+    // width were `0`, regardless of what `border-width` itself says) -
+    // real box-model growth, not just a paint-time decoration, so a
+    // bordered box genuinely takes more space than an unbordered one with
+    // otherwise-identical CSS (see `render::build_display_list` for the
+    // actual stroke painting).
+    let (border_top, border_right, border_bottom, border_left) = if box_.style.border_style == BorderStyle::None {
+        (0.0, 0.0, 0.0, 0.0)
+    } else {
+        (
+            resolve_edge(box_.style.border_width.top, containing_width),
+            resolve_edge(box_.style.border_width.right, containing_width),
+            resolve_edge(box_.style.border_width.bottom, containing_width),
+            resolve_edge(box_.style.border_width.left, containing_width),
+        )
+    };
+    box_.border = crate::tree::ResolvedBorder { top: border_top, right: border_right, bottom: border_bottom, left: border_left };
 
     // CSS's `width` property (content-box model, the only one this crate
     // models) sizes the *content* box. `auto` follows CSS 2.1 §10.3.3:
-    // margin + padding + width is made to equal containing_width.
+    // margin + border + padding + width is made to equal containing_width.
     let content_width = match box_.style.width {
         Length::Px(px) => px,
         Length::Percent(pct) => containing_width * pct / 100.0,
-        Length::Auto => {
-            (containing_width - margin_left - margin_right - padding_left - padding_right).max(0.0)
-        }
+        Length::Auto => (containing_width - margin_left - margin_right - border_left - border_right - padding_left - padding_right).max(0.0),
     };
 
     box_.dimensions.x = x + margin_left;
     box_.dimensions.y = y + margin_top;
-    box_.dimensions.width = content_width + padding_left + padding_right;
+    box_.dimensions.width = content_width + padding_left + padding_right + border_left + border_right;
 
-    let content_x = box_.dimensions.x + padding_left;
-    let content_y = box_.dimensions.y + padding_top;
+    let content_x = box_.dimensions.x + border_left + padding_left;
+    let content_y = box_.dimensions.y + border_top + padding_top;
 
     let content_height = layout_children(box_, content_width, content_x, content_y);
 
@@ -121,7 +203,7 @@ pub fn layout_block(box_: &mut LayoutBox, containing_width: f64, x: f64, y: f64)
         Length::Percent(_) => content_height,
         Length::Auto => content_height,
     };
-    box_.dimensions.height = resolved_content_height + padding_top + padding_bottom;
+    box_.dimensions.height = resolved_content_height + padding_top + padding_bottom + border_top + border_bottom;
 
     margin_top + box_.dimensions.height + margin_bottom
 }
@@ -133,6 +215,18 @@ pub fn layout_block(box_: &mut LayoutBox, containing_width: f64, x: f64, y: f64)
 /// caller. Dispatches on `box_.style.display`: `Flex` arranges children
 /// via `flex::layout_flex_children`, everything else stacks them as block
 /// boxes via `layout_block`.
+///
+/// Real `position: absolute` in the non-flex (block) branch: a child with
+/// `Position::Absolute` is skipped by the normal stacking cursor entirely
+/// (contributes `0` to the returned content height, doesn't push later
+/// siblings down) and instead laid out via `layout_block` with
+/// [`offset_from_edges`] used directly as its `(x, y)` — real removal
+/// from flow, positioned independently. Scope cut: a `Flex` container's
+/// own children never get this treatment (an absolutely positioned flex
+/// item still participates in flex sizing/placement as if it were a
+/// normal item) - the flex algorithm has no equivalent "skip me" path,
+/// and flex+abspos together is enough of a corner case that adding one
+/// wasn't worth it for this pass.
 pub(crate) fn layout_children(box_: &mut LayoutBox, content_width: f64, content_x: f64, content_y: f64) -> f64 {
     if box_.style.display == Display::Flex {
         let explicit_height = match box_.style.height {
@@ -154,6 +248,11 @@ pub(crate) fn layout_children(box_: &mut LayoutBox, content_width: f64, content_
     } else {
         let mut cursor_y = content_y;
         for child in &mut box_.children {
+            if child.style.position == Position::Absolute {
+                let (dx, dy) = offset_from_edges(&child.style);
+                layout_block(child, content_width, dx, dy);
+                continue;
+            }
             cursor_y += layout_block(child, content_width, content_x, cursor_y);
         }
         cursor_y - content_y

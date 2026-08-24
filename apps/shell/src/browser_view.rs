@@ -227,6 +227,15 @@ impl BrowserView {
         profile.borrow_mut().type_key(key)
     }
 
+    /// Real viewport scroll - wraps `profile::Profile::scroll_by`, see
+    /// that method's own doc for the sign convention and clamping.
+    pub fn scroll_by(&mut self, dy: f64) -> std::io::Result<Result<(), String>> {
+        let Some(profile) = &self.profile else {
+            return Ok(Ok(()));
+        };
+        profile.borrow_mut().scroll_by(dy)
+    }
+
     /// Sends `url` to the worker as a real navigation. Records `url` as
     /// [`current_url`](Self::current_url) either way, and
     /// [`navigation_error`](Self::navigation_error) if the fetch itself

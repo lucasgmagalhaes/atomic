@@ -1190,6 +1190,24 @@ impl eframe::App for NimbleApp {
                         }
                     }
                 }
+                if response.hovered() {
+                    // Real mouse-wheel-to-scroll routing (mockup's "Scroll"
+                    // gap): whichever pane the cursor is actually over gets
+                    // the real wheel delta forwarded to
+                    // `profile::Profile::scroll_by`, matching a real
+                    // browser's "scroll whatever's under the cursor" rule
+                    // (not whatever has focus - hover, not `has_focus()`,
+                    // is the gate here). `raw_scroll_delta.y` is egui's own
+                    // "content moves down" convention (already normalized
+                    // out of points/lines/pages by egui itself); this
+                    // worker's `SCROLL <dy>` protocol uses the opposite
+                    // sign (`dy` is how far the *viewport* moves down
+                    // through the document), hence the negation.
+                    let raw_scroll = cell_ui.input(|i| i.raw_scroll_delta);
+                    if raw_scroll.y != 0.0 {
+                        let _ = self.panes[index].browser.scroll_by(-raw_scroll.y as f64);
+                    }
+                }
                 if response.has_focus() {
                     // Real keyboard-to-DOM routing: whichever pane's
                     // click most recently called `request_focus()` above

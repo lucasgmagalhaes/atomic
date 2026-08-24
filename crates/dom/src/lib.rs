@@ -12,6 +12,16 @@ pub enum NodeData {
     Element {
         tag: String,
         attributes: HashMap<String, String>,
+        /// Real, independently-mutable form value — `Some` once either the
+        /// `value` attribute or `Dom::set_value`/JS `.value =` has touched
+        /// it, `None` beforehand (in which case [`Dom::value`] falls back
+        /// to the element's own rules, see that method's doc). Present on
+        /// every `Element`, not just `<input>`/`<textarea>` — this engine
+        /// has one generic `Node` JS class, not a per-tag
+        /// `HTMLInputElement`/`HTMLTextAreaElement` hierarchy, so `.value`
+        /// is a documented deviation exposed generically rather than typed
+        /// per element.
+        value: Option<String>,
     },
     Text(String),
     Comment(String),
@@ -34,6 +44,12 @@ pub struct Dom {
     slots: Vec<Slot>,
     free: Vec<usize>,
     root: NodeId,
+    /// Real `document.activeElement` state — the one node currently
+    /// focused, or `None`. See [`Dom::focus`]/[`Dom::blur`]/
+    /// [`Dom::clear_focus`]/[`Dom::active_element`]. No tab order/
+    /// `tabindex` model yet: this only tracks *which* node is focused, not
+    /// how focus moves between them.
+    focused: Option<NodeId>,
 }
 
 impl Default for Dom {
@@ -61,6 +77,7 @@ impl Dom {
             }],
             free: vec![],
             root: root_id,
+            focused: None,
         }
     }
 
@@ -98,6 +115,7 @@ impl Dom {
         self.insert(NodeData::Element {
             tag: tag.to_string(),
             attributes: HashMap::new(),
+            value: None,
         })
     }
 
@@ -162,6 +180,9 @@ impl Dom {
         for child in children {
             self.remove(child);
         }
+        if self.focused == Some(id) {
+            self.focused = None;
+        }
         self.detach(id);
         if id.index < self.slots.len() && self.slots[id.index].generation == id.generation {
             self.slots[id.index].node = None;
@@ -196,11 +217,21 @@ impl Dom {
 
     pub fn set_attribute(&mut self, id: NodeId, name: &str, value: &str) {
         if let Some(Node {
-            data: NodeData::Element { attributes, .. },
+            data: NodeData::Element { attributes, value: value_field, .. },
             ..
         }) = self.get_mut(id)
         {
             attributes.insert(name.to_string(), value.to_string());
+            // Mirrors the HTML `value` content attribute into the real
+            // `.value` property — real browsers only do this before the
+            // user/JS first touches `.value` (a "dirty value flag" this
+            // engine doesn't track); always mirroring is a documented
+            // simplification, and matches how the only caller that sets
+            // this attribute today (`html5ever`'s tree builder, via
+            // `html::sink`) always runs before any script does.
+            if name == "value" {
+                *value_field = Some(value.to_string());
+            }
         }
     }
 
@@ -274,5 +305,71 @@ impl Dom {
         }
         let text_node = self.create_text(text);
         self.append_child(id, text_node);
+    }
+
+    /// Real `HTMLInputElement`/`HTMLTextAreaElement`-shaped `.value` read
+    /// side. `id` need not be an `Element` at all — returns `""` for
+    /// anything else, same permissive style as [`Dom::attribute`].
+    /// A `<textarea>` whose `.value` was never explicitly set (attribute
+    /// or JS) falls back to its real text content, mirroring the real DOM
+    /// (`<textarea>`'s initial value comes from its children, `<input>`'s
+    /// from its `value` attribute — already handled by [`Dom::set_attribute`]
+    /// mirroring that attribute in).
+    pub fn value(&self, id: NodeId) -> String {
+        match self.get(id).map(|n| &n.data) {
+            Some(NodeData::Element { value: Some(v), .. }) => v.clone(),
+            Some(NodeData::Element { tag, value: None, .. }) if tag == "textarea" => self.text_content(id),
+            _ => String::new(),
+        }
+    }
+
+    /// Real `.value =` write side — independent of `textContent`/children,
+    /// unlike the pre-existing `set_text_content`. No-op on a non-`Element`
+    /// node.
+    pub fn set_value(&mut self, id: NodeId, value: &str) {
+        if let Some(Node {
+            data: NodeData::Element { value: value_field, .. },
+            ..
+        }) = self.get_mut(id)
+        {
+            *value_field = Some(value.to_string());
+        }
+    }
+
+    /// Real `Node.prototype.focus()` — becomes `document.activeElement`
+    /// (see [`Dom::active_element`]). No-op if `id` doesn't exist. No real
+    /// tab order/`tabindex` model: this only records *which* node is
+    /// focused, a caller (JS `.focus()`, or `profile-worker`'s coordinate
+    /// click routing) decides *when*.
+    pub fn focus(&mut self, id: NodeId) {
+        if self.get(id).is_some() {
+            self.focused = Some(id);
+        }
+    }
+
+    /// Real `Node.prototype.blur()` — clears focus only if `id` is the
+    /// currently focused node (matches the real DOM: blurring an element
+    /// that isn't focused is a no-op).
+    pub fn blur(&mut self, id: NodeId) {
+        if self.focused == Some(id) {
+            self.focused = None;
+        }
+    }
+
+    /// Clears focus unconditionally, regardless of which node (if any) is
+    /// currently focused — used when a click lands on a non-focusable
+    /// element, matching a real browser blurring whatever was focused
+    /// before.
+    pub fn clear_focus(&mut self) {
+        self.focused = None;
+    }
+
+    /// Real `document.activeElement` read side. Filters out a stale id
+    /// (a focused node later removed from the tree) rather than requiring
+    /// every removal path to also clear `focused` — [`Dom::remove`] does
+    /// that too as a fast path, but this stays correct even if some future
+    /// removal path forgets to.
+    pub fn active_element(&self) -> Option<NodeId> {
+        self.focused.filter(|&id| self.get(id).is_some())
     }
 }

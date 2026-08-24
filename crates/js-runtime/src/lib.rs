@@ -221,6 +221,14 @@ impl<'rt> Context<'rt> {
         self._host_state.as_ref().map(|s| &s.dom)
     }
 
+    /// Mutable counterpart to [`Context::dom`] — lets a host mutate the DOM
+    /// directly from Rust (not through `eval`), e.g. `profile-worker`
+    /// setting real focus state (`dom::Dom::focus`/`clear_focus`) from a
+    /// coordinate click before any JS runs.
+    pub fn dom_mut(&mut self) -> Option<&mut dom::Dom> {
+        self._host_state.as_mut().map(|s| &mut s.dom)
+    }
+
     /// Raw `JSContext` pointer, for a caller outside this crate that needs
     /// to register its own native globals (e.g. `automation`'s `pane`/
     /// `every`/`on`/cron bindings) via `quickjs-sys` directly, the same way

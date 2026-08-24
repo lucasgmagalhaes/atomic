@@ -58,6 +58,48 @@ fn serve_routes(routes: Vec<(&'static str, String)>) -> std::net::SocketAddr {
     addr
 }
 
+/// Like [`serve_routes`], but serves raw bytes with a caller-chosen
+/// `Content-Type` instead of `String`/`text/plain` — needed to serve a
+/// real PNG (binary, not UTF-8 text) for an `<img>` test.
+fn serve_routes_bytes(routes: Vec<(&'static str, &'static str, Vec<u8>)>) -> std::net::SocketAddr {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("failed to bind a loopback test server");
+    let addr = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut buf = [0u8; 4096];
+            let n = stream.read(&mut buf).unwrap_or(0);
+            let request = String::from_utf8_lossy(&buf[..n]);
+            let path = request.lines().next().and_then(|line| line.split_whitespace().nth(1)).unwrap_or("/").to_string();
+            let (content_type, body) = routes
+                .iter()
+                .find(|(route, _, _)| *route == path)
+                .map(|(_, ct, body)| (*ct, body.clone()))
+                .unwrap_or(("text/plain", Vec::new()));
+            let mut response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            )
+            .into_bytes();
+            response.extend_from_slice(&body);
+            let _ = stream.write_all(&response);
+            let _ = stream.flush();
+        }
+    });
+    addr
+}
+
+/// A real encoded PNG (via the `image` crate, same decoder `image_decode`
+/// itself wraps) - `width` x `height`, every pixel `color` (straight
+/// RGBA8). Used to serve a real `<img src>` a test can assert painted
+/// pixels against, without depending on an external image file.
+fn encode_png(width: u32, height: u32, color: [u8; 4]) -> Vec<u8> {
+    let img = image::RgbaImage::from_pixel(width, height, image::Rgba(color));
+    let mut bytes = Vec::new();
+    img.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png).expect("encoding a real PNG should not fail");
+    bytes
+}
+
 fn unique_shmem_name(tag: &str) -> String {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -262,6 +304,168 @@ fn navigate_fetches_a_linked_stylesheet_and_applies_it() {
         &[255, 0, 255, 255],
         "the fetched <link> stylesheet's background-color should have painted the div's box magenta, got {top_left:?}"
     );
+
+    profile.quit();
+}
+
+#[test]
+fn navigate_fetches_and_paints_a_real_img() {
+    let png = encode_png(300, 150, [0, 255, 0, 255]);
+    let html = r#"<img id="pic" src="pic.png">"#;
+    let addr = serve_routes_bytes(vec![("/", "text/html", html.as_bytes().to_vec()), ("/pic.png", "image/png", png)]);
+    let page_url = format!("http://{addr}/");
+
+    let name = unique_shmem_name("img");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let result = profile.navigate(&page_url).expect("protocol should not fail");
+    assert!(result.is_ok(), "navigate should succeed: {result:?}");
+
+    let pixels = profile.latest_frame().unwrap();
+    let top_left = &pixels[0..4];
+    assert_eq!(
+        top_left,
+        &[0, 255, 0, 255],
+        "a real fetched/decoded <img> should paint its own pixels, got {top_left:?}"
+    );
+
+    profile.quit();
+}
+
+#[test]
+fn navigate_with_an_unfetchable_img_src_still_renders_the_rest_of_the_page() {
+    let html = r#"<div id="box">hi</div><img src="/does-not-exist.png">"#;
+    let addr = serve_html_once(html);
+    let page_url = format!("http://{addr}/");
+
+    let name = unique_shmem_name("img-missing");
+    let mut profile = Profile::spawn(worker_path(), &name, 64, 64).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let result = profile.navigate(&page_url).expect("protocol should not fail");
+    assert!(result.is_ok(), "a missing <img> src should not fail the whole navigation: {result:?}");
+
+    profile.quit();
+}
+
+#[test]
+fn scroll_by_shifts_the_painted_viewport_through_taller_content() {
+    let html = r#"<style>#a { background-color: #ff0000; width: 100px; height: 150px; } #b { background-color: #0000ff; width: 100px; height: 150px; }</style><div id="a"></div><div id="b"></div>"#;
+    let addr = serve_html_once(html);
+    let page_url = format!("http://{addr}/");
+
+    let name = unique_shmem_name("scroll");
+    let mut profile = Profile::spawn(worker_path(), &name, 100, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let result = profile.navigate(&page_url).expect("protocol should not fail");
+    assert!(result.is_ok(), "navigate should succeed: {result:?}");
+
+    let before = profile.latest_frame().unwrap();
+    assert_eq!(&before[0..4], &[255, 0, 0, 255], "unscrolled viewport should show #a (red) first, got {:?}", &before[0..4]);
+
+    let scroll_result = profile.scroll_by(150.0).expect("protocol should not fail");
+    assert!(scroll_result.is_ok(), "scroll should succeed: {scroll_result:?}");
+
+    let after = profile.latest_frame().unwrap();
+    assert_eq!(
+        &after[0..4],
+        &[0, 0, 255, 255],
+        "scrolling down by #a's own height should bring #b (blue) to the top of the viewport, got {:?}",
+        &after[0..4]
+    );
+
+    // A huge further delta should clamp at the real content height (still
+    // #b, not scrolled past into empty/background space).
+    let clamp_result = profile.scroll_by(10_000.0).expect("protocol should not fail");
+    assert!(clamp_result.is_ok(), "scroll should succeed: {clamp_result:?}");
+    let clamped = profile.latest_frame().unwrap();
+    assert_eq!(
+        &clamped[0..4],
+        &[0, 0, 255, 255],
+        "scrolling far past the content should clamp at the bottom, not reveal empty space, got {:?}",
+        &clamped[0..4]
+    );
+
+    profile.quit();
+}
+
+#[test]
+fn scroll_by_a_negative_delta_clamps_back_to_the_top() {
+    let html = r#"<style>#a { background-color: #ff0000; width: 100px; height: 150px; } #b { background-color: #0000ff; width: 100px; height: 150px; }</style><div id="a"></div><div id="b"></div>"#;
+    let addr = serve_html_once(html);
+    let page_url = format!("http://{addr}/");
+
+    let name = unique_shmem_name("scroll-clamp-top");
+    let mut profile = Profile::spawn(worker_path(), &name, 100, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let result = profile.navigate(&page_url).expect("protocol should not fail");
+    assert!(result.is_ok(), "navigate should succeed: {result:?}");
+
+    let _ = profile.scroll_by(150.0).expect("protocol should not fail");
+    let scroll_result = profile.scroll_by(-10_000.0).expect("protocol should not fail");
+    assert!(scroll_result.is_ok(), "scroll should succeed: {scroll_result:?}");
+
+    let pixels = profile.latest_frame().unwrap();
+    assert_eq!(
+        &pixels[0..4],
+        &[255, 0, 0, 255],
+        "a large negative scroll should clamp back to the real top (#a, red), not go negative, got {:?}",
+        &pixels[0..4]
+    );
+
+    profile.quit();
+}
+
+#[test]
+fn reload_resets_scroll_to_the_top() {
+    let html = r#"<style>#a { background-color: #ff0000; width: 100px; height: 150px; } #b { background-color: #0000ff; width: 100px; height: 150px; }</style><div id="a"></div><div id="b"></div>"#;
+    let addr = serve_html_once(html);
+    let page_url = format!("http://{addr}/");
+
+    let name = unique_shmem_name("scroll-reload-reset");
+    let mut profile = Profile::spawn(worker_path(), &name, 100, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let result = profile.navigate(&page_url).expect("protocol should not fail");
+    assert!(result.is_ok(), "navigate should succeed: {result:?}");
+    let _ = profile.scroll_by(150.0).expect("protocol should not fail");
+
+    profile.reload().expect("protocol should not fail");
+
+    let pixels = profile.latest_frame().unwrap();
+    assert_eq!(
+        &pixels[0..4],
+        &[255, 0, 0, 255],
+        "a fresh page (post-reload) should always start scrolled to the top, got {:?}",
+        &pixels[0..4]
+    );
+
+    profile.quit();
+}
+
+#[test]
+fn click_at_hit_tests_against_the_scrolled_document_not_the_pre_scroll_one() {
+    let html = r#"<style>#a { background-color: #ff0000; width: 100px; height: 150px; } #b { background-color: #0000ff; width: 100px; height: 150px; }</style><div id="a"></div><div id="b"></div>"#;
+    let addr = serve_html_once(html);
+    let page_url = format!("http://{addr}/");
+
+    let name = unique_shmem_name("scroll-hit-test");
+    let mut profile = Profile::spawn(worker_path(), &name, 100, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let result = profile.navigate(&page_url).expect("protocol should not fail");
+    assert!(result.is_ok(), "navigate should succeed: {result:?}");
+    let _ = profile.scroll_by(150.0).expect("protocol should not fail");
+
+    // After scrolling by #a's own height, on-screen (0,0) is #b's own
+    // top-left in document space - a real hit test must add the scroll
+    // offset back in to land on #b, not (incorrectly) on whatever was at
+    // document-space (0,0) before any scroll happened (#a).
+    let click_result = profile.click_at(10.0, 10.0).expect("protocol should not fail");
+    assert!(click_result.is_ok(), "click should land on a real id-addressable element: {click_result:?}");
 
     profile.quit();
 }

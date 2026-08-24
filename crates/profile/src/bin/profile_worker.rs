@@ -20,7 +20,7 @@
 //! hardcoded base stylesheet that used to be all any page ever got — a
 //! real page now actually looks like something, not just unstyled text.
 //! `<link>` hrefs are resolved against the page's own URL via the real
-//! `url` crate (`resolve_stylesheet_url` — relative, root-relative, and
+//! `url` crate (`resolve_url` — relative, root-relative, and
 //! scheme-relative hrefs all work now, not just already-absolute ones),
 //! then fetched only if the result is `http(s)://` (skips `data:` etc.).
 //! `@import` and `@media` are real now too (`css`'s own parser handles
@@ -35,6 +35,19 @@
 //! itself already makes — a real browser fetches off the render thread
 //! and shows a loading state meanwhile; this one just misses a few frame
 //! ticks, acceptable since nothing animates during a fetch anyway).
+//!
+//! Real `<img>` painting now too (`load_images`/`collect_image_sources`,
+//! called from `Page::load` the same way `build_stylesheet` fetches
+//! `<link>`s): each `<img src>` is resolved against the page's own URL,
+//! fetched via `fetch_with_cookies`, and decoded via `image_decode`. The
+//! decode/sizing/painting primitives themselves (`image_decode`,
+//! `layout_engine::apply_image_sizes`, `render::build_image_list`/
+//! `composite_images`) already existed and were crate-tested — this
+//! worker just never called any of them, so a real navigated page's
+//! `<img>` rendered as an empty box regardless. `Page::render`/
+//! `hit_test_at` now share one `Page::layout` helper (previously each
+//! rebuilt its own box tree independently) so both agree on the same
+//! image-sized boxes.
 //!
 //! Command protocol over stdin (newline-delimited, one command per line),
 //! read on a dedicated thread and drained non-blockingly by the render
@@ -58,27 +71,35 @@
 //!   id; replies `CLICKED` or `ERROR <message>` (no such id, or only
 //!   `#id` selectors are supported at all — this engine has no general
 //!   CSS selector query beyond `dom::Dom::find_by_id`)
-//! - `FILL <#id> <value>` -> sets that element's `textContent` to `value`
-//!   and replies `FILLED`/`ERROR <message>` the same way. A real
-//!   `<input>`'s `value` is a distinct property from its children/text -
-//!   this engine models neither `HTMLInputElement` nor a `value` property
-//!   at all yet, so `textContent` is the closest existing primitive
-//!   (`js-runtime`'s only settable DOM string), not a faithful `.value`
-//!   assignment. `value` may not contain a newline (this protocol is
-//!   newline-delimited) - `profile::Profile::fill` rejects that before it
-//!   would corrupt the stream.
+//! - `FILL <#id> <value>` -> sets that element's real `.value`
+//!   (`dom::Dom::value`/`set_value`, independent of children/text) if it's
+//!   an `<input>`/`<textarea>`, `textContent` otherwise (this engine's
+//!   only settable string for any other element); replies
+//!   `FILLED`/`ERROR <message>`. `value` may not contain a newline (this
+//!   protocol is newline-delimited) - `profile::Profile::fill` rejects
+//!   that before it would corrupt the stream.
+//! - `SCROLL <dy>` -> real viewport scroll: shifts the page's scroll
+//!   offset by `dy` pixels (positive = down), clamped to
+//!   `[0, content_height - viewport_height]` (`0` if the page is shorter
+//!   than the viewport) - see `Page::render`/`hit_test_at`'s own docs for
+//!   how painting/hit-testing account for it. Replies `SCROLLED`, or
+//!   `ERROR <message>` if `dy` doesn't parse as a number. Reset to `0` by
+//!   `RELOAD`/`NAVIGATE`, same as `focused_id`. No horizontal scroll.
 //! - `QUIT` -> exits cleanly
 //! - anything else -> ignored
+use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
+use std::rc::Rc;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use css::{parse_stylesheet, Stylesheet};
 use dom::{Dom, NodeData, NodeId};
+use image_decode::DecodedImage;
 use js_runtime::{Context, Runtime};
-use layout_engine::{build_box_tree_with_viewport, layout_block};
-use render::{build_display_list, build_glyph_list, composite_glyphs, GpuRenderer};
+use layout_engine::{apply_image_sizes, build_box_tree_with_viewport, layout_block, LayoutBox, PositionedGlyph};
+use render::{build_display_list, build_glyph_list, build_image_list, composite_glyphs, composite_images, GpuRenderer, ImageQuad, Rect};
 
 const TARGET_FPS: u32 = 60;
 const FRAME_INTERVAL: Duration = Duration::from_nanos(1_000_000_000 / TARGET_FPS as u64);
@@ -144,7 +165,7 @@ enum CssSource {
 /// ones).
 fn collect_css_sources(dom: &Dom, node: NodeId, out: &mut Vec<CssSource>) {
     let Some(n) = dom.get(node) else { return };
-    if let NodeData::Element { tag, attributes } = &n.data {
+    if let NodeData::Element { tag, attributes, .. } = &n.data {
         if tag == "style" {
             out.push(CssSource::Inline(dom.text_content(node)));
         } else if tag == "link" {
@@ -176,7 +197,7 @@ fn collect_css_sources(dom: &Dom, node: NodeId, out: &mut Vec<CssSource>) {
 /// in this pass, and its tag is walked past without effect (not an error).
 fn collect_script_sources(dom: &Dom, node: NodeId, out: &mut Vec<String>) {
     let Some(n) = dom.get(node) else { return };
-    if let NodeData::Element { tag, attributes } = &n.data {
+    if let NodeData::Element { tag, attributes, .. } = &n.data {
         if tag == "script" && !attributes.contains_key("src") {
             out.push(dom.text_content(node));
         }
@@ -184,6 +205,62 @@ fn collect_script_sources(dom: &Dom, node: NodeId, out: &mut Vec<String>) {
     for &child in &n.children {
         collect_script_sources(dom, child, out);
     }
+}
+
+/// Walks `node`'s subtree collecting every `<img src="...">`'s own
+/// `NodeId` and raw (not yet resolved) `src`, in document order. Feeds
+/// [`load_images`] — the real decode/sizing/painting primitives
+/// (`image_decode`, `layout_engine::apply_image_sizes`, `render`'s
+/// `build_image_list`/`composite_images`) already existed and were tested
+/// at the crate level, but nothing in this worker ever called any of
+/// them: a real navigated page's `<img>` rendered as an empty box, same
+/// as `mockup/rendering-engine-gaps.md` §5 originally documented as a
+/// "gap total" — this closes the missing wiring, not new primitives.
+fn collect_image_sources(dom: &Dom, node: NodeId, out: &mut Vec<(NodeId, String)>) {
+    let Some(n) = dom.get(node) else { return };
+    if let NodeData::Element { tag, attributes, .. } = &n.data {
+        if tag == "img" {
+            if let Some(src) = attributes.get("src") {
+                out.push((node, src.clone()));
+            }
+        }
+    }
+    for &child in &n.children {
+        collect_image_sources(dom, child, out);
+    }
+}
+
+/// Fetches and decodes every real `<img src>` in `dom` (rooted at `root`),
+/// same "one real GET per resource, at load time" convention
+/// `build_stylesheet` already uses for `<link>` stylesheets — `src`
+/// resolved against `base_url` via [`resolve_url`], fetched through
+/// [`fetch_with_cookies`] (so a profile's proxy/DNS/cookie jar apply to
+/// images exactly like every other request this worker makes), decoded
+/// via `image_decode::decode`. An unresolvable URL, a failed fetch, or
+/// undecodable bytes (an unsupported format, corrupt data, an HTML error
+/// page served with an `.jpg` extension) simply gets no entry — the same
+/// "best-effort, never fail the whole page load over one bad resource"
+/// stance `build_stylesheet` already takes, and `apply_image_sizes`
+/// itself already documents as its contract for a missing entry.
+fn load_images(
+    dom: &Dom,
+    root: NodeId,
+    base_url: Option<&str>,
+    storage_root: &std::path::Path,
+    proxy: Option<&net::ProxyConfig>,
+    dns_server: Option<std::net::SocketAddr>,
+) -> HashMap<NodeId, Rc<DecodedImage>> {
+    let mut sources = Vec::new();
+    collect_image_sources(dom, root, &mut sources);
+
+    let mut images = HashMap::new();
+    for (node, src) in sources {
+        let Some(url) = resolve_url(base_url, &src) else { continue };
+        let Ok(response) = fetch_with_cookies(&url, storage_root, proxy, dns_server) else { continue };
+        let Some(decoded) = image_decode::decode(&response.body) else { continue };
+        images.insert(node, Rc::new(decoded));
+    }
+    images
 }
 
 /// Fetches `url` with a `Cookie` header built from the jar at
@@ -249,7 +326,7 @@ fn fetch_with_cookies(url: &str, storage_root: &std::path::Path, proxy: Option<&
 /// parse as `host:port` — an unparseable proxy argument degrades to "no
 /// proxy" rather than refusing to start, matching this file's general
 /// "best-effort, never fails the whole page load over one bad input"
-/// stance elsewhere (see `resolve_stylesheet_url`).
+/// stance elsewhere (see `resolve_url`).
 fn parse_proxy_arg(arg: Option<&str>) -> Option<net::ProxyConfig> {
     let arg = arg?;
     if arg.is_empty() {
@@ -294,7 +371,7 @@ fn parse_dns_arg(arg: Option<&str>) -> Option<std::net::SocketAddr> {
 /// result (e.g. `data:`), a malformed href, or a relative href with no
 /// `base_url` to resolve against (the built-in demo page has no URL of
 /// its own).
-fn resolve_stylesheet_url(base_url: Option<&str>, href: &str) -> Option<String> {
+fn resolve_url(base_url: Option<&str>, href: &str) -> Option<String> {
     let resolved = match base_url {
         Some(base) => url::Url::parse(base).ok()?.join(href).ok()?,
         None => url::Url::parse(href).ok()?,
@@ -309,7 +386,7 @@ fn resolve_stylesheet_url(base_url: Option<&str>, href: &str) -> Option<String> 
 /// Resolves every CSS source in `dom` (rooted at `root`) into one cascaded
 /// [`Stylesheet`]: [`BASE_STYLESHEET_SRC`] first, then each `<style>`/
 /// `<link>` source in document order, `<link>` hrefs resolved against
-/// `base_url` via [`resolve_stylesheet_url`] — a `<link>` that doesn't
+/// `base_url` via [`resolve_url`] — a `<link>` that doesn't
 /// resolve to a fetchable `http(s)://` URL is silently skipped, matching
 /// `resolve_html`'s own "best-effort, never panics on a real page" stance
 /// rather than failing the whole page load over one bad stylesheet
@@ -343,7 +420,7 @@ fn merge_stylesheet_text(
         if !should_fetch {
             continue;
         }
-        if let Some(resolved) = resolve_stylesheet_url(base_url, &import.url) {
+        if let Some(resolved) = resolve_url(base_url, &import.url) {
             if let Ok(response) = fetch_with_cookies(&resolved, storage_root, proxy, dns_server) {
                 let imported_text = String::from_utf8_lossy(&response.body).into_owned();
                 sheet.rules.extend(parse_stylesheet(&imported_text).rules);
@@ -369,7 +446,7 @@ fn build_stylesheet(
     for source in sources {
         let css_text = match source {
             CssSource::Inline(text) => Some(text),
-            CssSource::Link(href) => resolve_stylesheet_url(base_url, &href)
+            CssSource::Link(href) => resolve_url(base_url, &href)
                 .and_then(|url| fetch_with_cookies(&url, storage_root, proxy, dns_server).ok())
                 .map(|response| String::from_utf8_lossy(&response.body).into_owned()),
         };
@@ -464,14 +541,27 @@ fn dispatch_click(ctx: &Context, selector: &str) -> Result<(), String> {
     ctx.eval(&script, "<pane click>").map(|_| ()).map_err(|_| format!("no element with id \"{id}\" (or its click handler threw)"))
 }
 
-/// Sets the `#id` element's `textContent` to `value` via the existing
-/// `Node.prototype.textContent` setter — see this file's own doc comment
-/// on the `FILL` command for why that's a deviation from a real
-/// `HTMLInputElement.value` assignment, not an equivalent of one.
+/// `true` if `node` is a real `<input>`/`<textarea>` — the only tags this
+/// engine gives an independent `.value` (see `dom::Dom::value`'s own doc
+/// on why that's exposed generically on `Node` rather than a typed
+/// `HTMLInputElement`/`HTMLTextAreaElement` subclass).
+fn is_input_like(dom: &Dom, node: NodeId) -> bool {
+    matches!(&dom.get(node).map(|n| &n.data), Some(NodeData::Element { tag, .. }) if tag == "input" || tag == "textarea")
+}
+
+/// Sets the `#id` element's `.value` (a real, independent `dom::Dom`
+/// property now — see `is_input_like`/`dom::Dom::value`) if it's an
+/// `<input>`/`<textarea>`, `textContent` otherwise (this engine's only
+/// settable string for a generic element).
 fn fill_element(ctx: &Context, selector: &str, value: &str) -> Result<(), String> {
     let id = require_id_selector(selector)?;
+    let prop = {
+        let dom_ref = ctx.dom().ok_or("no DOM available")?;
+        let node = dom_ref.find_by_id(id).ok_or_else(|| format!("no element with id \"{id}\""))?;
+        if is_input_like(dom_ref, node) { "value" } else { "textContent" }
+    };
     let script = format!(
-        "(function(){{ var el = document.getElementById({id}); if (el === null) throw {missing}; el.textContent = {value}; }})();",
+        "(function(){{ var el = document.getElementById({id}); if (el === null) throw {missing}; el.{prop} = {value}; }})();",
         id = js_string_literal(id),
         missing = js_string_literal(&format!("no element with id \"{id}\"")),
         value = js_string_literal(value),
@@ -489,6 +579,12 @@ struct Page<'rt> {
     ctx: Context<'rt>,
     html_el: NodeId,
     sheet: Stylesheet,
+    /// Real fetched/decoded `<img>` images, keyed by the `<img>` element's
+    /// own `NodeId` — see `load_images`. Fixed for this `Page`'s lifetime
+    /// (fetched once at load time, same "a page's resources don't change
+    /// underneath it without a fresh navigation" convention its
+    /// stylesheet already follows).
+    images: HashMap<NodeId, Rc<DecodedImage>>,
 }
 
 impl<'rt> Page<'rt> {
@@ -515,6 +611,7 @@ impl<'rt> Page<'rt> {
     ) -> Self {
         let (dom, html_el) = html::parse_to_html_element(html);
         let sheet = build_stylesheet(&dom, html_el, base_url, viewport_width, storage_root, proxy, dns_server);
+        let images = load_images(&dom, html_el, base_url, storage_root, proxy, dns_server);
         let mut scripts = Vec::new();
         collect_script_sources(&dom, html_el, &mut scripts);
 
@@ -543,7 +640,33 @@ impl<'rt> Page<'rt> {
         for (index, script) in scripts.iter().enumerate() {
             let _ = ctx.eval(script, &format!("<script {index}>"));
         }
-        Page { ctx, html_el, sheet }
+        Page { ctx, html_el, sheet, images }
+    }
+
+    /// Builds and lays out this page's real box tree against `width` —
+    /// shared by `render` and `hit_test_at` so they always agree on
+    /// exactly the same box positions/sizes (previously each rebuilt its
+    /// own tree independently, which would have silently disagreed once
+    /// `<img>` intrinsic sizing entered the picture - `apply_image_sizes`
+    /// must run after box-tree construction and before layout, so both
+    /// callers need it applied identically). `None` only if the parse/
+    /// box-tree-construction step itself fails.
+    fn layout(&self, width: u32) -> Option<LayoutBox> {
+        let dom = self.ctx.dom()?;
+        let mut tree = build_box_tree_with_viewport(dom, self.html_el, &self.sheet, width as f64)?;
+        apply_image_sizes(dom, &mut tree, &self.images);
+        layout_block(&mut tree, width as f64, 0.0, 0.0);
+        Some(tree)
+    }
+
+    /// This page's real total content height at `width` — the root box's
+    /// own laid-out height, which already includes every descendant
+    /// (block layout stacks children downward with no clamping to any
+    /// viewport). Used to clamp `SCROLL`'s offset to real content, not an
+    /// arbitrary range. `0.0` if layout itself fails (same "nothing to
+    /// scroll" outcome as a page shorter than its viewport).
+    fn content_height(&self, width: u32) -> f64 {
+        self.layout(width).map(|tree| tree.dimensions.height).unwrap_or(0.0)
     }
 
     /// Re-layouts and re-rasterizes from the DOM's *current* state (which
@@ -551,35 +674,57 @@ impl<'rt> Page<'rt> {
     /// already-initialized `renderer` — creating a `GpuRenderer` opens a
     /// real GPU device/adapter, expensive enough that doing it every tick
     /// would itself become the vsync loop's bottleneck instead of the
-    /// fixed frame interval.
-    fn render(&self, renderer: &GpuRenderer, width: u32, height: u32) -> Vec<u8> {
-        let dom = self.ctx.dom().expect("Page always constructs its Context via with_dom");
-        let mut tree =
-            build_box_tree_with_viewport(dom, self.html_el, &self.sheet, width as f64).expect("parsed HTML always produces a box");
-        layout_block(&mut tree, width as f64, 0.0, 0.0);
+    /// fixed frame interval. Composites real decoded `<img>` pixels
+    /// (`self.images`, via `build_image_list`/`composite_images`) between
+    /// the background-rect pass and the text pass — closest to real paint
+    /// order (background, then replaced content, then inline text) this
+    /// worker's existing two-pass (GPU rects, then CPU glyphs) pipeline
+    /// can give without a bigger repaint-ordering rework.
+    ///
+    /// `scroll_top` is a real viewport scroll offset (see the `SCROLL`
+    /// command's own doc): every painted rect/image/glyph is shifted up
+    /// by this many pixels before compositing, so what's actually visible
+    /// in `[0, height)` is the document's `[scroll_top, scroll_top +
+    /// height)` slice — layout itself is unaffected (boxes keep their
+    /// real absolute document-space positions; only the paint step
+    /// windows into them), which is also why `build_display_list`/
+    /// `build_image_list`/`build_glyph_list` don't need a `scroll_top`
+    /// parameter of their own. `render`/`gpu`/`text`'s own compositors
+    /// already clip anything outside `[0, height)` silently (real
+    /// clipping, not new for this), so a shifted rect above or below the
+    /// viewport is simply not drawn - no separate clip step needed here.
+    fn render(&self, renderer: &GpuRenderer, width: u32, height: u32, scroll_top: f64) -> Vec<u8> {
+        let tree = self.layout(width).expect("parsed HTML always produces a box");
+        let offset = scroll_top as f32;
 
-        let rects = build_display_list(&tree);
-        let glyphs = build_glyph_list(&tree);
+        let rects: Vec<Rect> = build_display_list(&tree).into_iter().map(|r| Rect { y: r.y - offset, ..r }).collect();
+        let images: Vec<ImageQuad> = build_image_list(&tree).into_iter().map(|q| ImageQuad { y: q.y - offset, ..q }).collect();
+        let glyphs: Vec<PositionedGlyph> =
+            build_glyph_list(&tree).into_iter().map(|g| PositionedGlyph { y: g.y - scroll_top as i32, ..g }).collect();
 
         let mut pixels = renderer.render_to_rgba(&rects, width, height, [0.08, 0.09, 0.13, 1.0]);
+        composite_images(&mut pixels, width, height, &images);
         composite_glyphs(&mut pixels, width, height, &glyphs);
         pixels
     }
 
-    /// Real coordinate-to-DOM-node hit test — rebuilds and lays out the
-    /// same box tree `render` does (against `width`, the pane's own real
-    /// frame width, so the caller's `(x, y)` must already be in that same
-    /// pixel space) and walks it via `layout_engine::hit_test`. `None`
-    /// covers both "point is outside every box" and "the parse/layout
-    /// step itself failed" — a caller can't distinguish those from this
-    /// return value alone, matching this method's only real use
-    /// (`CLICK_AT`, where both cases report the same "nothing there"
-    /// outcome anyway).
-    fn hit_test_at(&self, width: u32, x: f64, y: f64) -> Option<NodeId> {
-        let dom = self.ctx.dom()?;
-        let mut tree = build_box_tree_with_viewport(dom, self.html_el, &self.sheet, width as f64)?;
-        layout_block(&mut tree, width as f64, 0.0, 0.0);
-        layout_engine::hit_test(&tree, x, y)
+    /// Real coordinate-to-DOM-node hit test — lays out the same box tree
+    /// `render` does (via `self.layout`, against `width`, the pane's own
+    /// real frame width, so the caller's `(x, y)` must already be in that
+    /// same on-screen pixel space) and walks it via
+    /// `layout_engine::hit_test`. `scroll_top` converts `y` from that
+    /// on-screen space back to the document's own absolute space (the
+    /// inverse of the shift `render` applies when painting) before
+    /// hit-testing, so a click against a scrolled page still lands on the
+    /// real element under the cursor, not whatever was there before any
+    /// `SCROLL`. `None` covers both "point is outside every box" and "the
+    /// parse/layout step itself failed" — a caller can't distinguish
+    /// those from this return value alone, matching this method's only
+    /// real use (`CLICK_AT`, where both cases report the same "nothing
+    /// there" outcome anyway).
+    fn hit_test_at(&self, width: u32, x: f64, y: f64, scroll_top: f64) -> Option<NodeId> {
+        let tree = self.layout(width)?;
+        layout_engine::hit_test(&tree, x, y + scroll_top)
     }
 }
 
@@ -607,15 +752,16 @@ fn nearest_id_ancestor(dom: &Dom, node: NodeId) -> Option<String> {
 
 /// Real coordinate click: hit-tests `(x, y)`, dispatches a real `"click"`
 /// via the nearest id-addressable ancestor (see `nearest_id_ancestor`'s
-/// own doc for the real limitation that implies), and reports whether the
-/// hit node itself is a real `<input>`/`<textarea>` with its own `id` —
-/// if so, `KEY` can now type into it (see that command's own doc). Not a
-/// focus *model* (no blur, no tab order, no `activeElement`) - a real but
-/// deliberately minimal "which id does the next KEY affect" tracker, the
-/// same "narrowest real thing that unblocks typing" scope cut this
-/// worker's other input commands (`CLICK`/`FILL`) already make.
-fn dispatch_click_at(page: &Page, width: u32, x: f64, y: f64) -> Result<Option<String>, String> {
-    let node = page.hit_test_at(width, x, y).ok_or("no element at that point")?;
+/// own doc for the real limitation that implies), and — real focus model
+/// now, via `dom::Dom::focus`/`clear_focus` — focuses the hit node itself
+/// if it's a real `<input>`/`<textarea>` with its own `id` (so `KEY` can
+/// type into it, and `document.activeElement` sees it too), or clears
+/// focus otherwise (matches a real browser blurring whatever was focused
+/// when a click lands somewhere non-focusable). Still no tab order
+/// (`Tab`/`Shift+Tab` moving focus) - only click-driven and JS-driven
+/// (`.focus()`/`.blur()`) focus changes exist.
+fn dispatch_click_at(page: &mut Page, width: u32, x: f64, y: f64, scroll_top: f64) -> Result<Option<String>, String> {
+    let node = page.hit_test_at(width, x, y, scroll_top).ok_or("no element at that point")?;
     let click_id = {
         let dom_ref = page.ctx.dom().ok_or("no DOM available")?;
         nearest_id_ancestor(dom_ref, node).ok_or("no id-addressable element at or above that point")?
@@ -627,26 +773,35 @@ fn dispatch_click_at(page: &Page, width: u32, x: f64, y: f64) -> Result<Option<S
     // could have mutated the DOM, and this engine's arena (`dom::Dom`'s
     // internal `Vec<Slot>`) isn't guaranteed not to reallocate on a node
     // creation in between.
-    let dom_ref = page.ctx.dom().ok_or("no DOM available")?;
-    let is_input_like = matches!(&dom_ref.get(node).map(|n| &n.data), Some(NodeData::Element { tag, .. }) if tag == "input" || tag == "textarea");
-    let focus_id = if is_input_like { dom_ref.attribute(node, "id").map(str::to_string) } else { None };
+    let (focusable, focus_id) = {
+        let dom_ref = page.ctx.dom().ok_or("no DOM available")?;
+        let focusable = is_input_like(dom_ref, node);
+        (focusable, if focusable { dom_ref.attribute(node, "id").map(str::to_string) } else { None })
+    };
+    if let Some(dom_mut) = page.ctx.dom_mut() {
+        if focusable {
+            dom_mut.focus(node);
+        } else {
+            dom_mut.clear_focus();
+        }
+    }
     Ok(focus_id)
 }
 
 /// Types `key` into whichever real `<input>`/`<textarea>` id `CLICK_AT`
 /// most recently focused (see `dispatch_click_at`'s doc) - `"Backspace"`
 /// removes the field's real last character, anything else is appended
-/// verbatim as typed text. Same `textContent`-not-`.value` deviation
-/// `FILL` already documents (this engine has no real
-/// `HTMLInputElement.value`) - a real `"keydown"` event still dispatches
-/// first via the existing `dispatchEvent` binding, so a page's own
-/// `keydown` listener genuinely runs, same as a real browser firing the
-/// event before applying the default action.
+/// verbatim as typed text. Writes the element's real `.value`
+/// (`dom::Dom::value`/`set_value`) now, not `textContent` — a real
+/// `"keydown"` event still dispatches first via the existing
+/// `dispatchEvent` binding, so a page's own `keydown` listener genuinely
+/// runs, same as a real browser firing the event before applying the
+/// default action.
 fn type_key(ctx: &Context, focused_id: &str, key: &str) -> Result<(), String> {
     let current = {
         let dom_ref = ctx.dom().ok_or("no DOM available")?;
         let node = dom_ref.find_by_id(focused_id).ok_or_else(|| format!("no element with id \"{focused_id}\""))?;
-        dom_ref.text_content(node)
+        dom_ref.value(node)
     };
     let updated = if key == "Backspace" {
         let mut chars: Vec<char> = current.chars().collect();
@@ -656,7 +811,7 @@ fn type_key(ctx: &Context, focused_id: &str, key: &str) -> Result<(), String> {
         format!("{current}{key}")
     };
     let script = format!(
-        "(function(){{ var el = document.getElementById({id}); if (el === null) throw {missing}; el.dispatchEvent(\"keydown\"); el.textContent = {value}; }})();",
+        "(function(){{ var el = document.getElementById({id}); if (el === null) throw {missing}; el.dispatchEvent(\"keydown\"); el.value = {value}; }})();",
         id = js_string_literal(focused_id),
         missing = js_string_literal(&format!("no element with id \"{focused_id}\"")),
         value = js_string_literal(&updated),
@@ -747,7 +902,7 @@ fn main() {
     };
 
     let mut writer = ipc::FrameWriter::new(shmem_name, width, height).expect("failed to create/open shared memory");
-    writer.publish(&page.render(&renderer, width, height));
+    writer.publish(&page.render(&renderer, width, height, 0.0));
 
     // Commands arrive on a dedicated thread so a slow/absent stdin stream
     // never blocks the render loop below - `try_recv` drains whatever's
@@ -778,11 +933,19 @@ fn main() {
     // liveness checks and settings changes), only the vsync work itself
     // stops.
     let mut paused = false;
-    // Real "which id does the next KEY affect" state - see
-    // `dispatch_click_at`'s doc. Reset on `RELOAD`/`NAVIGATE` since a
-    // fresh `Page` means a fresh DOM the old id might not even exist in
-    // anymore.
+    // Real "which id does the next KEY affect" state - a thin cache of
+    // `dom::Dom`'s own real `active_element()` (see `dispatch_click_at`'s
+    // doc), kept as a `String` id here since `KEY`'s handler goes through
+    // `id`-selector `eval()` scripts like every other command in this
+    // protocol. Reset on `RELOAD`/`NAVIGATE` since a fresh `Page` means a
+    // fresh DOM the old id might not even exist in anymore (a fresh
+    // `dom::Dom` starts with no focus of its own either).
     let mut focused_id: Option<String> = None;
+    // Real viewport scroll offset (see `SCROLL`'s own handling below and
+    // `Page::render`/`hit_test_at`'s docs) - reset to `0.0` on
+    // `RELOAD`/`NAVIGATE` same as `focused_id`, since a fresh page always
+    // starts scrolled to the top.
+    let mut scroll_top: f64 = 0.0;
 
     'render_loop: loop {
         while let Ok(line) = cmd_rx.try_recv() {
@@ -803,7 +966,8 @@ fn main() {
                 let (loaded, error) = load_source(&runtime, &current_source, width as f64, &storage_root, proxy.as_ref(), dns_server);
                 page = loaded;
                 focused_id = None;
-                writer.publish(&page.render(&renderer, width, height));
+                scroll_top = 0.0;
+                writer.publish(&page.render(&renderer, width, height, scroll_top));
                 match error {
                     Some(message) => {
                         let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
@@ -818,7 +982,8 @@ fn main() {
                 let (loaded, error) = load_source(&runtime, &current_source, width as f64, &storage_root, proxy.as_ref(), dns_server);
                 page = loaded;
                 focused_id = None;
-                writer.publish(&page.render(&renderer, width, height));
+                scroll_top = 0.0;
+                writer.publish(&page.render(&renderer, width, height, scroll_top));
                 match error {
                     Some(message) => {
                         let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
@@ -830,7 +995,7 @@ fn main() {
                 let _ = stdout.flush();
             } else if let Some(rest) = line.strip_prefix("CLICK ") {
                 let result = dispatch_click(&page.ctx, rest.trim());
-                writer.publish(&page.render(&renderer, width, height));
+                writer.publish(&page.render(&renderer, width, height, scroll_top));
                 match result {
                     Ok(()) => {
                         let _ = writeln!(stdout, "CLICKED");
@@ -845,8 +1010,8 @@ fn main() {
                 let coords = parts.next().zip(parts.next()).and_then(|(x, y)| Some((x.parse::<f64>().ok()?, y.parse::<f64>().ok()?)));
                 match coords {
                     Some((x, y)) => {
-                        let result = dispatch_click_at(&page, width, x, y);
-                        writer.publish(&page.render(&renderer, width, height));
+                        let result = dispatch_click_at(&mut page, width, x, y, scroll_top);
+                        writer.publish(&page.render(&renderer, width, height, scroll_top));
                         match result {
                             Ok(focus) => {
                                 focused_id = focus;
@@ -866,7 +1031,7 @@ fn main() {
                 match &focused_id {
                     Some(id) => {
                         let result = type_key(&page.ctx, id, key);
-                        writer.publish(&page.render(&renderer, width, height));
+                        writer.publish(&page.render(&renderer, width, height, scroll_top));
                         match result {
                             Ok(()) => {
                                 let _ = writeln!(stdout, "TYPED");
@@ -886,13 +1051,26 @@ fn main() {
                 let selector = parts.next().unwrap_or("").trim();
                 let value = parts.next().unwrap_or("");
                 let result = fill_element(&page.ctx, selector, value);
-                writer.publish(&page.render(&renderer, width, height));
+                writer.publish(&page.render(&renderer, width, height, scroll_top));
                 match result {
                     Ok(()) => {
                         let _ = writeln!(stdout, "FILLED");
                     }
                     Err(message) => {
                         let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
+                    }
+                }
+                let _ = stdout.flush();
+            } else if let Some(rest) = line.strip_prefix("SCROLL ") {
+                match rest.trim().parse::<f64>() {
+                    Ok(dy) => {
+                        let max_scroll = (page.content_height(width) - height as f64).max(0.0);
+                        scroll_top = (scroll_top + dy).clamp(0.0, max_scroll);
+                        writer.publish(&page.render(&renderer, width, height, scroll_top));
+                        let _ = writeln!(stdout, "SCROLLED");
+                    }
+                    Err(_) => {
+                        let _ = writeln!(stdout, "ERROR SCROLL requires a numeric delta");
                     }
                 }
                 let _ = stdout.flush();
@@ -923,7 +1101,7 @@ fn main() {
         }
 
         page.ctx.run_pending_timers();
-        writer.publish(&page.render(&renderer, width, height));
+        writer.publish(&page.render(&renderer, width, height, scroll_top));
 
         // Fixed-cadence scheduling, not `sleep(frame_interval)` in a loop -
         // that drifts by however long each tick's own work took. If a tick

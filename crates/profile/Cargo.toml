@@ -10,11 +10,15 @@ html = { path = "../html" }
 css = { path = "../css" }
 layout-engine = { path = "../layout-engine" }
 render = { path = "../render" }
+image_decode = { path = "../image_decode" }
 security = { path = "../security" }
 js-runtime = { path = "../js-runtime" }
 net = { path = "../net" }
 storage = { path = "../storage" }
 url = "2.5.8"
+
+[dev-dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 [[bin]]
 name = "profile-worker"

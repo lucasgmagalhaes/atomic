@@ -264,11 +264,12 @@ impl Profile {
         }
     }
 
-    /// Sets the `#id` element's `textContent` to `value` — see
-    /// `profile-worker`'s own doc on why this is a deviation from a real
-    /// `HTMLInputElement.value` assignment (this engine has no such
-    /// property), not an equivalent of one. `value` must not contain a
-    /// newline (this crate's stdin/stdout protocol is newline-delimited —
+    /// Sets the `#id` element's real `.value` (`dom::Dom::value`/
+    /// `set_value`, independent of children/text) if it's an
+    /// `<input>`/`<textarea>`, `textContent` otherwise — see
+    /// `profile-worker`'s own doc on `FILL` for the exact rule. `value`
+    /// must not contain a newline (this crate's stdin/stdout protocol is
+    /// newline-delimited —
     /// see this struct's own doc comment); a value that does never reaches
     /// the worker, reported the same way a worker-side failure would be
     /// rather than corrupting the command stream.
@@ -312,19 +313,41 @@ impl Profile {
         }
     }
 
-    /// Types `key` into whichever real element the most recent
-    /// [`click_at`](Self::click_at) focused - `"Backspace"` is a real
-    /// delete-last-character, anything else is appended as typed text
-    /// (into `textContent`, not a real `.value` - see `profile-worker`'s
-    /// own doc on why). `Ok(Err(message))` if nothing is currently
-    /// focused (never clicked an `<input>`/`<textarea>`, or the page
-    /// reloaded since - see `profile-worker`'s `focused_id` reset on
+    /// Types `key` into whichever real `<input>`/`<textarea>` the most
+    /// recent [`click_at`](Self::click_at) focused - `"Backspace"` is a
+    /// real delete-last-character, anything else is appended as typed
+    /// text, into the element's real `.value` (`dom::Dom::value`/
+    /// `set_value`). `Ok(Err(message))` if nothing is currently focused
+    /// (never clicked an `<input>`/`<textarea>`, or the page reloaded
+    /// since - see `profile-worker`'s `focused_id` reset on
     /// `RELOAD`/`NAVIGATE`) or the focused id no longer exists.
     pub fn type_key(&mut self, key: &str) -> std::io::Result<Result<(), String>> {
         if key.contains('\n') {
             return Ok(Err("key must not contain a newline".to_string()));
         }
         writeln!(self.stdin, "KEY {key}")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        let line = line.trim();
+        match line.strip_prefix("ERROR ") {
+            Some(message) => Ok(Err(message.to_string())),
+            None => Ok(Ok(())),
+        }
+    }
+
+    /// Real page (viewport) scroll: shifts the worker's scroll offset by
+    /// `dy` pixels (positive scrolls down, matching a mouse wheel's own
+    /// sign convention), clamped worker-side to `[0, content_height -
+    /// viewport_height]` (`0` if the page is shorter than the viewport -
+    /// nothing to scroll). Every subsequent render/hit-test/`CLICK_AT`
+    /// reflects the new offset until the next `SCROLL`, `RELOAD`, or
+    /// `NAVIGATE` (which resets it to `0`, a fresh page always starts
+    /// scrolled to the top - see `profile-worker`'s own `SCROLL` doc).
+    /// No horizontal scroll - this engine's box model has no concept of
+    /// content wider than its container to begin with.
+    pub fn scroll_by(&mut self, dy: f64) -> std::io::Result<Result<(), String>> {
+        writeln!(self.stdin, "SCROLL {dy}")?;
         self.stdin.flush()?;
         let mut line = String::new();
         self.stdout.read_line(&mut line)?;

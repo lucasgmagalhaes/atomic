@@ -180,6 +180,111 @@ unsafe fn define_text_content(ctx: *mut sys::JSContext, proto: sys::JSValue) {
     sys::JS_FreeAtom(ctx, atom);
 }
 
+unsafe extern "C" fn node_value_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    let node_ptr = node_opaque(sys::JS_GetRuntime(ctx), this_val);
+    let dom_ptr = dom_opaque(ctx);
+    if node_ptr.is_null() || dom_ptr.is_null() {
+        return sys::js_undefined();
+    }
+    new_js_string(ctx, &(*dom_ptr).value(*node_ptr))
+}
+
+unsafe extern "C" fn node_value_set(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    val: sys::JSValue,
+) -> sys::JSValue {
+    let node_ptr = node_opaque(sys::JS_GetRuntime(ctx), this_val);
+    let dom_ptr = dom_opaque(ctx);
+    let Some(text) = read_js_string(ctx, val) else {
+        return sys::js_undefined();
+    };
+    if !node_ptr.is_null() && !dom_ptr.is_null() {
+        (*dom_ptr).set_value(*node_ptr, &text);
+    }
+    sys::js_undefined()
+}
+
+/// Defines the `value` accessor on `proto` — real, independent of
+/// `textContent` (see `dom::Dom::value`/`set_value`'s own docs for the
+/// deviation from a typed `HTMLInputElement`/`HTMLTextAreaElement`
+/// hierarchy this generic `Node` class makes).
+unsafe fn define_value(ctx: *mut sys::JSContext, proto: sys::JSValue) {
+    let name = CString::new("value").unwrap();
+
+    let getter = sys::JS_NewCFunction2(
+        ctx,
+        std::mem::transmute::<Getter, sys::JSCFunction>(node_value_get),
+        name.as_ptr(),
+        0,
+        sys::JS_CFUNC_GETTER,
+        0,
+    );
+    let setter = sys::JS_NewCFunction2(
+        ctx,
+        std::mem::transmute::<Setter, sys::JSCFunction>(node_value_set),
+        name.as_ptr(),
+        1,
+        sys::JS_CFUNC_SETTER,
+        0,
+    );
+
+    let atom = sys::JS_NewAtom(ctx, name.as_ptr());
+    sys::JS_DefinePropertyGetSet(
+        ctx,
+        proto,
+        atom,
+        getter,
+        setter,
+        sys::JS_PROP_HAS_GET | sys::JS_PROP_HAS_SET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE,
+    );
+    sys::JS_FreeAtom(ctx, atom);
+}
+
+unsafe extern "C" fn node_focus(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let node_ptr = node_opaque(sys::JS_GetRuntime(ctx), this_val);
+    let dom_ptr = dom_opaque(ctx);
+    if !node_ptr.is_null() && !dom_ptr.is_null() {
+        (*dom_ptr).focus(*node_ptr);
+    }
+    sys::js_undefined()
+}
+
+unsafe extern "C" fn node_blur(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let node_ptr = node_opaque(sys::JS_GetRuntime(ctx), this_val);
+    let dom_ptr = dom_opaque(ctx);
+    if !node_ptr.is_null() && !dom_ptr.is_null() {
+        (*dom_ptr).blur(*node_ptr);
+    }
+    sys::js_undefined()
+}
+
+/// Defines real `focus()`/`blur()` methods on `proto`, backed by
+/// `dom::Dom`'s own focus state (`document.activeElement`, see
+/// `document_active_element_get` below).
+unsafe fn define_focus_methods(ctx: *mut sys::JSContext, proto: sys::JSValue) {
+    let focus_name = CString::new("focus").unwrap();
+    let focus_fn = sys::JS_NewCFunction2(ctx, node_focus, focus_name.as_ptr(), 0, sys::JS_CFUNC_GENERIC, 0);
+    sys::JS_SetPropertyStr(ctx, proto, focus_name.as_ptr(), focus_fn);
+
+    let blur_name = CString::new("blur").unwrap();
+    let blur_fn = sys::JS_NewCFunction2(ctx, node_blur, blur_name.as_ptr(), 0, sys::JS_CFUNC_GENERIC, 0);
+    sys::JS_SetPropertyStr(ctx, proto, blur_name.as_ptr(), blur_fn);
+}
+
 /// Registers the `Node` class on `ctx`'s runtime (if not already done for
 /// this runtime) and builds this context's `Node.prototype`.
 unsafe fn ensure_node_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
@@ -196,6 +301,8 @@ unsafe fn ensure_node_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
 
     let proto = sys::JS_NewObject(ctx);
     define_text_content(ctx, proto);
+    define_value(ctx, proto);
+    define_focus_methods(ctx, proto);
     crate::events::define_event_target(ctx, proto);
     sys::JS_SetClassProto(ctx, class_id, proto);
 
@@ -233,10 +340,44 @@ unsafe extern "C" fn document_get_element_by_id(
     }
 }
 
+unsafe extern "C" fn document_active_element_get(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+) -> sys::JSValue {
+    let dom_ptr = dom_opaque(ctx);
+    if dom_ptr.is_null() {
+        return sys::js_null();
+    }
+    match (*dom_ptr).active_element() {
+        Some(node_id) => get_or_create_node_object(ctx, crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NODE_CLASS_KIND), node_id),
+        None => sys::js_null(),
+    }
+}
+
+/// Defines the real, read-only `document.activeElement` getter — backed by
+/// `dom::Dom`'s own focus state, so it reflects whatever the most recent
+/// `.focus()`/`.blur()` call (JS-driven or `profile-worker`'s coordinate
+/// click routing) left focused.
+unsafe fn define_active_element(ctx: *mut sys::JSContext, document: sys::JSValue) {
+    let name = CString::new("activeElement").unwrap();
+    let getter = sys::JS_NewCFunction2(
+        ctx,
+        std::mem::transmute::<Getter, sys::JSCFunction>(document_active_element_get),
+        name.as_ptr(),
+        0,
+        sys::JS_CFUNC_GETTER,
+        0,
+    );
+    let atom = sys::JS_NewAtom(ctx, name.as_ptr());
+    sys::JS_DefinePropertyGetSet(ctx, document, atom, getter, sys::js_undefined(), sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE);
+    sys::JS_FreeAtom(ctx, atom);
+}
+
 /// Registers the `Node` class and a global `document` object exposing
-/// `getElementById(id)`. Callers must have already pointed the context's
-/// opaque slot at a live `dom::Dom` via `JS_SetContextOpaque` — bindings
-/// read it back on every call and no-op (return null/undefined) if unset.
+/// `getElementById(id)`/`activeElement`. Callers must have already pointed
+/// the context's opaque slot at a live `dom::Dom` via `JS_SetContextOpaque`
+/// — bindings read it back on every call and no-op (return null/undefined)
+/// if unset.
 pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     ensure_node_class(ctx);
 
@@ -252,6 +393,7 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
         0,
     );
     sys::JS_SetPropertyStr(ctx, document, name.as_ptr(), get_by_id);
+    define_active_element(ctx, document);
 
     sys::JS_FreeValue(ctx, document);
 }

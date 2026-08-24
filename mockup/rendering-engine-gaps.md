@@ -9,11 +9,9 @@ Convenção: **REAL** = implementado e testado. **FALTANDO** = confirmado ausent
 ### Seletores (`parser.rs`)
 - REAL: tipo (`div`), id (`#foo`), classe (`.foo`), universal (`*`) — `parser.rs:420-452`
 - REAL: combinador descendente (espaço) — `parser.rs:405-418`
-- FALTANDO: combinador filho `>`
-- FALTANDO: combinadores irmão `+`/`~`
-- FALTANDO: pseudo-classes (`:hover`, `:first-child`, `:nth-child`, `:not()`, etc.) — lexer não tokeniza nada além do `:` já usado como separador `property:value`
+- **Fechado desde então (commit `dd8467c`, não datado neste doc originalmente — corrigido 2026-08-25):** combinador filho `>`, combinadores irmão `+`/`~` (encadeáveis), seletores de atributo (`[attr]`/`[attr=val]`), e pseudo-classes estruturais `:first-child`/`:last-child`/`:nth-child()` (inteiro, `odd`/`even`, e a fórmula geral `An+B`) — todos reais e testados (`crates/css/tests/selectors_test.rs`). `:hover`/`:focus` parseiam (contam pra especificidade) mas nunca casam — documentado, já que não existe estado de interação nenhum pra eles refletirem.
+- FALTANDO: `:not()`
 - FALTANDO: pseudo-elementos (`::before`, `::after`)
-- FALTANDO: seletores de atributo (`[attr=val]`, `[attr~=val]`, ...) — tokens `[`/`]` nem existem no lexer
 
 ### At-rules
 - REAL: `@import` (URL + media condicional opcional) — `parser.rs:247-288`
@@ -33,12 +31,15 @@ Convenção: **REAL** = implementado e testado. **FALTANDO** = confirmado ausent
 ## 2. Layout (`crates/layout-engine`)
 
 ### `ComputedStyle` (`style.rs:122-147`)
-Campos reais: `display`, `width`, `height`, `margin`, `padding`, `flex_direction`, `justify_content`, `align_items`, `flex_grow`, `flex_shrink`, `flex_basis`, `background_color`, `font_size`, `color`.
+Campos reais: `display`, `width`, `height`, `margin`, `padding`, `position`, `top`/`right`/`bottom`/`left`, `flex_direction`, `justify_content`, `align_items`, `flex_grow`, `flex_shrink`, `flex_basis`, `background_color`, `font_size`, `color`.
 
-- FALTANDO: `position` (static/relative/absolute/fixed) — não é campo, não é referenciado em `layout.rs`
+**`position` fechado (2026-08-25), real, com escopo:** `static`/`relative`/`absolute` (`style.rs`), aplicados em `layout::layout_block`/`layout_children`. `relative` desloca a caixa (e toda sua subtree, já que o deslocamento é aplicado ao `(x, y)` de entrada antes do resto do cálculo) sem afetar o espaço reservado no fluxo do pai — o valor de retorno usado pra avançar o cursor dos irmãos vem só de `margin`+`height`, nunca de `x`/`y`. `absolute` remove a caixa do fluxo de verdade (contribui `0` de altura pro pai, não desloca os irmãos seguintes) e a posiciona via `top`/`left` (ou `-right`/`-bottom` quando `top`/`left` são `Auto`) a partir da origem da página `(0, 0)` — real, mas mais estreito que a spec: não busca o "nearest positioned ancestor" (esse motor faz um único passe top-down, sem um segundo passe pra revisitar uma vez que o ancestral já tem tamanho conhecido), sempre usa a origem da página. Largura/altura da caixa absolutamente posicionada ainda resolvem contra o `content_width` do ancestral de layout mais próximo (não a viewport) — só x/y pulam isso. `top`/`bottom` em porcentagem caem pra `0.0` (precisariam da altura definida do containing block, que este motor não rastreia de forma confiável). Testado (`crates/layout-engine/tests/position_test.rs`): deslocamento relativo sem mover irmãos, deslocamento carregando pra descendentes, fallback `right`/`bottom`, remoção real do fluxo, posição-padrão na origem sem offsets, e largura ainda resolvendo contra o pai.
+- FALTANDO: `position: fixed`/`sticky`
+- FALTANDO: "nearest positioned ancestor" real como containing block de um `absolute` (sempre usa a origem da página)
+- FALTANDO: `absolute` dentro de um container `flex` ainda participa do algoritmo de flex normalmente (não é removido do fluxo flex) — só o branch de block-stacking trata isso
 - FALTANDO: floats (`float`/`clear`)
 - FALTANDO: margin collapsing — margens adjacentes sempre somam, nunca colapsam; `margin: auto` vira `0`, não centraliza
-- FALTANDO: `border-*` (width/color/style/radius) — border não é modelado, então nem pode ter borda visual
+- FALTANDO: `border-radius`, cores/estilos por lado — `border-width`/`border-style`/`border-color` (solid, uma cor) fechados, ver seção 3 (Render)
 - FALTANDO: `opacity`
 - FALTANDO: `z-index` / stacking context
 - FALTANDO: `overflow` (ver seção Scroll)
@@ -62,14 +63,15 @@ Campos reais: `display`, `width`, `height`, `margin`, `padding`, `flex_direction
 ### Formatação inline/bloco (`tree.rs`)
 - REAL: contexto de formatação inline de verdade — texto + elementos `display: inline` consecutivos viram um `LayoutBox::inline_spans` shapeado junto via `cosmic-text` (`tree.rs:110-262`)
 - FALTANDO: geração de anonymous block box — um elemento block-level dentro de conteúdo inline não é "de-inlinado" como um browser real faz (`tree.rs:22-24`)
-- FALTANDO: UA stylesheet padrão por tag — `display: inline` só se aplica se a stylesheet disser explicitamente (`b, span { display: inline }`); sem isso, tudo renderiza como bloco
+- FALTANDO: UA stylesheet padrão por tag — `display: inline` só se aplica se a stylesheet dizer explicitamente (`b, span { display: inline }`); sem isso, tudo renderiza como bloco
 
 ## 3. Render (`crates/render`)
 
 ### Pintura (`display_list.rs`, `gpu.rs`)
 - REAL: retângulos sólidos com cor de fundo, um draw call, alpha blending — `display_list.rs:29-42`, `gpu.rs:254-300`
+- **`border-width`/`border-style`/`border-color` fechado (2026-08-25), real:** `layout::layout_block` faz o `border-width` crescer de verdade o box model (`Dimensions` agora é a border box: content+padding+border, não só padding box) quando `border-style` não é `none`; `render::build_display_list` pinta a borda como até 4 retângulos sólidos formando uma moldura ao redor da borda externa da caixa — reaproveita o mesmo pipeline de quad sólido que já pinta `background-color`, sem shader/geometria nova. Só `solid` (sem `dashed`/`dotted`/`double`/...), uma cor só pra todo mundo (sem `border-top-color` etc.), sem `border-radius` (cantos quadrados só, esse pipeline não tem geometria arredondada/anti-aliasing). Testado em `crates/layout-engine/tests/border_test.rs` (crescimento real do box model, largura auto encolhendo pra caber a borda, origem do conteúdo do filho deslocada, `border-style: none` não ocupa espaço mesmo com `border-width` setado, shorthand `border` aceita os 3 componentes em qualquer ordem) e `crates/render/tests/display_list_test.rs` (4 tiras nas posições certas, lado com largura 0 não gera retângulo, ordem de pintura fundo-depois-borda).
 - FALTANDO: `border-radius`
-- FALTANDO: `border-width`/`border-color` (não modelado em layout, então nem chega no render)
+- FALTANDO: cores/estilos por lado (`border-top-color`, `border-left-style`, ...)
 - FALTANDO: `box-shadow`
 - FALTANDO: `opacity`/transform (`translate`/`scale`/`rotate`)
 - FALTANDO: `clip-path`
@@ -101,12 +103,12 @@ Campos reais: `display`, `width`, `height`, `margin`, `padding`, `flex_direction
 
 ## 5. Imagens
 
-**Gap total, não parcial.** Zero código em qualquer lugar do workspace:
-- Sem dependência de crate de decodificação (`image`, `png`, `jpeg`) em nenhum `Cargo.toml`
-- Sem tratamento de `<img>` em `dom`/`html`/`layout-engine`
-- Sem `HTMLImageElement`
-- Sem textura-a-partir-de-imagem em `render`/`webgl`
-- Consequência: nenhuma página com imagem real renderiza a imagem — o `<img>` vira um elemento genérico sem conteúdo visual
+**Fechado (2026-08-24), real, ponta a ponta.** `image_decode` (PNG+JPEG via a crate `image`), `layout_engine::apply_image_sizes` (sizing intrínseco real) e `render::build_image_list`/`composite_images` (compositing real, nearest-neighbor) já existiam e eram testados isoladamente por crate — mas nada em `profile-worker`, o único processo que realmente renderiza uma página navegada, jamais chamava nenhum dos três. Uma página real com `<img>` continuava sem pintar nada, apesar de cada peça individual já ser real. Fechado agora: `profile-worker`'s `load_images`/`collect_image_sources` buscam (via `fetch_with_cookies` — mesmo proxy/DNS/cookie jar de qualquer outro fetch deste worker) e decodificam cada `<img src>` no carregamento da página (mesma convenção "um GET real por recurso, no load" que `build_stylesheet` já usa pra `<link>`), e `Page::render`/`hit_test_at` agora compartilham um `Page::layout` único que aplica `apply_image_sizes` antes do layout — antes cada um reconstruía sua própria árvore de boxes de forma independente, o que teria discordado silenciosamente assim que o sizing intrínseco de imagem entrasse em cena.
+
+- FALTANDO: `HTMLImageElement` como tipo de nó dedicado (`onload`/`onerror`/`naturalWidth`/`naturalHeight` em JS) — `dom::NodeData::Element` continua genérico, sem hierarquia de classe por tag
+- FALTANDO: GIF/WebP/AVIF/SVG (a feature-set da crate `image` habilitada aqui é só PNG+JPEG), imagens animadas (só o primeiro frame), perfil de cor ICC
+- FALTANDO: `srcset`/`<picture>`/`loading="lazy"`
+- Uma falha de fetch/decode (URL não resolve, 404, bytes corrompidos) deixa a box vazia (mesmo comportamento de um `<img>` sem `src`), sem erro reportado
 
 ## 6. Input real (mouse/teclado → DOM)
 
@@ -130,13 +132,22 @@ Consequência prática: um humano não consegue clicar num link ou digitar num c
 
 ## 7. Scroll
 
-**Gap total.** `overflow` não é propriedade de `ComputedStyle`. Sem clipping, sem viewport scrollável maior que o pane, sem barra de rolagem, sem `scrollTop`/`scrollIntoView`. Documentado só em comentário (`display_list.rs:6`), sem nenhum código de suporte.
+**Parcialmente fechado (2026-08-25), real: scroll de viewport (a página inteira, não containers internos com `overflow`).** `profile-worker` ganhou um comando `SCROLL <dy>` real (`crates/profile/src/bin/profile_worker.rs`): um `scroll_top: f64` por página (resetado a `0` em `RELOAD`/`NAVIGATE`, igual `focused_id`), clampado em `[0, content_height - viewport_height]` via `Page::content_height` (a altura real do box raiz já laid-out — layout em si sempre calcula o conteúdo inteiro, sem cortar no viewport; scroll é só uma janela de pintura sobre isso). `Page::render` desloca cada `Rect`/`ImageQuad`/`PositionedGlyph` já pintado por `-scroll_top` antes de compositar (os três compositors — `render_to_rgba`/`composite_images`/`composite_glyphs` — já clipavam silenciosamente qualquer coisa fora de `[0, height)`, então não precisou de clipping novo); `Page::hit_test_at` soma `scroll_top` de volta em `y` antes de testar, então `CLICK_AT` continua acertando o elemento real sob o cursor mesmo com a página rolada. `Page::render`/`hit_test_at` agora passam por um `Page::layout` único (mesmo que a sessão anterior já unificou pra imagens), garantindo que pintura e hit-test concordam sobre a mesma árvore. `profile::Profile::scroll_by(dy)` expõe isso pro host; `apps/shell`'s grade de panes agora rota o scroll real do mouse (`egui`'s `raw_scroll_delta`, sinal invertido pra bater com a convenção do protocolo) pro pane que está sob o cursor (`hovered()`, não foco — igual um browser real rola o que está sob o mouse).
+
+- FALTANDO: `overflow` como propriedade de `ComputedStyle` — scroll continua sendo só do viewport/documento inteiro, um `<div style="overflow:auto">` interno não tem scroll próprio (precisaria virar sua própria "janela de pintura" recursiva, não só uma no nível da página)
+- FALTANDO: barra de rolagem visual (nenhum indicador de posição/tamanho de scroll é desenhado)
+- FALTANDO: `scrollTop`/`scrollLeft`/`scrollIntoView`/`scroll()` como API JS em `document`/`Node` — o scroll só existe no lado do host (protocolo `SCROLL`), nada em `js-runtime` expõe isso pra um script da própria página ler ou setar
+- FALTANDO: scroll horizontal — o protocolo e o clamping só cobrem o eixo vertical, e o box model deste engine não tem noção de conteúdo mais largo que o container de qualquer forma
+- FALTANDO: scroll suave/momentum — cada `SCROLL` aplica o delta e repinta imediatamente, sem animação
 
 ## 8. Formulários / elementos de input
 
-- FALTANDO: tipo de nó dedicado pra `<input>`/`<textarea>`/`<select>` — `dom::NodeData::Element` é genérico (`{ tag, attributes }`), sem distinção por tag
-- FALTANDO: `HTMLInputElement.value` (ou qualquer `.value` de elemento de formulário) — confirmado ausente em `dom` e `js-runtime`
-- Consequência: mesmo com hit-testing implementado no futuro, digitar em um "campo" não teria onde escrever — precisaria de um tipo de nó novo com estado de valor próprio
+**Parcialmente fechado (2026-08-24), real:** `.value` real e independente de `textContent` (`dom::Dom::value`/`set_value`, novo campo `value: Option<String>` em `NodeData::Element`) e foco real (`dom::Dom::focus`/`blur`/`clear_focus`/`active_element`) — expostos em `js-runtime` como `Node.prototype.value` (getter/setter), `Node.prototype.focus()`/`blur()`, e `document.activeElement` (`crates/js-runtime/src/dom_bindings.rs`). `<input value="...">` (o atributo HTML) semeia `.value` via `Dom::set_attribute`'s mirroring; `<textarea>` cai pro seu `textContent` real até `.value` ser tocado, depois vira independente — o mesmo comportamento real do DOM, simplificado (sem "dirty value flag" por trás: `set_attribute("value", ...)` sempre espelha, não só antes da primeira interação). `profile-worker`'s `FILL`/`KEY` agora escrevem `.value` de verdade num `<input>`/`<textarea>` (`textContent` continua sendo o alvo pra qualquer outro elemento), e `CLICK_AT` agora foca de verdade via `dom::Dom::focus`/`clear_focus` (não só um tracker local de string) — `document.activeElement` reflete um clique real do usuário, não só chamadas JS.
+
+- FALTANDO ainda: tipo de nó dedicado pra `<input>`/`<textarea>`/`<select>` — `dom::NodeData::Element` continua genérico (`{ tag, attributes, value }`), sem distinção por tag; `.value` é exposto genericamente em `Node.prototype`, não numa hierarquia `HTMLInputElement`/`HTMLTextAreaElement` própria (documentado no código)
+- FALTANDO: `<select>`/`<option>` — nenhum tratamento especial, `.value` genérico não modela `selectedIndex`/opções
+- FALTANDO: tab order (`Tab`/`Shift+Tab` movendo foco), `tabindex` — só existe foco disparado por clique real (`CLICK_AT`) ou chamada JS explicita (`.focus()`/`.blur()`)
+- FALTANDO: eventos `focus`/`blur`/`input`/`change` reais disparados como `Event` — `focus()`/`blur()` mudam o estado real mas não despacham nada via `dispatchEvent`; só `"keydown"` é disparado (por `KEY`, já existia antes)
 
 ## Resumo de prioridade (se fosse continuar o motor)
 

@@ -2315,6 +2315,7 @@ dependencies = [
  "platform-apis",
  "quickjs-sys",
  "storage",
+ "url",
 ]
 
 [[package]]

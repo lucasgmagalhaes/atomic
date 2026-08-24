@@ -11,3 +11,4 @@ css = { path = "../css" }
 platform-apis = { path = "../platform-apis" }
 net = { path = "../net" }
 storage = { path = "../storage" }
+url = "2.5.8"

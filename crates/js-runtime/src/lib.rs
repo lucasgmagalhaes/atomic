@@ -19,13 +19,16 @@ mod events;
 mod event_subclasses;
 mod fetch;
 mod fetch_async;
+mod history;
 mod host_state;
 mod indexed_db_bindings;
 mod local_storage_bindings;
+mod location;
 mod notifications;
 mod page_visibility;
 mod performance;
 mod timers;
+mod window;
 mod value_bridge;
 mod web_audio;
 
@@ -92,6 +95,8 @@ impl<'rt> Context<'rt> {
         unsafe {
             performance::register(ptr);
             crypto::register(ptr);
+            events::register(ptr);
+            event_subclasses::register(ptr);
             page_visibility::register(ptr);
             fetch::register(ptr);
             fetch_async::register(ptr);
@@ -103,6 +108,9 @@ impl<'rt> Context<'rt> {
             notifications::register(ptr);
             clipboard::register(ptr);
             web_audio::register(ptr);
+            window::register(ptr);
+            location::register(ptr);
+            history::register(ptr);
         };
         Context {
             ptr,
@@ -125,6 +133,7 @@ impl<'rt> Context<'rt> {
             storage_dir: None,
             local_storage: None,
             session_storage: None,
+            url: None,
         });
         let raw = state.as_mut() as *mut host_state::HostState as *mut std::os::raw::c_void;
         unsafe {
@@ -232,6 +241,59 @@ impl<'rt> Context<'rt> {
     /// genuinely needs to mutate DOM state without touching JS at all.
     pub fn dom_mut(&mut self) -> Option<&mut dom::Dom> {
         self._host_state.as_mut().map(|s| &mut s.dom)
+    }
+
+    /// Sets the page's real URL, backing `location`'s reflected properties
+    /// (see `location`). No-op on a plain [`Context::new`] (nothing to set
+    /// it on) — a caller with a real navigated URL (`profile-worker`'s
+    /// `base_url`) calls this once after construction; `history.rs`'s
+    /// `pushState`/`replaceState`/`back`/`forward`/`go` update it further
+    /// for same-document navigation.
+    pub fn set_url(&mut self, url: &str) {
+        if let Some(state) = self._host_state.as_mut() {
+            state.url = Some(url.to_string());
+        }
+    }
+
+    /// Fires real `DOMContentLoaded` (on `document`, bubbles) and `load`
+    /// (on `window`/the global object, doesn't bubble) — the two lifecycle
+    /// events this crate models so far (see `JS_ENGINE_CAPABILITY_MATRIX.md`
+    /// item 5). A host with a real parsed/scripted page
+    /// (`profile-worker`'s `Page::load`, after running every page script)
+    /// calls this once per navigation/reload, matching the real DOM's
+    /// "fires once the document is parsed and its scripts have run" timing
+    /// — this crate has no separate parser-async/subresource-loading
+    /// timeline to distinguish `DOMContentLoaded` from `load` further than
+    /// that, a documented scope cut (both currently fire back to back).
+    pub fn dispatch_lifecycle_events(&self) {
+        unsafe {
+            let document = crate::document::get_or_create(self.ptr);
+            events::dispatch_simple(self.ptr, document, "DOMContentLoaded", true, false);
+            sys::JS_FreeValue(self.ptr, document);
+            let global = sys::JS_GetGlobalObject(self.ptr);
+            events::dispatch_simple(self.ptr, global, "load", false, false);
+            sys::JS_FreeValue(self.ptr, global);
+        }
+    }
+
+    /// Fires a real, cancelable `beforeunload` on `window` (the global
+    /// object) — a host that's about to replace this context's page
+    /// (`profile-worker`'s `RELOAD`/`NAVIGATE` handling) calls this first
+    /// and only proceeds if it returns `true`. A listener that calls
+    /// `event.preventDefault()` makes this return `false`, i.e. the page
+    /// asked to stay. Real deviation from spec: a real browser then shows a
+    /// confirmation dialog the user can override; this engine has no
+    /// dialog/UI-confirmation surface at all yet (see
+    /// `JS_ENGINE_CAPABILITY_MATRIX.md`'s "dialogs, popups" gap), so
+    /// `preventDefault()` cancels the navigation outright rather than just
+    /// requesting confirmation.
+    pub fn fire_before_unload(&self) -> bool {
+        unsafe {
+            let global = sys::JS_GetGlobalObject(self.ptr);
+            let proceed = events::dispatch_simple(self.ptr, global, "beforeunload", false, true);
+            sys::JS_FreeValue(self.ptr, global);
+            proceed
+        }
     }
 
     /// Raw `JSContext` pointer, for a caller outside this crate that needs

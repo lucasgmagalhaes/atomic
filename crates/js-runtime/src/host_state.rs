@@ -33,6 +33,15 @@ pub(crate) struct HostState {
     /// just an alias persisted the same way.
     pub local_storage: Option<storage::LocalStorage>,
     pub session_storage: Option<storage::LocalStorage>,
+    /// The page's own URL, backing `location`'s reflected properties (see
+    /// `crate::location`). `None` for a plain `Context::with_dom`/a page
+    /// with no real navigated URL (e.g. `profile-worker`'s built-in demo
+    /// page) — `location` degrades to empty strings rather than panicking,
+    /// same pattern `cookies`/`local_storage` already use. Set via
+    /// `Context::set_url`; also updated in place by `history.pushState`/
+    /// `replaceState`/`back`/`forward`/`go` (same-document navigation, per
+    /// spec, doesn't need a real fetch).
+    pub url: Option<String>,
 }
 
 /// Reads the `HostState` behind `ctx`'s opaque slot, or null if unset

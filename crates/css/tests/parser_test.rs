@@ -1,5 +1,65 @@
 use css::{parse_stylesheet, CompoundSelector, SimpleSelector, Token};
 
+/// Real regression coverage for a genuine infinite-loop bug found via a
+/// real fetched page (`https://example.com/`'s own actual CSS has
+/// `a:link,a:visited{...}`): `parse_compound_selector` consumes tokens
+/// (e.g. `a`, `:`, `link`) before discovering `link` isn't a supported
+/// pseudo-class and returning `None` - the outer `parse_stylesheet`/
+/// `parse_media_block` loops didn't advance past a failed rule at all,
+/// so they retried `parse_rule` forever on the exact same stuck token.
+/// Fixed by `skip_malformed_rule` (real CSS Syntax Module error recovery:
+/// skip to the next `{`, then skip its balanced block). Runs each case on
+/// a real background thread with a hard join timeout so a *future*
+/// regression fails this test in a few seconds with a clear message,
+/// instead of hanging the whole test binary (and, if hit through the real
+/// pipeline, a live `profile-worker` process) indefinitely.
+fn parse_with_timeout(css: &'static str) -> css::Stylesheet {
+    let handle = std::thread::spawn(move || parse_stylesheet(css));
+    let start = std::time::Instant::now();
+    loop {
+        if handle.is_finished() {
+            return handle.join().expect("parse_stylesheet should not panic");
+        }
+        assert!(start.elapsed() < std::time::Duration::from_secs(5), "parse_stylesheet({css:?}) did not return within 5s - likely stuck in an infinite loop again");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn an_unrecognized_pseudo_class_does_not_hang_the_parser() {
+    let sheet = parse_with_timeout("a:link{color:#348}");
+    // Real CSS Syntax Module recovery: the whole malformed rule is
+    // discarded (this parser doesn't support `:link` at all), not
+    // partially kept - the important thing is that parsing completes and
+    // moves on, not that this specific rule survives.
+    assert_eq!(sheet.rules.len(), 0);
+}
+
+#[test]
+fn an_unrecognized_pseudo_class_in_a_comma_list_does_not_hang_and_later_rules_still_parse() {
+    let sheet = parse_with_timeout("a:link,a:visited{color:#348}div{width:10px}");
+    assert_eq!(sheet.rules.len(), 1, "the malformed rule should be skipped, but a real later rule must still parse");
+    assert_eq!(sheet.rules[0].selectors.0[0].0, vec![CompoundSelector(vec![SimpleSelector::Type("div".into())])]);
+}
+
+#[test]
+fn the_real_example_com_stylesheet_parses_without_hanging() {
+    // The exact real CSS `https://example.com/` serves - this is what
+    // originally hung a real navigate() call end to end.
+    let sheet = parse_with_timeout("body{background:#eee;width:60vw;margin:15vh auto;font-family:system-ui,sans-serif}h1{font-size:1.5em}div{opacity:0.8}a:link,a:visited{color:#348}");
+    // 3 real rules parse (body/h1/div) - vw/em units and opacity aren't
+    // supported either, but unsupported *values* don't fail a rule the
+    // way an unsupported *selector* does, so these still count as parsed
+    // rules even though their declarations may not all apply later.
+    assert_eq!(sheet.rules.len(), 3);
+}
+
+#[test]
+fn a_malformed_rule_inside_a_real_media_block_does_not_hang() {
+    let sheet = parse_with_timeout("@media screen { a:link{color:red} div{width:10px} }");
+    assert_eq!(sheet.rules.len(), 1, "the malformed rule inside @media should be skipped, the real one after it still parses");
+}
+
 #[test]
 fn parses_single_rule_with_declarations() {
     let sheet = parse_stylesheet("div { color: red; width: 10px; }");

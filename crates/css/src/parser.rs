@@ -263,12 +263,51 @@ impl<'a> Parser<'a> {
                 _ => {
                     if let Some(rule) = self.parse_rule(None) {
                         rules.push(rule);
+                    } else {
+                        self.skip_malformed_rule();
                     }
                 }
             }
             self.skip_whitespace();
         }
         Stylesheet { rules, imports }
+    }
+
+    /// Real CSS error recovery for a rule `parse_rule` failed partway
+    /// through (an unsupported selector construct - an unrecognized
+    /// pseudo-class like `:link`/`:visited`, or any other selector syntax
+    /// outside this parser's real feature set - real-world CSS is full of
+    /// these). Without this, the outer loop would retry `parse_rule` on
+    /// the exact same stuck token forever: a failed selector parse can
+    /// leave the cursor mid-selector (having already consumed some real
+    /// tokens before hitting the unsupported one) or unmoved entirely, and
+    /// neither `parse_rule` nor its own failure path guarantees forward
+    /// progress on its own — this is what does. Matches the CSS Syntax
+    /// Module's own "consume the remnants of a bad qualified rule"
+    /// recovery: skip forward to the next `{` (discarding whatever's
+    /// between here and there - the rest of the malformed selector), then
+    /// skip that block's real balanced-brace contents too (same tracking
+    /// `skip_at_rule_body` already does for at-rules). No `{` before EOF
+    /// just drains to the end.
+    fn skip_malformed_rule(&mut self) {
+        loop {
+            match self.tokens.next() {
+                Some(Token::LBrace) => {
+                    let mut depth = 1;
+                    while depth > 0 {
+                        match self.tokens.next() {
+                            Some(Token::LBrace) => depth += 1,
+                            Some(Token::RBrace) => depth -= 1,
+                            Some(_) => {}
+                            None => break,
+                        }
+                    }
+                    break;
+                }
+                Some(_) => {}
+                None => break,
+            }
+        }
     }
 
     fn parse_rule(&mut self, media: Option<MediaQuery>) -> Option<Rule> {
@@ -381,6 +420,8 @@ impl<'a> Parser<'a> {
         while !matches!(self.tokens.peek(), Some(Token::RBrace) | None) {
             if let Some(rule) = self.parse_rule(query.clone()) {
                 rules.push(rule);
+            } else {
+                self.skip_malformed_rule();
             }
             self.skip_whitespace();
         }

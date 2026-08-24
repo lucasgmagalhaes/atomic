@@ -271,6 +271,22 @@ impl NimbleApp {
         }
     }
 
+    /// The Settings window's GPU dropdown "Apply" button: respawns every
+    /// live pane with `self.performance.gpu_adapter` (see that field's own
+    /// doc on why this can't be a live setting like `fps_cap`) - loses
+    /// each pane's current page/proxy the same way `apply_proxy` already
+    /// does for a single pane, since a respawn is a genuinely fresh
+    /// process either way.
+    fn apply_gpu_adapter_to_all_panes(&mut self) {
+        let adapter = self.performance.gpu_adapter;
+        for pane in &mut self.panes {
+            pane.browser = BrowserView::spawn_with_identity_and_gpu(&pane.id, PANE_WIDTH, PANE_HEIGHT, None, adapter);
+            pane.monitor = PaneMonitor::new();
+        }
+        self.apply_visibility_throttling();
+        self.apply_fps_cap_to_all_panes();
+    }
+
     fn navigate_to_address_bar(&mut self) {
         let url = self.address_bar_text.trim().to_string();
         if !url.is_empty() {
@@ -688,7 +704,29 @@ impl eframe::App for NimbleApp {
                 if let Some(error) = &self.performance_error {
                     ui.colored_label(egui::Color32::RED, error);
                 }
-                ui.label("Real: applies live to every running pane's own vsync loop (profile::Profile::set_fps_cap). Background throttling (pausing hidden panes) and GPU selection: not implemented yet - no equivalent command/hook exists for either.");
+                ui.label("Frame cap and background throttling (pausing hidden panes) both apply live to already-running panes.");
+
+                let adapters = render::list_adapters();
+                if adapters.is_empty() {
+                    ui.weak("No GPU adapters enumerated on this machine.");
+                } else {
+                    let current_label = match self.performance.gpu_adapter {
+                        Some(index) => adapters.get(index).map(|a| format!("{} ({:?})", a.name, a.device_type)).unwrap_or_else(|| "Default".to_string()),
+                        None => "Default".to_string(),
+                    };
+                    ui.horizontal(|ui| {
+                        egui::ComboBox::from_label("GPU").selected_text(current_label).show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.performance.gpu_adapter, None, "Default");
+                            for (index, adapter) in adapters.iter().enumerate() {
+                                ui.selectable_value(&mut self.performance.gpu_adapter, Some(index), format!("{} ({:?})", adapter.name, adapter.device_type));
+                            }
+                        });
+                        if ui.button("Apply (respawns all panes)").clicked() {
+                            self.apply_gpu_adapter_to_all_panes();
+                        }
+                    });
+                }
+                ui.label("GPU selection takes effect on the next spawn, not live - applying respawns every pane (losing its current page, same as changing a proxy).");
 
                 ui.separator();
                 ui.heading("Credentials");

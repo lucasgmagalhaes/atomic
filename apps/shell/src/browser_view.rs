@@ -106,7 +106,7 @@ impl BrowserView {
         static SPAWN_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let n = SPAWN_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let shmem_name = format!("nimble-shell-{}-{n}", std::process::id());
-        Self::spawn_with_shmem_name(&shmem_name, width, height, proxy)
+        Self::spawn_with_shmem_name(&shmem_name, width, height, proxy, None)
     }
 
     /// Same as [`spawn_with_proxy`](Self::spawn_with_proxy), but keyed to a
@@ -123,13 +123,24 @@ impl BrowserView {
     /// here, same as this project's existing "no per-profile identity
     /// beyond a GUI-assigned id" scope.
     pub fn spawn_with_identity(pane_id: &str, width: u32, height: u32, proxy: Option<&str>) -> Self {
-        let shmem_name = format!("nimble-profile-{pane_id}");
-        Self::spawn_with_shmem_name(&shmem_name, width, height, proxy)
+        Self::spawn_with_identity_and_gpu(pane_id, width, height, proxy, None)
     }
 
-    fn spawn_with_shmem_name(shmem_name: &str, width: u32, height: u32, proxy: Option<&str>) -> Self {
+    /// Same as [`spawn_with_identity`](Self::spawn_with_identity), plus
+    /// opening a specific GPU adapter (see `profile::Profile::
+    /// spawn_with_gpu_adapter`'s own doc - `render::list_adapters()`'s
+    /// enumeration order) instead of the default heuristic. Like
+    /// proxy/DNS, this is fixed for the spawned process's lifetime -
+    /// changing it means a fresh spawn, same "respawn, not a live
+    /// setting" scope every other spawn-time choice already has here.
+    pub fn spawn_with_identity_and_gpu(pane_id: &str, width: u32, height: u32, proxy: Option<&str>, gpu_adapter: Option<usize>) -> Self {
+        let shmem_name = format!("nimble-profile-{pane_id}");
+        Self::spawn_with_shmem_name(&shmem_name, width, height, proxy, gpu_adapter)
+    }
+
+    fn spawn_with_shmem_name(shmem_name: &str, width: u32, height: u32, proxy: Option<&str>, gpu_adapter: Option<usize>) -> Self {
         let (profile, error) = match worker_binary_path() {
-            Ok(path) => match profile::Profile::spawn_with_proxy(&path.to_string_lossy(), shmem_name, width, height, proxy) {
+            Ok(path) => match profile::Profile::spawn_full(&path.to_string_lossy(), shmem_name, width, height, proxy, None, gpu_adapter) {
                 Ok(p) => (Some(p), None),
                 Err(e) => (None, Some(e.to_string())),
             },

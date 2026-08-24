@@ -105,13 +105,25 @@ impl Profile {
         Self::spawn_with_proxy_and_dns(worker_path, shmem_name, width, height, None, dns_server)
     }
 
-    /// The general form [`spawn`](Self::spawn)/[`spawn_with_proxy`](Self::spawn_with_proxy)/
-    /// [`spawn_with_dns`](Self::spawn_with_dns) all delegate to. A proxy and
-    /// a custom DNS server can both be passed, but the worker's own
+    /// Same as [`spawn`](Self::spawn), plus opening a specific GPU adapter
+    /// (see `render::list_adapters`'s own doc for how a caller enumerates
+    /// real ones) instead of `render::GpuRenderer::new`'s default-adapter
+    /// heuristic — the mockup's "Settings > Performance > GPU" knob.
+    /// `index` is into `render::list_adapters()`'s own order; an
+    /// out-of-range index is the worker process's problem to report (it
+    /// panics on that, same as `GpuRenderer::new_with_adapter` itself
+    /// does), not this crate's.
+    pub fn spawn_with_gpu_adapter(worker_path: &str, shmem_name: &str, width: u32, height: u32, gpu_adapter: Option<usize>) -> Result<Self, SpawnError> {
+        Self::spawn_full(worker_path, shmem_name, width, height, None, None, gpu_adapter)
+    }
+
+    /// The general form every other `spawn_*` delegates to. A proxy and a
+    /// custom DNS server can both be passed, but the worker's own
     /// `fetch_with_cookies` always prefers the proxy when both are set
     /// (there's no `net` entry point combining `CONNECT` tunneling with a
     /// caller-chosen resolver — a proxied request's DNS resolution is the
-    /// proxy's job).
+    /// proxy's job). `gpu_adapter` is independent of both — it picks which
+    /// GPU renders, not how network requests are routed.
     pub fn spawn_with_proxy_and_dns(
         worker_path: &str,
         shmem_name: &str,
@@ -120,13 +132,29 @@ impl Profile {
         proxy: Option<&str>,
         dns_server: Option<&str>,
     ) -> Result<Self, SpawnError> {
+        Self::spawn_full(worker_path, shmem_name, width, height, proxy, dns_server, None)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn spawn_full(
+        worker_path: &str,
+        shmem_name: &str,
+        width: u32,
+        height: u32,
+        proxy: Option<&str>,
+        dns_server: Option<&str>,
+        gpu_adapter: Option<usize>,
+    ) -> Result<Self, SpawnError> {
         let mut command = Command::new(worker_path);
         command.arg(shmem_name).arg(width.to_string()).arg(height.to_string());
-        if proxy.is_some() || dns_server.is_some() {
+        if proxy.is_some() || dns_server.is_some() || gpu_adapter.is_some() {
             command.arg(proxy.unwrap_or(""));
         }
-        if let Some(dns_server) = dns_server {
-            command.arg(dns_server);
+        if dns_server.is_some() || gpu_adapter.is_some() {
+            command.arg(dns_server.map(str::to_string).unwrap_or_default());
+        }
+        if let Some(gpu_adapter) = gpu_adapter {
+            command.arg(gpu_adapter.to_string());
         }
         let mut child = command
             .stdin(Stdio::piped())

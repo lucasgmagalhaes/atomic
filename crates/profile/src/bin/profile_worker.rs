@@ -580,8 +580,8 @@ fn load_source<'rt>(
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    if args.len() < 4 || args.len() > 6 {
-        eprintln!("usage: profile-worker <shmem-name> <width> <height> [proxy: host:port or user:pass@host:port] [dns-server: host:port]");
+    if args.len() < 4 || args.len() > 7 {
+        eprintln!("usage: profile-worker <shmem-name> <width> <height> [proxy: host:port or user:pass@host:port] [dns-server: host:port] [gpu-adapter-index]");
         std::process::exit(2);
     }
     let shmem_name = &args[1];
@@ -589,6 +589,12 @@ fn main() {
     let height: u32 = args[3].parse().expect("height must be a positive integer");
     let proxy = parse_proxy_arg(args.get(4).map(String::as_str));
     let dns_server = parse_dns_arg(args.get(5).map(String::as_str));
+    // A missing/empty/unparseable value degrades to `render::GpuRenderer::
+    // new`'s own default-adapter heuristic - same "refuse to be strict
+    // about an optional trailing arg" stance as `dns_server`, not `proxy`'s
+    // stricter one (there's no "adapter selection failed" state worth
+    // reporting back over the stdin/stdout protocol; it just falls back).
+    let gpu_adapter: Option<usize> = args.get(6).filter(|s| !s.is_empty()).and_then(|s| s.parse().ok());
 
     // One storage root per worker process, keyed by shmem name (already
     // unique per spawned profile) so two profiles never share cookies/
@@ -600,7 +606,10 @@ fn main() {
     let runtime = Runtime::new();
     let mut current_source = PageSource::Demo;
     let (mut page, _) = load_source(&runtime, &current_source, width as f64, &storage_root, proxy.as_ref(), dns_server);
-    let renderer = GpuRenderer::new();
+    let renderer = match gpu_adapter {
+        Some(index) => GpuRenderer::new_with_adapter(index),
+        None => GpuRenderer::new(),
+    };
 
     let mut writer = ipc::FrameWriter::new(shmem_name, width, height).expect("failed to create/open shared memory");
     writer.publish(&page.render(&renderer, width, height));

@@ -3748,6 +3748,7 @@ dependencies = [
  "net",
  "platform-apis",
  "profile",
+ "render",
  "security",
  "url",
 ]

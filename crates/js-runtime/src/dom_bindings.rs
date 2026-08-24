@@ -204,6 +204,12 @@ unsafe extern "C" fn node_value_set(
     };
     if !node_ptr.is_null() && !dom_ptr.is_null() {
         (*dom_ptr).set_value(*node_ptr, &text);
+        // Real `"input"` semantics: fires on every value mutation,
+        // regardless of whether it came from a user keystroke
+        // (`profile-worker`'s `type_key`) or a script setting `.value =`
+        // directly — matches the real DOM, which doesn't distinguish the
+        // two for this event.
+        crate::events::dispatch(ctx, this_val, "input");
     }
     sys::js_undefined()
 }
@@ -254,6 +260,7 @@ unsafe extern "C" fn node_focus(
     let dom_ptr = dom_opaque(ctx);
     if !node_ptr.is_null() && !dom_ptr.is_null() {
         (*dom_ptr).focus(*node_ptr);
+        crate::events::dispatch(ctx, this_val, "focus");
     }
     sys::js_undefined()
 }
@@ -267,7 +274,15 @@ unsafe extern "C" fn node_blur(
     let node_ptr = node_opaque(sys::JS_GetRuntime(ctx), this_val);
     let dom_ptr = dom_opaque(ctx);
     if !node_ptr.is_null() && !dom_ptr.is_null() {
-        (*dom_ptr).blur(*node_ptr);
+        // `Some(changed)` only when `id` really was the focused node —
+        // matches the real DOM not firing `"blur"` for an element that
+        // wasn't focused to begin with.
+        if let Some(changed) = (*dom_ptr).blur(*node_ptr) {
+            crate::events::dispatch(ctx, this_val, "blur");
+            if changed {
+                crate::events::dispatch(ctx, this_val, "change");
+            }
+        }
     }
     sys::js_undefined()
 }

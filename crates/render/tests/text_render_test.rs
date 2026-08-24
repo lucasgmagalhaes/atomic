@@ -1,7 +1,7 @@
 use css::parse_stylesheet;
 use dom::Dom;
 use layout_engine::{build_box_tree, layout_block};
-use render::{build_glyph_list, composite_glyphs};
+use render::{build_glyph_list, composite_glyphs, ClipRect, ClippedGlyph};
 
 #[test]
 fn rendering_text_paints_non_background_pixels() {
@@ -68,4 +68,45 @@ fn glyphs_outside_the_buffer_are_clipped_without_panicking() {
     let mut pixels = vec![0u8; 4 * 4 * 4];
     // Must not panic on out-of-bounds writes.
     composite_glyphs(&mut pixels, 4, 4, &glyphs);
+}
+
+#[test]
+fn clip_restricts_which_pixels_a_glyph_can_paint() {
+    let mut d = Dom::new();
+    let root = d.root();
+    let p = d.create_element("p");
+    let text = d.create_text("A");
+    d.append_child(root, p);
+    d.append_child(p, text);
+
+    let sheet = parse_stylesheet("p { color: #ff0000; font-size: 64px; }");
+    let mut tree = build_box_tree(&d, p, &sheet).unwrap();
+    layout_block(&mut tree, 800.0, 0.0, 0.0);
+
+    let glyphs = build_glyph_list(&tree);
+    assert!(!glyphs.is_empty());
+
+    let width = 200u32;
+    let height = 100u32;
+
+    // Sanity: unclipped, this glyph does paint something (matches
+    // `rendering_text_paints_non_background_pixels` above).
+    let mut unclipped_pixels = vec![0u8; (width * height * 4) as usize];
+    composite_glyphs(&mut unclipped_pixels, width, height, &glyphs);
+    assert!(unclipped_pixels.iter().any(|&b| b > 0));
+
+    // Same glyphs, wrapped in a clip region far from where "A" actually
+    // paints (near the origin) - real per-pixel clipping means nothing
+    // should land inside that far corner.
+    let clipped: Vec<ClippedGlyph> = glyphs
+        .iter()
+        .map(|g| ClippedGlyph {
+            glyph: g.glyph,
+            clip: Some(ClipRect { x: 150.0, y: 50.0, width: 50.0, height: 50.0 }),
+        })
+        .collect();
+
+    let mut clipped_pixels = vec![0u8; (width * height * 4) as usize];
+    composite_glyphs(&mut clipped_pixels, width, height, &clipped);
+    assert!(clipped_pixels.iter().all(|&b| b == 0), "clip region doesn't overlap the glyph - nothing should paint");
 }

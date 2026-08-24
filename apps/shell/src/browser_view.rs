@@ -227,6 +227,15 @@ impl BrowserView {
         profile.borrow_mut().type_key(key)
     }
 
+    /// Real `Tab`/`Shift+Tab` focus movement - wraps `profile::Profile::tab`,
+    /// see that method's own doc for the tab order it follows.
+    pub fn tab(&mut self, reverse: bool) -> std::io::Result<Result<(), String>> {
+        let Some(profile) = &self.profile else {
+            return Ok(Ok(()));
+        };
+        profile.borrow_mut().tab(reverse)
+    }
+
     /// Real viewport scroll - wraps `profile::Profile::scroll_by`, see
     /// that method's own doc for the sign convention and clamping.
     pub fn scroll_by(&mut self, dy: f64) -> std::io::Result<Result<(), String>> {

@@ -99,7 +99,10 @@ use dom::{Dom, NodeData, NodeId};
 use image_decode::DecodedImage;
 use js_runtime::{Context, Runtime};
 use layout_engine::{apply_image_sizes, build_box_tree_with_viewport, layout_block, LayoutBox, PositionedGlyph};
-use render::{build_display_list, build_glyph_list, build_image_list, composite_glyphs, composite_images, GpuRenderer, ImageQuad, Rect};
+use render::{
+    build_display_list, build_glyph_list, build_image_list, composite_glyphs, composite_images, ClipRect, ClippedGlyph, GpuRenderer,
+    ImageQuad, Rect,
+};
 
 const TARGET_FPS: u32 = 60;
 const FRAME_INTERVAL: Duration = Duration::from_nanos(1_000_000_000 / TARGET_FPS as u64);
@@ -541,6 +544,33 @@ fn dispatch_click(ctx: &Context, selector: &str) -> Result<(), String> {
     ctx.eval(&script, "<pane click>").map(|_| ()).map_err(|_| format!("no element with id \"{id}\" (or its click handler threw)"))
 }
 
+/// Real focus, via the JS `.focus()` binding rather than calling
+/// `dom::Dom::focus` directly — routing through JS means the real
+/// `"focus"` event dispatches too (`dom_bindings::node_focus` calls
+/// `events::dispatch` after mutating `dom::Dom`'s focus state), same
+/// reasoning `dispatch_click` already applies to clicks.
+fn focus_element(ctx: &Context, id: &str) -> Result<(), String> {
+    let script = format!(
+        "(function(){{ var el = document.getElementById({id}); if (el === null) throw {missing}; el.focus(); }})();",
+        id = js_string_literal(id),
+        missing = js_string_literal(&format!("no element with id \"{id}\"")),
+    );
+    ctx.eval(&script, "<pane focus>").map(|_| ()).map_err(|_| format!("no element with id \"{id}\""))
+}
+
+/// Real blur, via the JS `.blur()` binding — see `focus_element`'s own doc
+/// for why this goes through JS instead of `dom::Dom::blur` directly:
+/// `dom_bindings::node_blur` dispatches a real `"blur"` event, and a real
+/// `"change"` event too if `.value` moved since the matching `focus()`.
+fn blur_element(ctx: &Context, id: &str) -> Result<(), String> {
+    let script = format!(
+        "(function(){{ var el = document.getElementById({id}); if (el === null) throw {missing}; el.blur(); }})();",
+        id = js_string_literal(id),
+        missing = js_string_literal(&format!("no element with id \"{id}\"")),
+    );
+    ctx.eval(&script, "<pane blur>").map(|_| ()).map_err(|_| format!("no element with id \"{id}\""))
+}
+
 /// `true` if `node` is a real `<input>`/`<textarea>` — the only tags this
 /// engine gives an independent `.value` (see `dom::Dom::value`'s own doc
 /// on why that's exposed generically on `Node` rather than a typed
@@ -693,14 +723,33 @@ impl<'rt> Page<'rt> {
     /// already clip anything outside `[0, height)` silently (real
     /// clipping, not new for this), so a shifted rect above or below the
     /// viewport is simply not drawn - no separate clip step needed here.
+    /// Real `overflow: hidden`/`auto`/`scroll` clipping (per-element, see
+    /// `layout_engine::Overflow`) rides along the same shift: an
+    /// `ImageQuad`/`ClippedGlyph`'s own `clip` region is in the same
+    /// absolute document space as everything else, so it needs the same
+    /// `-offset`/`-scroll_top` shift applied as the quad/glyph it clips,
+    /// or a scrolled page would clip against a stale, unscrolled region.
     fn render(&self, renderer: &GpuRenderer, width: u32, height: u32, scroll_top: f64) -> Vec<u8> {
         let tree = self.layout(width).expect("parsed HTML always produces a box");
         let offset = scroll_top as f32;
+        let shift_clip = |clip: Option<ClipRect>, dy: f32| clip.map(|c| ClipRect { y: c.y - dy, ..c });
 
         let rects: Vec<Rect> = build_display_list(&tree).into_iter().map(|r| Rect { y: r.y - offset, ..r }).collect();
-        let images: Vec<ImageQuad> = build_image_list(&tree).into_iter().map(|q| ImageQuad { y: q.y - offset, ..q }).collect();
-        let glyphs: Vec<PositionedGlyph> =
-            build_glyph_list(&tree).into_iter().map(|g| PositionedGlyph { y: g.y - scroll_top as i32, ..g }).collect();
+        let images: Vec<ImageQuad> = build_image_list(&tree)
+            .into_iter()
+            .map(|q| ImageQuad {
+                y: q.y - offset,
+                clip: shift_clip(q.clip, offset),
+                ..q
+            })
+            .collect();
+        let glyphs: Vec<ClippedGlyph> = build_glyph_list(&tree)
+            .into_iter()
+            .map(|g| ClippedGlyph {
+                glyph: PositionedGlyph { y: g.glyph.y - scroll_top as i32, ..g.glyph },
+                clip: shift_clip(g.clip, offset),
+            })
+            .collect();
 
         let mut pixels = renderer.render_to_rgba(&rects, width, height, [0.08, 0.09, 0.13, 1.0]);
         composite_images(&mut pixels, width, height, &images);
@@ -752,14 +801,20 @@ fn nearest_id_ancestor(dom: &Dom, node: NodeId) -> Option<String> {
 
 /// Real coordinate click: hit-tests `(x, y)`, dispatches a real `"click"`
 /// via the nearest id-addressable ancestor (see `nearest_id_ancestor`'s
-/// own doc for the real limitation that implies), and — real focus model
-/// now, via `dom::Dom::focus`/`clear_focus` — focuses the hit node itself
+/// own doc for the real limitation that implies), and — real focus model,
+/// via `focus_element`/`blur_element` (JS `.focus()`/`.blur()`, not
+/// `dom::Dom::focus`/`clear_focus` called directly, so real `"focus"`/
+/// `"blur"`/`"change"` events dispatch too) — focuses the hit node itself
 /// if it's a real `<input>`/`<textarea>` with its own `id` (so `KEY` can
 /// type into it, and `document.activeElement` sees it too), or clears
 /// focus otherwise (matches a real browser blurring whatever was focused
-/// when a click lands somewhere non-focusable). Still no tab order
-/// (`Tab`/`Shift+Tab` moving focus) - only click-driven and JS-driven
-/// (`.focus()`/`.blur()`) focus changes exist.
+/// when a click lands somewhere non-focusable). Whatever was focused
+/// before is blurred first, same order a real browser fires them in
+/// (`blur` on the old element before `focus` on the new one). A click that
+/// lands back on the already-focused element is a no-op for focus (no
+/// redundant `blur`+`focus` pair), matching a real browser not re-firing
+/// focus on a click to a field that already has it. See `tab_focus` for
+/// the other way focus moves - a real `Tab`/`Shift+Tab` press.
 fn dispatch_click_at(page: &mut Page, width: u32, x: f64, y: f64, scroll_top: f64) -> Result<Option<String>, String> {
     let node = page.hit_test_at(width, x, y, scroll_top).ok_or("no element at that point")?;
     let click_id = {
@@ -773,16 +828,24 @@ fn dispatch_click_at(page: &mut Page, width: u32, x: f64, y: f64, scroll_top: f6
     // could have mutated the DOM, and this engine's arena (`dom::Dom`'s
     // internal `Vec<Slot>`) isn't guaranteed not to reallocate on a node
     // creation in between.
-    let (focusable, focus_id) = {
+    let (focusable, focus_id, already_focused, previously_focused_id) = {
         let dom_ref = page.ctx.dom().ok_or("no DOM available")?;
         let focusable = is_input_like(dom_ref, node);
-        (focusable, if focusable { dom_ref.attribute(node, "id").map(str::to_string) } else { None })
-    };
-    if let Some(dom_mut) = page.ctx.dom_mut() {
-        if focusable {
-            dom_mut.focus(node);
+        let focus_id = if focusable { dom_ref.attribute(node, "id").map(str::to_string) } else { None };
+        let already_focused = focusable && dom_ref.active_element() == Some(node);
+        let previously_focused_id = if already_focused {
+            None
         } else {
-            dom_mut.clear_focus();
+            dom_ref.active_element().and_then(|prev| dom_ref.attribute(prev, "id").map(str::to_string))
+        };
+        (focusable, focus_id, already_focused, previously_focused_id)
+    };
+    if let Some(prev_id) = previously_focused_id {
+        let _ = blur_element(&page.ctx, &prev_id);
+    }
+    if focusable && !already_focused {
+        if let Some(id) = &focus_id {
+            let _ = focus_element(&page.ctx, id);
         }
     }
     Ok(focus_id)
@@ -817,6 +880,56 @@ fn type_key(ctx: &Context, focused_id: &str, key: &str) -> Result<(), String> {
         value = js_string_literal(&updated),
     );
     ctx.eval(&script, "<pane key>").map(|_| ()).map_err(|_| format!("no element with id \"{focused_id}\" (or its keydown handler threw)"))
+}
+
+/// Real `Tab` (`reverse: false`) / `Shift+Tab` (`reverse: true`) focus
+/// movement — computes the next target via `dom::Dom::next_focus_target`'s
+/// own cycling rule, then blurs whatever was focused before and focuses
+/// the new target through the real JS `.blur()`/`.focus()` bindings
+/// (`blur_element`/`focus_element`, same as `dispatch_click_at`), so real
+/// `"blur"`/`"change"`/`"focus"` events fire. Real limitation shared with
+/// every other id-addressed command in this protocol (`CLICK`/`FILL`/
+/// `CLICK_AT`): a tab-order target with no `id` attribute can't be
+/// reached through a `document.getElementById`-based `eval()` script, so
+/// this walks the tab order from the computed starting point in the same
+/// direction (wrapping at most once around the whole list) until it finds
+/// one with a real `id`, rather than silently landing on an unreachable
+/// target. `Ok(None)` when the tab order is empty or every element in it
+/// lacks an `id` - both report as "nothing to tab to" to the caller, same
+/// as `hit_test_at`'s "nothing there" convention for `CLICK_AT`.
+fn tab_focus(page: &mut Page, reverse: bool) -> Result<Option<String>, String> {
+    let (target_id, previously_focused_id) = {
+        let dom_ref = page.ctx.dom().ok_or("no DOM available")?;
+        let order = dom_ref.tab_order();
+        if order.is_empty() {
+            return Ok(None);
+        }
+        let current_index = dom_ref.active_element().and_then(|id| order.iter().position(|&n| n == id));
+        let start = match (current_index, reverse) {
+            (Some(i), false) => (i + 1) % order.len(),
+            (Some(i), true) => (i + order.len() - 1) % order.len(),
+            (None, false) => 0,
+            (None, true) => order.len() - 1,
+        };
+        let step: i64 = if reverse { -1 } else { 1 };
+        let target_id = (0..order.len()).find_map(|offset| {
+            let index = (start as i64 + step * offset as i64).rem_euclid(order.len() as i64) as usize;
+            dom_ref.attribute(order[index], "id").map(str::to_string)
+        });
+        let previously_focused_id = dom_ref.active_element().and_then(|prev| dom_ref.attribute(prev, "id").map(str::to_string));
+        (target_id, previously_focused_id)
+    };
+
+    let Some(target_id) = target_id else {
+        return Ok(None);
+    };
+    if let Some(prev_id) = previously_focused_id {
+        if prev_id != target_id {
+            let _ = blur_element(&page.ctx, &prev_id);
+        }
+    }
+    focus_element(&page.ctx, &target_id)?;
+    Ok(Some(target_id))
 }
 
 /// Loads `source`, returning the built page and `Some(error)` if the
@@ -1043,6 +1156,23 @@ fn main() {
                     }
                     None => {
                         let _ = writeln!(stdout, "ERROR no element focused - CLICK_AT an <input>/<textarea> first");
+                    }
+                }
+                let _ = stdout.flush();
+            } else if line == "TAB" || line == "TAB_REVERSE" {
+                let reverse = line == "TAB_REVERSE";
+                let result = tab_focus(&mut page, reverse);
+                writer.publish(&page.render(&renderer, width, height, scroll_top));
+                match result {
+                    Ok(Some(id)) => {
+                        focused_id = Some(id);
+                        let _ = writeln!(stdout, "TABBED");
+                    }
+                    Ok(None) => {
+                        let _ = writeln!(stdout, "ERROR no focusable element with an id on this page");
+                    }
+                    Err(message) => {
+                        let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
                     }
                 }
                 let _ = stdout.flush();

@@ -31,9 +31,12 @@ Convenção: **REAL** = implementado e testado. **FALTANDO** = confirmado ausent
 ## 2. Layout (`crates/layout-engine`)
 
 ### `ComputedStyle` (`style.rs:122-147`)
-Campos reais: `display`, `width`, `height`, `margin`, `padding`, `flex_direction`, `justify_content`, `align_items`, `flex_grow`, `flex_shrink`, `flex_basis`, `background_color`, `font_size`, `color`.
+Campos reais: `display`, `width`, `height`, `margin`, `padding`, `position`, `top`/`right`/`bottom`/`left`, `flex_direction`, `justify_content`, `align_items`, `flex_grow`, `flex_shrink`, `flex_basis`, `background_color`, `font_size`, `color`.
 
-- FALTANDO: `position` (static/relative/absolute/fixed) — não é campo, não é referenciado em `layout.rs`
+**`position` fechado (2026-08-25), real, com escopo:** `static`/`relative`/`absolute` (`style.rs`), aplicados em `layout::layout_block`/`layout_children`. `relative` desloca a caixa (e toda sua subtree, já que o deslocamento é aplicado ao `(x, y)` de entrada antes do resto do cálculo) sem afetar o espaço reservado no fluxo do pai — o valor de retorno usado pra avançar o cursor dos irmãos vem só de `margin`+`height`, nunca de `x`/`y`. `absolute` remove a caixa do fluxo de verdade (contribui `0` de altura pro pai, não desloca os irmãos seguintes) e a posiciona via `top`/`left` (ou `-right`/`-bottom` quando `top`/`left` são `Auto`) a partir da origem da página `(0, 0)` — real, mas mais estreito que a spec: não busca o "nearest positioned ancestor" (esse motor faz um único passe top-down, sem um segundo passe pra revisitar uma vez que o ancestral já tem tamanho conhecido), sempre usa a origem da página. Largura/altura da caixa absolutamente posicionada ainda resolvem contra o `content_width` do ancestral de layout mais próximo (não a viewport) — só x/y pulam isso. `top`/`bottom` em porcentagem caem pra `0.0` (precisariam da altura definida do containing block, que este motor não rastreia de forma confiável). Testado (`crates/layout-engine/tests/position_test.rs`): deslocamento relativo sem mover irmãos, deslocamento carregando pra descendentes, fallback `right`/`bottom`, remoção real do fluxo, posição-padrão na origem sem offsets, e largura ainda resolvendo contra o pai.
+- FALTANDO: `position: fixed`/`sticky`
+- FALTANDO: "nearest positioned ancestor" real como containing block de um `absolute` (sempre usa a origem da página)
+- FALTANDO: `absolute` dentro de um container `flex` ainda participa do algoritmo de flex normalmente (não é removido do fluxo flex) — só o branch de block-stacking trata isso
 - FALTANDO: floats (`float`/`clear`)
 - FALTANDO: margin collapsing — margens adjacentes sempre somam, nunca colapsam; `margin: auto` vira `0`, não centraliza
 - FALTANDO: `border-*` (width/color/style/radius) — border não é modelado, então nem pode ter borda visual

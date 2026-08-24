@@ -1,6 +1,6 @@
 pub mod sink;
 
-use dom::Dom;
+use dom::{Dom, NodeId};
 use html5ever::driver::ParseOpts;
 use html5ever::tendril::TendrilSink;
 use html5ever::parse_document;
@@ -33,6 +33,40 @@ pub fn parse_to_html_element(html: &str) -> (Dom, dom::NodeId) {
         .and_then(|n| n.children.iter().find(|&&c| is_element_named(&dom, c, "html")).copied())
         .unwrap_or(root);
     (dom, html_el)
+}
+
+/// Parses `html` as an HTML *fragment* — the write side of
+/// `element.innerHTML = html` / `element.outerHTML = html`. There is no
+/// real context-sensitive fragment parsing here (e.g. `<tr>innerHTML`
+/// should parse content inside an implicit `<table>` context per spec;
+/// this doesn't do that) — `html` is parsed the same way `parse` parses
+/// a full document (via the existing `Sink`, so all the same tag-soup
+/// recovery/implied-tag behavior applies), then this returns the ids of
+/// whatever ended up as the direct children of the parsed `<body>`
+/// element (falling back to the parsed `<html>` element's own children
+/// if no `<body>` was found — html5ever's implied-tag recovery should
+/// always produce one for any non-degenerate input, but a caller
+/// shouldn't have to worry about that edge case). The caller is
+/// responsible for cloning (`dom::Dom::adopt`, once that method lands)
+/// each returned id into the real document — the returned `Dom` is a
+/// throwaway parse buffer, not meant to be kept around or attached to
+/// anything directly, since its `NodeId`s are only valid within it.
+pub fn parse_fragment(html: &str) -> (Dom, Vec<NodeId>) {
+    let dom = parse(html);
+    let root = dom.root();
+    let html_el = dom
+        .get(root)
+        .and_then(|n| n.children.iter().find(|&&c| is_element_named(&dom, c, "html")).copied());
+    let body_el = html_el
+        .and_then(|html_el| dom.get(html_el))
+        .and_then(|n| n.children.iter().find(|&&c| is_element_named(&dom, c, "body")).copied());
+    let children = body_el
+        .or(html_el)
+        .or(Some(root))
+        .and_then(|id| dom.get(id))
+        .map(|n| n.children.clone())
+        .unwrap_or_default();
+    (dom, children)
 }
 
 fn is_element_named(dom: &Dom, id: dom::NodeId, name: &str) -> bool {

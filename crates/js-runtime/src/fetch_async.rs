@@ -35,11 +35,13 @@ use quickjs_sys as sys;
 struct PendingFetch {
     resolve: sys::JSValue,
     reject: sys::JSValue,
+    url: String,
     receiver: mpsc::Receiver<Result<net::Response, net::Error>>,
 }
 
 struct PendingXhr {
     xhr_obj: sys::JSValue,
+    url: String,
     receiver: mpsc::Receiver<Result<net::Response, net::Error>>,
 }
 
@@ -142,11 +144,12 @@ unsafe extern "C" fn fetch(ctx: *mut sys::JSContext, _this_val: sys::JSValue, ar
     };
 
     let (tx, rx) = mpsc::channel();
+    let request_url = url.clone();
     thread::spawn(move || {
         let _ = tx.send(net::get(&url));
     });
 
-    with_state(ctx, |s| s.fetches.push(PendingFetch { resolve, reject, receiver: rx }));
+    with_state(ctx, |s| s.fetches.push(PendingFetch { resolve, reject, url: request_url, receiver: rx }));
     promise
 }
 
@@ -188,12 +191,13 @@ unsafe extern "C" fn xhr_send(ctx: *mut sys::JSContext, this_val: sys::JSValue, 
     sys::JS_FreeValue(ctx, url_val);
 
     let (tx, rx) = mpsc::channel();
+    let request_url = url.clone();
     thread::spawn(move || {
         let _ = tx.send(net::get(&url));
     });
 
     let xhr_obj = sys::JS_DupValue(ctx, this_val);
-    with_state(ctx, |s| s.xhrs.push(PendingXhr { xhr_obj, receiver: rx }));
+    with_state(ctx, |s| s.xhrs.push(PendingXhr { xhr_obj, url: request_url, receiver: rx }));
     sys::js_undefined()
 }
 
@@ -254,8 +258,14 @@ pub(crate) unsafe fn pump(ctx: *mut sys::JSContext) -> usize {
         }
         due
     });
+    let page_origin = crate::cors::page_origin(ctx);
     for (pending, result) in due_fetches {
         fired += 1;
+        let result: Result<net::Response, String> = match result {
+            Ok(response) if crate::cors::is_response_allowed(page_origin.as_deref(), &pending.url, &response.headers) => Ok(response),
+            Ok(_) => Err("blocked by CORS: no matching Access-Control-Allow-Origin".to_string()),
+            Err(e) => Err(e.to_string()),
+        };
         match result {
             Ok(response) => {
                 let mut obj = build_response_object(ctx, &response);
@@ -264,7 +274,7 @@ pub(crate) unsafe fn pump(ctx: *mut sys::JSContext) -> usize {
                 sys::JS_FreeValue(ctx, obj);
             }
             Err(e) => {
-                let mut msg = new_js_string(ctx, &e.to_string());
+                let mut msg = new_js_string(ctx, &e);
                 let r = sys::JS_Call(ctx, pending.reject, sys::js_undefined(), 1, &mut msg);
                 sys::JS_FreeValue(ctx, r);
                 sys::JS_FreeValue(ctx, msg);
@@ -288,6 +298,11 @@ pub(crate) unsafe fn pump(ctx: *mut sys::JSContext) -> usize {
     for (pending, result) in due_xhrs {
         fired += 1;
         set_num(ctx, pending.xhr_obj, "readyState", 4.0);
+        let result: Result<net::Response, String> = match result {
+            Ok(response) if crate::cors::is_response_allowed(page_origin.as_deref(), &pending.url, &response.headers) => Ok(response),
+            Ok(_) => Err("blocked by CORS: no matching Access-Control-Allow-Origin".to_string()),
+            Err(e) => Err(e.to_string()),
+        };
         match result {
             Ok(response) => {
                 let body = String::from_utf8_lossy(&response.body).into_owned();
@@ -298,7 +313,7 @@ pub(crate) unsafe fn pump(ctx: *mut sys::JSContext) -> usize {
             }
             Err(e) => {
                 let onerror = get_prop(ctx, pending.xhr_obj, "onerror");
-                let msg = new_js_string(ctx, &e.to_string());
+                let msg = new_js_string(ctx, &e);
                 call_if_present(ctx, onerror, pending.xhr_obj, msg);
             }
         }

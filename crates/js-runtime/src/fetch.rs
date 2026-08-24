@@ -72,13 +72,17 @@ unsafe extern "C" fn fetch_sync(
     };
 
     match net::get(&url) {
-        Ok(response) => {
+        Ok(response) if crate::cors::is_response_allowed(crate::cors::page_origin(ctx).as_deref(), &url, &response.headers) => {
             let body = String::from_utf8_lossy(&response.body).into_owned();
             set_bool(ctx, result, "ok", (200..300).contains(&response.status));
             set_num(ctx, result, "status", response.status as f64);
             set_str(ctx, result, "body", &body);
         }
-        Err(_) => {
+        // A blocked cross-origin response (no matching Access-Control-
+        // Allow-Origin) surfaces the same as a network failure - real
+        // fetch() never lets script see a disallowed cross-origin
+        // response's body/status either, it just fails the whole request.
+        Ok(_) | Err(_) => {
             set_bool(ctx, result, "ok", false);
             set_num(ctx, result, "status", 0.0);
             set_str(ctx, result, "body", "");

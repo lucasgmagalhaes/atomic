@@ -3,12 +3,52 @@
 //! Event state is native structured data. User code is invoked only as a
 //! QuickJS function; no supplied string is parsed or evaluated by this layer.
 use quickjs_sys as sys;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ffi::CString;
 use std::os::raw::{c_int, c_void};
 
 const LISTENERS_PROP: &[u8] = b"__listeners\0";
 const MAX_LISTENERS_PER_TYPE: i64 = 64;
+const MAX_BUBBLE_DEPTH: usize = 128;
+const MAX_NESTED_DISPATCH: usize = 32;
 const EVENT_CLASS_KIND: &str = "Event";
+
+thread_local! {
+    static DISPATCH_DEPTHS: RefCell<HashMap<usize, usize>> = RefCell::new(HashMap::new());
+}
+
+struct DispatchGuard {
+    ctx: usize,
+}
+
+impl Drop for DispatchGuard {
+    fn drop(&mut self) {
+        DISPATCH_DEPTHS.with(|depths| {
+            let mut depths = depths.borrow_mut();
+            let depth = depths
+                .get_mut(&self.ctx)
+                .expect("dispatch depth must exist");
+            *depth -= 1;
+            if *depth == 0 {
+                depths.remove(&self.ctx);
+            }
+        });
+    }
+}
+
+fn begin_dispatch(ctx: *mut sys::JSContext) -> Option<DispatchGuard> {
+    let ctx = ctx as usize;
+    DISPATCH_DEPTHS.with(|depths| {
+        let mut depths = depths.borrow_mut();
+        let depth = depths.entry(ctx).or_default();
+        if *depth >= MAX_NESTED_DISPATCH {
+            return None;
+        }
+        *depth += 1;
+        Some(DispatchGuard { ctx })
+    })
+}
 
 struct EventState {
     event_type: String,
@@ -323,6 +363,9 @@ unsafe fn dispatch_at(ctx: *mut sys::JSContext, node: sys::JSValue, event: sys::
     }
 }
 pub(crate) unsafe fn dispatch(ctx: *mut sys::JSContext, node: sys::JSValue, kind: &str) -> bool {
+    let Some(_dispatch_guard) = begin_dispatch(ctx) else {
+        return false;
+    };
     let Some(target_id) = crate::dom_bindings::node_id(ctx, node) else {
         return true;
     };
@@ -331,7 +374,8 @@ pub(crate) unsafe fn dispatch(ctx: *mut sys::JSContext, node: sys::JSValue, kind
         return false;
     }
     let mut current = Some(target_id);
-    while let Some(id) = current {
+    for _ in 0..MAX_BUBBLE_DEPTH {
+        let Some(id) = current else { break };
         let p = state(ctx, event);
         if (*p).propagation_stopped {
             break;

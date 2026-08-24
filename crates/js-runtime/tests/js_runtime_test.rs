@@ -284,6 +284,20 @@ fn stop_propagation_prevents_later_ancestors() {
 }
 
 #[test]
+fn nested_dispatch_is_bounded_without_leaking_depth_between_events() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let button = d.create_element("button");
+    d.append_child(root, button);
+    d.set_attribute(button, "id", "button");
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const button = document.getElementById('button'); let calls = 0; button.addEventListener('loop', () => { calls++; button.dispatchEvent('loop'); }); button.dispatchEvent('loop'); const first = calls; button.removeEventListener('loop'); button.addEventListener('done', () => { calls++; }); const second = button.dispatchEvent('done'); return `${first},${second},${calls}`; })()", "<test>").unwrap();
+    assert_eq!(result, "32,true,33");
+}
+
+#[test]
 fn remove_event_listener_stops_future_dispatch() {
     let mut d = dom::Dom::new();
     let root = d.root();

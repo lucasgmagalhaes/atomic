@@ -55,17 +55,23 @@
 //! rendering, and a burst of frames never stalls a command response by
 //! more than one tick, ~16ms):
 //! - `PING` -> replies `PONG` on stdout (liveness check)
-//! - `RELOAD` -> re-fetches/re-renders whatever page is currently loaded
-//!   (the built-in demo page, or the last `NAVIGATE`d URL — including
-//!   retrying one that previously failed), creates a fresh JS context
-//!   (resetting any JS state - matches a real navigation); replies
-//!   `RELOADED` once that's done, or `ERROR <message>` if the (re-)fetch
-//!   failed, same as `NAVIGATE`
-//! - `NAVIGATE <url>` -> fetches `url` and renders it as the new page;
-//!   replies `NAVIGATED` on success or `ERROR <message>` on failure (bad
-//!   URL, network error, ...) — either way an in-page error message is
-//!   rendered too, not just reported over the protocol, so the frame
-//!   itself never silently goes stale
+//! - `RELOAD` -> fires a real, cancelable `beforeunload` on the current
+//!   page's `window` first (see `Context::fire_before_unload`); a listener
+//!   calling `preventDefault()` cancels the whole reload, replying
+//!   `ERROR navigation canceled by beforeunload` with the old page left
+//!   running untouched. Otherwise re-fetches/re-renders whatever page is
+//!   currently loaded (the built-in demo page, or the last `NAVIGATE`d
+//!   URL — including retrying one that previously failed), creates a
+//!   fresh JS context (resetting any JS state - matches a real
+//!   navigation), fires real `DOMContentLoaded`/`load` on it once its
+//!   scripts have run; replies `RELOADED` once that's done, or
+//!   `ERROR <message>` if the (re-)fetch failed, same as `NAVIGATE`
+//! - `NAVIGATE <url>` -> same `beforeunload` gate as `RELOAD`, then fetches
+//!   `url` and renders it as the new page; replies `NAVIGATED` on success
+//!   or `ERROR <message>` on failure (bad URL, network error, ...) —
+//!   either way an in-page error message is rendered too, not just
+//!   reported over the protocol, so the frame itself never silently goes
+//!   stale
 //! - `CLICK <#id>` -> dispatches a real `"click"` event (via the existing
 //!   `Node.prototype.dispatchEvent` JS binding) at the element with that
 //!   id; replies `CLICKED` or `ERROR <message>` (no such id, or only
@@ -645,7 +651,7 @@ impl<'rt> Page<'rt> {
         let mut scripts = Vec::new();
         collect_script_sources(&dom, html_el, &mut scripts);
 
-        let ctx = match storage_host {
+        let mut ctx = match storage_host {
             Some(host) => match Context::with_storage(runtime, dom, host, storage_root.join(host)) {
                 Ok(ctx) => ctx,
                 // `with_storage` already consumed `dom` by the time it can
@@ -656,6 +662,9 @@ impl<'rt> Page<'rt> {
             },
             None => Context::with_dom(runtime, dom),
         };
+        if let Some(url) = base_url {
+            ctx.set_url(url);
+        }
         if run_demo_script {
             let _ = ctx.eval(DEMO_SCRIPT, "<profile-worker demo>");
         }
@@ -670,6 +679,11 @@ impl<'rt> Page<'rt> {
         for (index, script) in scripts.iter().enumerate() {
             let _ = ctx.eval(script, &format!("<script {index}>"));
         }
+        // Real `DOMContentLoaded`/`load` lifecycle timing: fired once the
+        // document is parsed and every page script has run, matching a
+        // real browser's own ordering (see `Context::dispatch_lifecycle_events`'s
+        // doc for the scope this crate cuts relative to the full spec).
+        ctx.dispatch_lifecycle_events();
         Page { ctx, html_el, sheet, images }
     }
 
@@ -1077,6 +1091,11 @@ fn main() {
                 let _ = writeln!(stdout, "RESUMED");
                 let _ = stdout.flush();
             } else if line == "RELOAD" {
+                if !page.ctx.fire_before_unload() {
+                    let _ = writeln!(stdout, "ERROR navigation canceled by beforeunload");
+                    let _ = stdout.flush();
+                    continue;
+                }
                 let (loaded, error) = load_source(&runtime, &current_source, width as f64, &storage_root, proxy.as_ref(), dns_server);
                 page = loaded;
                 focused_id = None;
@@ -1092,6 +1111,11 @@ fn main() {
                 }
                 let _ = stdout.flush();
             } else if let Some(url) = line.strip_prefix("NAVIGATE ") {
+                if !page.ctx.fire_before_unload() {
+                    let _ = writeln!(stdout, "ERROR navigation canceled by beforeunload");
+                    let _ = stdout.flush();
+                    continue;
+                }
                 current_source = PageSource::Url(url.trim().to_string());
                 let (loaded, error) = load_source(&runtime, &current_source, width as f64, &storage_root, proxy.as_ref(), dns_server);
                 page = loaded;

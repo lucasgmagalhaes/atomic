@@ -554,6 +554,82 @@ fn reload_retries_the_last_navigated_url() {
 }
 
 #[test]
+fn a_beforeunload_listener_that_cancels_blocks_the_next_navigation() {
+    let page_addr = serve_html_once(
+        r#"<div id="marker" style="width:300px;height:150px;background-color:#123456;"></div>
+        <script>window.addEventListener('beforeunload', (e) => { e.preventDefault(); });</script>"#,
+    );
+    let page_url = format!("http://{page_addr}/");
+
+    let name = unique_shmem_name("beforeunload-cancel");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    profile.navigate(&page_url).unwrap().unwrap();
+    let frame_before = profile.latest_frame().unwrap();
+
+    let result = profile
+        .navigate("https://example.com/should-never-be-fetched")
+        .expect("protocol should not fail");
+    assert_eq!(
+        result,
+        Err("navigation canceled by beforeunload".to_string()),
+        "a beforeunload listener that calls preventDefault() should cancel the navigation"
+    );
+
+    // The old page must still be the one rendered - navigation genuinely
+    // never happened, not just "reported an error but replaced the page
+    // anyway".
+    let frame_after = profile.latest_frame().unwrap();
+    assert_eq!(frame_before, frame_after);
+    assert!(profile.ping().unwrap());
+
+    profile.quit();
+}
+
+#[test]
+fn a_beforeunload_listener_that_does_not_cancel_lets_navigation_proceed() {
+    let page_addr = serve_html_once(
+        "<script>window.addEventListener('beforeunload', () => {});</script>",
+    );
+    let page_url = format!("http://{page_addr}/");
+
+    let name = unique_shmem_name("beforeunload-allow");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    profile.navigate(&page_url).unwrap().unwrap();
+    let result = profile.navigate("https://example.com/").expect("protocol should not fail");
+    assert!(result.is_ok(), "a non-canceling beforeunload listener must not block navigation: {result:?}");
+
+    profile.quit();
+}
+
+#[test]
+fn load_event_fires_before_the_first_paint_of_a_navigated_page() {
+    // `.b` (red) is only applied by the real `load` listener swapping the
+    // marker's class - if `load` fires (and fires before the very first
+    // render, matching `Context::dispatch_lifecycle_events`' place in
+    // `Page::load`), the first-ever frame for this page already shows red,
+    // not the initial blue.
+    let page_addr = serve_html_once(
+        r#"<div id="marker" class="a"></div><style>.a { background-color: #0000ff; width: 300px; height: 150px; } .b { background-color: #ff0000; width: 300px; height: 150px; }</style><script>window.addEventListener('load', () => { document.getElementById('marker').className = 'b'; });</script>"#,
+    );
+    let page_url = format!("http://{page_addr}/");
+
+    let name = unique_shmem_name("load-event");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    profile.navigate(&page_url).unwrap().unwrap();
+    let pixels = profile.latest_frame().unwrap();
+    let top_left = &pixels[0..4];
+    assert_eq!(top_left, &[255, 0, 0, 255], "the load listener should have already run by the first paint, got {top_left:?}");
+
+    profile.quit();
+}
+
+#[test]
 fn demo_page_visit_counter_persists_via_real_local_storage_across_reload() {
     // DEMO_SCRIPT increments a real localStorage-backed `visits` counter
     // into #counter's text every (re)load. Waiting for the 50ms tick then

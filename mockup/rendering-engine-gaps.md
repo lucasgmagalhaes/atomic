@@ -110,7 +110,13 @@ Campos reais: `display`, `width`, `height`, `margin`, `padding`, `flex_direction
 
 ## 6. Input real (mouse/teclado → DOM)
 
-**Gap total no nível de interação humana.** O que existe:
+**Fechado (2026-08-23), real: `layout_engine::hit_test` (coordenada → `NodeId` real sobre a `LayoutBox` tree já laid-out), `profile-worker`'s `CLICK_AT <x> <y>`/`KEY <key>` commands, `Profile::click_at`/`type_key`, e `apps/shell` roteando clique/teclado reais do egui pra dentro da página renderizada (não só selecionar o pane). Limitação real herdada do `CLICK`/`FILL` já existente: só alcança elemento com `id` (direto ou via ancestral) — sem isso não tem como despachar. Sem foco/tab order real (`activeElement`), sem `.value` real (ver seção 8) — `KEY` escreve em `textContent`.**
+
+Bug real encontrado e corrigido nesse processo: `getElementById` criava um objeto JS novo a cada chamada, então um listener anexado numa chamada `eval()` ficava invisível pra um `dispatchEvent` de uma chamada `eval()` separada depois — quebrava o padrão "anexa listener no load, despacha depois" que qualquer página real usa. Corrigido com identidade de objeto real por `NodeId` (cache thread-local).
+
+Também descoberto e corrigido: páginas navegadas nunca executavam suas próprias tags `<script>` (só a página demo hardcoded rodava). E um bug real e severo no parser CSS: seletor com pseudo-classe não suportada (ex: `:link`, que `https://example.com/` usa de verdade) travava o parser em loop infinito pra sempre — qualquer página real com CSS fora do subset suportado travava o worker inteiro.
+
+O que existia antes desse fechamento, pra contexto histórico:
 - `Profile::click(selector)`/`Profile::fill(selector, value)` — só `#id`, dirigido via protocolo stdin `CLICK`/`FILL` do `profile-worker`, usado por scripts de automação (`pane.click(...)`), não pelo usuário clicando na tela
 - `CLICK` dispara um evento `"click"` real via `dom::Dom::find_by_id` + `dispatchEvent` já existente
 - `FILL` seta `textContent` (não existe `HTMLInputElement.value`, ver seção 8)

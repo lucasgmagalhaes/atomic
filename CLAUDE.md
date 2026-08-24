@@ -15,7 +15,7 @@ Do not assume one name is canonical. If you need to pick one for new code/docs, 
 
 ## Source of truth for architecture
 
-`mockup/browser-idle-spec.md` is the technical execution spec (Rust workspace, crate breakdown, phased roadmap). `mockup/Nimble Browser.dc.html` is the UI/UX mockup (interactive HTML prototype) — it drives product features, not implementation.
+`mockup/browser-idle-spec.md` is the technical execution spec (Rust workspace, crate breakdown, phased roadmap). `mockup/Nimble Browser.dc.html` is the UI/UX mockup (interactive HTML prototype) — it drives product features, not implementation. `mockup/rendering-engine-gaps.md` is a detailed, code-verified gap map of the rendering engine specifically (css/layout-engine/render/webgl/dom) — what's real vs missing at the CSS-property/API level, not the crate/phase level `browser-idle-spec.md` tracks.
 
 The spec has a **"Features do mockup (UI) — mapeamento pra spec"** section that cross-references every mockup feature against the spec/roadmap. Known gaps not yet covered by any crate/phase as of the last review:
 

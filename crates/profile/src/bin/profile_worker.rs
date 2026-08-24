@@ -49,6 +49,15 @@
 //! rebuilt its own box tree independently) so both agree on the same
 //! image-sized boxes.
 //!
+//! Real `Content-Security-Policy` delivery too (`resolve_document`/
+//! `collect_meta_csp_policies`, both consumed by `Page::load` before any
+//! page script runs): the document response's own CSP headers and every
+//! `<meta http-equiv="Content-Security-Policy">` tag in the parsed HTML
+//! are handed to `js_runtime::Context::add_csp_policy` as separate
+//! policies, so a fetched page's own `fetchSync`/`fetch()`/XHR targets
+//! are gated by its server's policy — see `js-runtime`'s `csp` module for
+//! what a policy actually restricts in this engine.
+//!
 //! Command protocol over stdin (newline-delimited, one command per line),
 //! read on a dedicated thread and drained non-blockingly by the render
 //! loop each tick (so a slow/absent command stream never stalls
@@ -314,6 +323,33 @@ fn collect_script_sources(dom: &Dom, node: NodeId, out: &mut Vec<String>) {
     }
     for &child in &n.children {
         collect_script_sources(dom, child, out);
+    }
+}
+
+/// Walks `node`'s subtree in document order collecting every
+/// `<meta http-equiv="Content-Security-Policy" content="...">`'s policy
+/// text (the `http-equiv` match is ASCII case-insensitive per the HTML
+/// spec; an empty/missing `content` delivers no policy). Feeds the
+/// `<meta>` half of CSP delivery - the response-header half is extracted
+/// earlier, in [`resolve_document`], since only it still holds the raw
+/// response. Scope cut vs a real browser's processing model: this engine
+/// fully parses before running anything (there's no streaming parser
+/// insertion-point timing to honor), so every delivered policy - header
+/// or meta, wherever the tag sits - is simply in effect for the whole
+/// page load, including its scripts.
+fn collect_meta_csp_policies(dom: &Dom, node: NodeId, out: &mut Vec<String>) {
+    let Some(n) = dom.get(node) else { return };
+    if let NodeData::Element { tag, attributes, .. } = &n.data {
+        if tag == "meta"
+            && attributes.get("http-equiv").is_some_and(|v| v.eq_ignore_ascii_case("content-security-policy"))
+        {
+            if let Some(policy) = attributes.get("content").filter(|p| !p.is_empty()) {
+                out.push(policy.clone());
+            }
+        }
+    }
+    for &child in &n.children {
+        collect_meta_csp_policies(dom, child, out);
     }
 }
 
@@ -585,16 +621,40 @@ fn error_page_html(url: &str, message: &str) -> String {
     )
 }
 
-/// Resolves `source` to real HTML: the built-in demo string, or a real
-/// `net::get` response body decoded as UTF-8 (lossily - this doesn't
-/// attempt charset detection from `Content-Type`/`<meta charset>`, real
-/// HTML often isn't UTF-8 but plenty is, and this crate doesn't have a
-/// non-UTF-8 text decoder yet).
-fn resolve_html(source: &PageSource, storage_root: &std::path::Path, proxy: Option<&net::ProxyConfig>, dns_server: Option<std::net::SocketAddr>) -> Result<String, String> {
+/// What one real page load delivered: the HTML source itself plus every
+/// `Content-Security-Policy` policy that came with it (one entry per
+/// repeated response header, in wire order — kept separate, not joined,
+/// since real CSP policies intersect rather than merge; see
+/// [`collect_meta_csp_policies`] for where `<meta http-equiv>` delivery
+/// adds to this after parsing). The demo page has no response headers, so
+/// its list is always empty.
+struct LoadedDocument {
+    html: String,
+    csp_policies: Vec<String>,
+}
+
+/// Resolves `source` to a real [`LoadedDocument`]: the built-in demo
+/// string, or a real `net::get` response decoded as UTF-8 (lossily - this
+/// doesn't attempt charset detection from `Content-Type`/`<meta charset>`,
+/// real HTML often isn't UTF-8 but plenty is, and this crate doesn't have
+/// a non-UTF-8 text decoder yet) *plus* the response's own
+/// `Content-Security-Policy` headers — extracted here because this is the
+/// only place that still holds the raw response; `Page::load` only ever
+/// saw the body string.
+fn resolve_document(source: &PageSource, storage_root: &std::path::Path, proxy: Option<&net::ProxyConfig>, dns_server: Option<std::net::SocketAddr>) -> Result<LoadedDocument, String> {
     match source {
-        PageSource::Demo => Ok(DEMO_HTML.to_string()),
+        PageSource::Demo => Ok(LoadedDocument { html: DEMO_HTML.to_string(), csp_policies: Vec::new() }),
         PageSource::Url(url) => fetch_with_cookies(url, storage_root, proxy, dns_server)
-            .map(|response| String::from_utf8_lossy(&response.body).into_owned())
+            .map(|response| LoadedDocument {
+                html: String::from_utf8_lossy(&response.body).into_owned(),
+                csp_policies: response
+                    .headers
+                    .iter()
+                    .filter(|(name, _)| name.eq_ignore_ascii_case("content-security-policy"))
+                    .map(|(_, value)| value.clone())
+                    .filter(|value| !value.is_empty())
+                    .collect(),
+            })
             .map_err(|e| e.to_string()),
     }
 }
@@ -742,7 +802,9 @@ struct LayoutCache {
 }
 
 impl<'rt> Page<'rt> {
-    /// Builds a page from `html`. `run_demo_script` should only be `true`
+    /// Builds a page from `doc` (the fetched HTML plus whatever CSP
+    /// policies its response delivered - see [`LoadedDocument`]).
+    /// `run_demo_script` should only be `true`
     /// for the built-in demo page - a real fetched page has no
     /// `#counter` element for `DEMO_SCRIPT` to find (which now uses real
     /// `localStorage`/`document.cookie` itself - see the const's doc).
@@ -752,9 +814,12 @@ impl<'rt> Page<'rt> {
     /// `Some` - `None` gets a plain `Context::with_dom` instead. A
     /// storage-open failure (rare - a permissions problem, a full disk)
     /// degrades to `with_dom` rather than failing the whole page load.
+    /// Every CSP policy `doc` carried (response headers) plus every
+    /// `<meta http-equiv="Content-Security-Policy">` tag in the parsed
+    /// HTML is enforced before the first script runs.
     fn load(
         runtime: &'rt Runtime,
-        html: &str,
+        doc: &LoadedDocument,
         run_demo_script: bool,
         base_url: Option<&str>,
         storage_host: Option<&str>,
@@ -763,6 +828,7 @@ impl<'rt> Page<'rt> {
         proxy: Option<&net::ProxyConfig>,
         dns_server: Option<std::net::SocketAddr>,
     ) -> Self {
+        let html = &doc.html;
         let (dom, html_el) = html::parse_to_html_element(html);
         let sheet = build_stylesheet(&dom, html_el, base_url, viewport_width, storage_root, proxy, dns_server);
         let images = load_images(&dom, html_el, base_url, storage_root, proxy, dns_server);
@@ -782,6 +848,23 @@ impl<'rt> Page<'rt> {
         };
         if let Some(url) = base_url {
             ctx.set_url(url);
+        }
+        // Real CSP delivery, before any script runs - matching a real
+        // browser, where a page's policy is fully in effect by the time its
+        // first script executes. Two delivery channels, enforced together:
+        // the document response's own `Content-Security-Policy` headers
+        // (extracted in `resolve_document`, repeated headers kept as
+        // separate policies) and every `<meta http-equiv>` tag the parsed
+        // DOM turned out to carry. Each is appended via `add_csp_policy`
+        // rather than joined into one string - real CSP policies intersect
+        // rather than merge (see `js_runtime::csp`'s module docs).
+        for policy in &doc.csp_policies {
+            ctx.add_csp_policy(policy);
+        }
+        let mut meta_policies = Vec::new();
+        collect_meta_csp_policies(ctx.dom().expect("Page::load always builds its context over a dom"), html_el, &mut meta_policies);
+        for policy in meta_policies {
+            ctx.add_csp_policy(&policy);
         }
         if run_demo_script {
             let _ = ctx.eval(DEMO_SCRIPT, "<profile-worker demo>");
@@ -1120,10 +1203,10 @@ fn load_source<'rt>(
         PageSource::Demo => Some(DEMO_STORAGE_HOST.to_string()),
         PageSource::Url(url) => url::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_string)),
     };
-    match resolve_html(source, storage_root, proxy, dns_server) {
-        Ok(html) => {
+    match resolve_document(source, storage_root, proxy, dns_server) {
+        Ok(doc) => {
             let run_demo_script = matches!(source, PageSource::Demo);
-            (Page::load(runtime, &html, run_demo_script, base_url, storage_host.as_deref(), viewport_width, storage_root, proxy, dns_server), None)
+            (Page::load(runtime, &doc, run_demo_script, base_url, storage_host.as_deref(), viewport_width, storage_root, proxy, dns_server), None)
         }
         Err(message) => {
             let url = match source {
@@ -1134,9 +1217,21 @@ fn load_source<'rt>(
             // resolve - `base_url: None` here, not the failed `url`. It
             // still gets real storage scoped to the same host though, so
             // a subsequent successful load/reload of that host sees
-            // consistent state.
+            // consistent state. No CSP either - a failed fetch delivered
+            // no policy (an empty `LoadedDocument.csp_policies`, same as
+            // the demo page).
             (
-                Page::load(runtime, &error_page_html(url, &message), false, None, storage_host.as_deref(), viewport_width, storage_root, proxy, dns_server),
+                Page::load(
+                    runtime,
+                    &LoadedDocument { html: error_page_html(url, &message), csp_policies: Vec::new() },
+                    false,
+                    None,
+                    storage_host.as_deref(),
+                    viewport_width,
+                    storage_root,
+                    proxy,
+                    dns_server,
+                ),
                 Some(message),
             )
         }

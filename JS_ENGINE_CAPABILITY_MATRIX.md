@@ -148,7 +148,7 @@ Last reviewed: 2026-08-24. This is an implementation roadmap for Nimble's embedd
 
 ## Next implementation order
 
-1. `DOMTokenList` via `element.classList` (stable identity; `add`, `remove`, `toggle`, `contains`, `replace`, `value`, `length`, iteration).
+1. ~~`DOMTokenList` via `element.classList`~~ — done: `add`/`remove`/`contains` (already landed) plus `toggle`/`replace`/`value` getter-setter/`length`/real iteration now real too (`crates/js-runtime/src/dom_bindings.rs`, `sync_class_list`). Stable per-`NodeId` object identity kept (`CLASS_LIST_OBJECTS` cache), refreshed from the live `class` attribute on every mutating call and on every `element.classList` getter hit so a direct `setAttribute("class", ...)` bypass is still picked up on next access. Iteration is real `Symbol.iterator`/`forEach`/etc, not a hand-rolled protocol: the classList object's prototype is set to the real `Array.prototype` (`array_prototype`, via `JS_SetPrototype`) and indexed properties (`0..length`) are kept in sync — `Array.prototype`'s own iterator is generic over any array-like `this`, so this is genuinely spec-shaped, not array-typed (`Array.isArray(classList)` is still `false`, matching real `DOMTokenList`). No `quickjs-sys` binding for well-known symbols was needed or added. `item(index)` isn't a separate method — falls out of the same indexed properties.
 2. `dataset` and `attributes`, then element-specific properties for form controls and anchors.
 3. `innerHTML`/`outerHTML` backed by the existing HTML parser, with bounded input and listener/node-cache invalidation.
 4. Capture phase and event listener options; then `CustomEvent`, keyboard and pointer event classes.

@@ -234,6 +234,35 @@ fn class_list_is_stable_and_updates_the_class_attribute() {
 }
 
 #[test]
+fn class_list_supports_toggle_replace_value_length_and_iteration() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let element = d.create_element("div");
+    d.set_attribute(element, "class", "a b");
+    d.append_child(root, element);
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { \
+                const el = document.querySelector('div'); \
+                const list = el.classList; \
+                const toggledOn = list.toggle('c'); \
+                const toggledOff = list.toggle('a'); \
+                const forced = list.toggle('d', true); \
+                const replaced = list.replace('b', 'e'); \
+                const lengthAfterMutations = list.length; \
+                list.value = 'x y z'; \
+                const joined = [...list].join(','); \
+                return `${toggledOn},${toggledOff},${forced},${replaced},${lengthAfterMutations},${list.length},${joined},${el.className}`; \
+            })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "true,false,true,true,3,3,x,y,z,x y z");
+}
+
+#[test]
 fn attribute_presence_and_names_follow_live_dom_attributes() {
     let mut d = dom::Dom::new();
     let root = d.root();

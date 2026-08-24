@@ -75,6 +75,14 @@ pub struct LayoutBox {
     /// width constraint is known; empty until then and always empty for
     /// boxes with real (non-text, non-inline-span) children.
     pub glyphs: Vec<PositionedGlyph>,
+    /// `Some` only for an `<img>` element box whose image was actually
+    /// fetched and decoded successfully (a caller supplies this via
+    /// [`apply_image_sizes`] — box tree construction itself never fetches
+    /// anything over the network). `None` for every other box, and for
+    /// an `<img>` with no `src`, a failed fetch, or undecodable bytes -
+    /// those all render as an empty box, same as this engine already
+    /// treats an unknown/unstyled element.
+    pub image: Option<std::rc::Rc<image_decode::DecodedImage>>,
 }
 
 fn classes_of(attributes: &std::collections::HashMap<String, String>) -> Vec<String> {
@@ -98,13 +106,68 @@ fn resolve_element_style(
     parent_font_size: f64,
     parent_color: Color,
 ) -> ComputedStyle {
-    let _ = (dom, node); // kept for signature symmetry/future use (e.g. sibling-position selectors)
-    chain.push(ElementSnapshot {
-        tag: tag.to_string(),
+    let _ = (tag, attributes); // already folded into build_element_snapshot's own dom lookup
+    chain.push(build_element_snapshot(dom, node));
+    resolve_style(&matching_declarations(sheet, chain, viewport_width), parent_font_size, parent_color)
+}
+
+/// Real sibling/attribute data for `node`'s own [`ElementSnapshot`] entry
+/// (attribute selectors, `+`/`~` combinators, `:first-child`/
+/// `:last-child`/`:nth-child`) — derived from the same `dom::Dom` this
+/// module already walks, not placeholder values. `preceding_siblings`
+/// holds a full snapshot per earlier element sibling (skipping text/
+/// comment nodes), each built the same recursive way, so a multi-hop
+/// chain like `a + b + c` can walk from `c`'s own list into `b`'s own
+/// nested list to reach `a` — see `css::cascade::ElementSnapshot`'s own
+/// doc for how `selector_matches` consumes this. `node` with no parent
+/// (the document root) or that isn't itself an element gets an empty/
+/// default snapshot.
+fn build_element_snapshot(dom: &Dom, node: NodeId) -> ElementSnapshot {
+    let Some(n) = dom.get(node) else { return ElementSnapshot::default() };
+    let NodeData::Element { tag, attributes } = &n.data else {
+        return ElementSnapshot::default();
+    };
+    let (preceding_siblings, has_following_sibling) = sibling_snapshots(dom, node);
+    ElementSnapshot {
+        tag: tag.clone(),
         id: attributes.get("id").cloned(),
         classes: classes_of(attributes),
-    });
-    resolve_style(&matching_declarations(sheet, chain, viewport_width), parent_font_size, parent_color)
+        attributes: attributes.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        preceding_siblings,
+        has_following_sibling,
+    }
+}
+
+/// Element siblings (skipping text/comment nodes) sharing `node`'s parent:
+/// every earlier one as a full recursive snapshot (document order,
+/// immediately-preceding last, matching `ElementSnapshot::preceding_siblings`'s
+/// own doc), plus whether at least one element sibling follows. `node`
+/// with no parent (root) or that isn't found among its own parent's
+/// children (shouldn't happen for a real `dom::Dom`, but this crate
+/// doesn't panic on DOM inconsistency elsewhere either) gets `(empty,
+/// false)`.
+fn sibling_snapshots(dom: &Dom, node: NodeId) -> (Vec<ElementSnapshot>, bool) {
+    let Some(parent) = dom.get(node).and_then(|n| n.parent) else {
+        return (Vec::new(), false);
+    };
+    let Some(parent_node) = dom.get(parent) else {
+        return (Vec::new(), false);
+    };
+
+    let element_siblings: Vec<NodeId> = parent_node
+        .children
+        .iter()
+        .copied()
+        .filter(|&c| matches!(dom.get(c).map(|n| &n.data), Some(NodeData::Element { .. })))
+        .collect();
+
+    let Some(pos) = element_siblings.iter().position(|&c| c == node) else {
+        return (Vec::new(), false);
+    };
+
+    let preceding_siblings = element_siblings[..pos].iter().map(|&sib| build_element_snapshot(dom, sib)).collect();
+    let has_following_sibling = pos + 1 < element_siblings.len();
+    (preceding_siblings, has_following_sibling)
 }
 
 /// Recursively flattens `node`'s subtree into `out` as [`InlineSpanSource`]
@@ -242,6 +305,7 @@ fn build_children(
                 text: None,
                 inline_spans: Some(spans),
                 glyphs: Vec::new(),
+                image: None,
             });
         }
     };
@@ -287,18 +351,15 @@ fn build(
             text: Some(text.clone()),
             inline_spans: None,
             glyphs: Vec::new(),
+            image: None,
         });
     }
 
-    let NodeData::Element { tag, attributes } = &n.data else {
+    let NodeData::Element { .. } = &n.data else {
         return None;
     };
 
-    chain.push(ElementSnapshot {
-        tag: tag.clone(),
-        id: attributes.get("id").cloned(),
-        classes: classes_of(attributes),
-    });
+    chain.push(build_element_snapshot(dom, node));
     let style = resolve_style(&matching_declarations(sheet, chain, viewport_width), parent_font_size, parent_color);
 
     let children = if style.display == Display::None {
@@ -320,6 +381,7 @@ fn build(
         text: None,
         inline_spans: None,
         glyphs: Vec::new(),
+        image: None,
     })
 }
 
@@ -350,4 +412,41 @@ pub fn build_box_tree_with_viewport(dom: &Dom, node: NodeId, sheet: &Stylesheet,
     let mut chain = Vec::new();
     let initial = ComputedStyle::initial();
     build(dom, node, sheet, viewport_width, &mut chain, initial.font_size, initial.color)
+}
+
+/// Applies real fetched/decoded `<img>` images onto an already-built box
+/// tree: sets [`LayoutBox::image`] and, for any `<img>` box whose CSS
+/// `width`/`height` weren't explicitly set (`Length::Auto`), overrides
+/// them with the image's real intrinsic pixel dimensions - real
+/// intrinsic sizing, achieved by feeding an ordinary `Length::Px` into
+/// the exact same `layout::layout_block` code path an explicit
+/// `width: 200px` would use (no changes to `layout.rs` itself needed).
+/// An `<img>` with an explicit CSS width/height keeps it, matching real
+/// browsers (CSS always wins over intrinsic size when both are present).
+///
+/// Must run after [`build_box_tree`]/[`build_box_tree_with_viewport`] and
+/// before `layout::layout_block` — box tree construction itself never
+/// fetches anything over the network. `images` is supplied by the
+/// caller (e.g. `profile-worker`, after a `net::get` + `image_decode::
+/// decode` per `<img src>` found in the page), keyed by the `<img>`
+/// element's own `NodeId`. A node with no entry (no `src`, a failed
+/// fetch, undecodable bytes) is left as a plain empty box, same as any
+/// other unstyled element.
+pub fn apply_image_sizes(dom: &Dom, box_: &mut LayoutBox, images: &std::collections::HashMap<NodeId, std::rc::Rc<image_decode::DecodedImage>>) {
+    if let Some(dom::Node { data: NodeData::Element { tag, .. }, .. }) = dom.get(box_.node) {
+        if tag.eq_ignore_ascii_case("img") {
+            if let Some(image) = images.get(&box_.node) {
+                if box_.style.width == crate::style::Length::Auto {
+                    box_.style.width = crate::style::Length::Px(image.width as f64);
+                }
+                if box_.style.height == crate::style::Length::Auto {
+                    box_.style.height = crate::style::Length::Px(image.height as f64);
+                }
+                box_.image = Some(image.clone());
+            }
+        }
+    }
+    for child in &mut box_.children {
+        apply_image_sizes(dom, child, images);
+    }
 }

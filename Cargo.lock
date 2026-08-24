@@ -2147,6 +2147,15 @@ dependencies = [
  "num-traits",
  "png",
  "tiff",
+ "zune-core",
+ "zune-jpeg",
+]
+
+[[package]]
+name = "image_decode"
+version = "0.1.0"
+dependencies = [
+ "image",
 ]
 
 [[package]]
@@ -2341,6 +2350,7 @@ dependencies = [
  "cosmic-text",
  "css",
  "dom",
+ "image_decode",
 ]
 
 [[package]]
@@ -3414,6 +3424,7 @@ dependencies = [
  "bytemuck",
  "css",
  "dom",
+ "image_decode",
  "layout-engine",
  "pollster",
  "wgpu",

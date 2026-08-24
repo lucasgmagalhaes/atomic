@@ -8,6 +8,7 @@ fn el(tag: &str) -> ElementSnapshot {
         tag: tag.to_string(),
         id: None,
         classes: vec![],
+        ..Default::default()
     }
 }
 
@@ -71,6 +72,7 @@ fn higher_specificity_wins_the_cascade() {
         tag: "div".into(),
         id: Some("id".into()),
         classes: vec![],
+        ..Default::default()
     }];
     let style = resolve_style(&matching_declarations(&sheet, &chain, 1024.0), 16.0, BLACK);
     assert_eq!(style.width, Length::Px(20.0));

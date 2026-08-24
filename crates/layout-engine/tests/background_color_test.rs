@@ -7,6 +7,7 @@ fn style_for(css_text: &str) -> layout_engine::ComputedStyle {
         tag: "div".into(),
         id: None,
         classes: vec![],
+        ..Default::default()
     }];
     resolve_style(&matching_declarations(&sheet, &chain, 1024.0), 16.0, Color { r: 0, g: 0, b: 0, a: 255 })
 }

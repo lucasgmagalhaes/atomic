@@ -7,3 +7,4 @@ edition = "2021"
 cosmic-text = "0.19.0"
 css = { path = "../css" }
 dom = { path = "../dom" }
+image_decode = { path = "../image_decode" }

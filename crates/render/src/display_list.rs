@@ -64,3 +64,44 @@ fn collect_glyphs(box_: &LayoutBox, out: &mut Vec<PositionedGlyph>) {
         collect_glyphs(child, out);
     }
 }
+
+/// One decoded `<img>`, positioned at its box's painted rect - the
+/// destination the real pixel data should be scaled/blitted into (see
+/// `crate::image::composite_images`), not necessarily the image's own
+/// native pixel size (a box can be a different size than its image's
+/// intrinsic dimensions, e.g. an explicit CSS `width` that doesn't match).
+#[derive(Clone)]
+pub struct ImageQuad {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub image: std::rc::Rc<image_decode::DecodedImage>,
+}
+
+/// Same paint-order walk as [`build_display_list`]/[`build_glyph_list`],
+/// but collects one [`ImageQuad`] per box carrying a real decoded
+/// `LayoutBox::image` (set by `layout_engine::apply_image_sizes`) - an
+/// `<img>` with no successfully fetched/decoded image contributes
+/// nothing, same as a box with a transparent background contributes no
+/// [`Rect`].
+pub fn build_image_list(box_: &LayoutBox) -> Vec<ImageQuad> {
+    let mut list = Vec::new();
+    collect_images(box_, &mut list);
+    list
+}
+
+fn collect_images(box_: &LayoutBox, out: &mut Vec<ImageQuad>) {
+    if let Some(image) = &box_.image {
+        out.push(ImageQuad {
+            x: box_.dimensions.x as f32,
+            y: box_.dimensions.y as f32,
+            width: box_.dimensions.width as f32,
+            height: box_.dimensions.height as f32,
+            image: image.clone(),
+        });
+    }
+    for child in &box_.children {
+        collect_images(child, out);
+    }
+}

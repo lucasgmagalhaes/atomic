@@ -93,6 +93,14 @@ pub(crate) fn is_mixed_content_blocked(page_origin: Option<&str>, request_url: &
 /// anywhere, so the browser default is the only policy that exists here.
 pub(crate) unsafe fn referrer_header(ctx: *mut sys::JSContext, request_url: &str) -> Option<String> {
     let page_url = crate::location::current_url(ctx)?;
+    if !page_url.origin().is_tuple() {
+        // Opaque origin (a `data:`/`blob:` page, or any URL the `url`
+        // crate can't derive a real scheme/host/port tuple from) — a real
+        // browser never discloses a referrer from one, since there's no
+        // real origin to disclose (unlike the cross-origin case, which
+        // still discloses *something*, just not the full URL).
+        return None;
+    }
     let request_url = url::Url::parse(request_url).ok()?;
     if page_url.scheme() == "https" && request_url.scheme() == "http" {
         return None;

@@ -59,6 +59,31 @@ fn cross_origin_request_sends_only_the_page_origin_as_referer() {
 }
 
 #[test]
+fn an_opaque_origin_pages_location_origin_reads_null() {
+    let d = dom::Dom::new();
+    let rt = Runtime::new();
+    let mut ctx = Context::with_dom(&rt, d);
+    ctx.set_url("data:text/html,hello");
+
+    let result = ctx.eval("location.origin", "<test>").unwrap();
+    assert_eq!(result, "null");
+}
+
+#[test]
+fn an_opaque_origin_page_sends_no_referer() {
+    let addr = serve_once_echoing_request();
+    let url = format!("http://{addr}/target");
+
+    let d = dom::Dom::new();
+    let rt = Runtime::new();
+    let mut ctx = Context::with_dom(&rt, d);
+    ctx.set_url("data:text/html,hello");
+
+    let result = ctx.eval(&format!("fetchSync('{url}').body"), "<test>").unwrap();
+    assert!(!result.to_lowercase().contains("referer:"), "got: {result}");
+}
+
+#[test]
 fn a_context_with_no_real_url_sends_no_referer() {
     let addr = serve_once_echoing_request();
     let url = format!("http://{addr}/target");

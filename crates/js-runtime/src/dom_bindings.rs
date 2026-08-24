@@ -376,6 +376,183 @@ unsafe fn define_text_content(ctx: *mut sys::JSContext, proto: sys::JSValue) {
     sys::JS_FreeAtom(ctx, atom);
 }
 
+unsafe fn navigation_node(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    relation: impl FnOnce(&dom::Dom, dom::NodeId) -> Option<dom::NodeId>,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_null();
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return sys::js_null();
+    }
+    relation(&*dom, id)
+        .map(|id| {
+            node_object(
+                ctx,
+                crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NODE_CLASS_KIND),
+                id,
+            )
+        })
+        .unwrap_or_else(sys::js_null)
+}
+
+unsafe extern "C" fn node_parent_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    navigation_node(ctx, this_val, |dom, id| {
+        dom.get(id).and_then(|node| node.parent)
+    })
+}
+
+unsafe extern "C" fn node_first_child_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    navigation_node(ctx, this_val, |dom, id| {
+        dom.get(id).and_then(|node| node.children.first().copied())
+    })
+}
+
+unsafe extern "C" fn node_last_child_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    navigation_node(ctx, this_val, |dom, id| {
+        dom.get(id).and_then(|node| node.children.last().copied())
+    })
+}
+
+unsafe fn sibling(ctx: *mut sys::JSContext, this_val: sys::JSValue, next: bool) -> sys::JSValue {
+    navigation_node(ctx, this_val, |dom, id| {
+        let parent = dom.get(id)?.parent?;
+        let siblings = &dom.get(parent)?.children;
+        let index = siblings.iter().position(|&candidate| candidate == id)?;
+        if next {
+            siblings.get(index + 1).copied()
+        } else {
+            index
+                .checked_sub(1)
+                .and_then(|index| siblings.get(index).copied())
+        }
+    })
+}
+
+unsafe extern "C" fn node_previous_sibling_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    sibling(ctx, this_val, false)
+}
+unsafe extern "C" fn node_next_sibling_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    sibling(ctx, this_val, true)
+}
+
+unsafe extern "C" fn node_children_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    let array = sys::JS_NewArray(ctx);
+    let Some(id) = node_id(ctx, this_val) else {
+        return array;
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return array;
+    }
+    let children = (*dom)
+        .get(id)
+        .map(|node| node.children.clone())
+        .unwrap_or_default();
+    let class_id = crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NODE_CLASS_KIND);
+    for (index, child) in children.into_iter().enumerate() {
+        sys::JS_SetPropertyUint32(ctx, array, index as u32, node_object(ctx, class_id, child));
+    }
+    array
+}
+
+unsafe extern "C" fn node_type_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    let dom = dom_opaque(ctx);
+    let value = if dom.is_null() {
+        None
+    } else {
+        (*dom).get(id).map(|node| match node.data {
+            dom::NodeData::Document => 9.0,
+            dom::NodeData::Element { .. } => 1.0,
+            dom::NodeData::Text(_) => 3.0,
+            dom::NodeData::Comment(_) => 8.0,
+        })
+    };
+    value.map(sys::js_float64).unwrap_or_else(sys::js_undefined)
+}
+
+unsafe extern "C" fn node_name_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    let dom = dom_opaque(ctx);
+    let name = if dom.is_null() {
+        None
+    } else {
+        (*dom).get(id).map(|node| match &node.data {
+            dom::NodeData::Document => "#document".to_owned(),
+            dom::NodeData::Element { tag, .. } => tag.to_ascii_uppercase(),
+            dom::NodeData::Text(_) => "#text".to_owned(),
+            dom::NodeData::Comment(_) => "#comment".to_owned(),
+        })
+    };
+    name.map(|name| new_js_string(ctx, &name))
+        .unwrap_or_else(sys::js_undefined)
+}
+
+unsafe fn define_navigation(ctx: *mut sys::JSContext, proto: sys::JSValue) {
+    for (name, getter) in [
+        ("parentNode", node_parent_get as Getter),
+        ("firstChild", node_first_child_get as Getter),
+        ("lastChild", node_last_child_get as Getter),
+        ("previousSibling", node_previous_sibling_get as Getter),
+        ("nextSibling", node_next_sibling_get as Getter),
+        ("childNodes", node_children_get as Getter),
+        ("nodeType", node_type_get as Getter),
+        ("nodeName", node_name_get as Getter),
+    ] {
+        let name = CString::new(name).unwrap();
+        let getter = sys::JS_NewCFunction2(
+            ctx,
+            std::mem::transmute::<Getter, sys::JSCFunction>(getter),
+            name.as_ptr(),
+            0,
+            sys::JS_CFUNC_GETTER,
+            0,
+        );
+        let atom = sys::JS_NewAtom(ctx, name.as_ptr());
+        sys::JS_DefinePropertyGetSet(
+            ctx,
+            proto,
+            atom,
+            getter,
+            sys::js_undefined(),
+            sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE,
+        );
+        sys::JS_FreeAtom(ctx, atom);
+    }
+}
+
 unsafe extern "C" fn node_value_get(
     ctx: *mut sys::JSContext,
     this_val: sys::JSValue,
@@ -852,6 +1029,7 @@ unsafe fn ensure_node_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
 
     let proto = sys::JS_NewObject(ctx);
     define_text_content(ctx, proto);
+    define_navigation(ctx, proto);
     define_value(ctx, proto);
     define_focus_methods(ctx, proto);
     define_mutation_methods(ctx, proto);

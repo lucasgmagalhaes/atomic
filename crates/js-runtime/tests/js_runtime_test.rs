@@ -122,6 +122,26 @@ fn scripts_can_insert_text_before_a_sibling_and_remove_children() {
 }
 
 #[test]
+fn node_navigation_exposes_stable_tree_relationships() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let parent = d.create_element("main");
+    let first = d.create_element("span");
+    let second = d.create_element("button");
+    d.set_attribute(parent, "id", "parent");
+    d.set_attribute(first, "id", "first");
+    d.set_attribute(second, "id", "second");
+    d.append_child(root, parent);
+    d.append_child(parent, first);
+    d.append_child(parent, second);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const parent = document.getElementById('parent'); const first = document.getElementById('first'); const second = document.getElementById('second'); return `${parent.childNodes.length},${parent.firstChild === first},${parent.lastChild === second},${first.nextSibling === second},${second.previousSibling === first},${first.parentNode === parent},${first.nodeType},${first.nodeName}`; })()", "<test>").unwrap();
+    assert_eq!(result, "2,true,true,true,true,true,1,SPAN");
+}
+
+#[test]
 fn query_selector_uses_the_existing_css_selector_subset_in_document_order() {
     let mut d = dom::Dom::new();
     let root = d.root();

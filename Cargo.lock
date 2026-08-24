@@ -2308,6 +2308,7 @@ dependencies = [
 name = "js-runtime"
 version = "0.1.0"
 dependencies = [
+ "css",
  "dom",
  "net",
  "platform-apis",

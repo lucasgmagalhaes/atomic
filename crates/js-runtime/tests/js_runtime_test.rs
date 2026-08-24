@@ -41,7 +41,9 @@ fn get_element_by_id_returns_a_node_with_text_content() {
         .unwrap();
     assert_eq!(read, "hello");
 
-    let missing = ctx.eval("document.getElementById('nope')", "<test>").unwrap();
+    let missing = ctx
+        .eval("document.getElementById('nope')", "<test>")
+        .unwrap();
     assert_eq!(missing, "null");
 
     let wrote = ctx
@@ -55,6 +57,256 @@ fn get_element_by_id_returns_a_node_with_text_content() {
         )
         .unwrap();
     assert_eq!(wrote, "bye");
+}
+
+#[test]
+fn scripts_can_create_append_query_and_remove_dom_nodes() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let parent = d.create_element("main");
+    d.set_attribute(parent, "id", "parent");
+    d.append_child(root, parent);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const parent = document.getElementById('parent'); const child = document.createElement('article'); child.textContent = 'created'; const appended = parent.appendChild(child); const found = parent.querySelector('article'); child.remove(); return `${appended === child},${found === child},${document.querySelector('article')}`; })()", "<test>").unwrap();
+    assert_eq!(result, "true,true,null");
+}
+
+#[test]
+fn dom_mutation_rejects_invalid_tags_and_cycles() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let parent = d.create_element("div");
+    let child = d.create_element("span");
+    d.set_attribute(parent, "id", "parent");
+    d.set_attribute(child, "id", "child");
+    d.append_child(root, parent);
+    d.append_child(parent, child);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const parent = document.getElementById('parent'); const child = document.getElementById('child'); let invalid = false; let cycle = false; try { document.createElement('<script>'); } catch (_) { invalid = true; } try { child.appendChild(parent); } catch (_) { cycle = true; } return `${invalid},${cycle},${parent.querySelector('span') === child}`; })()", "<test>").unwrap();
+    assert_eq!(result, "true,true,true");
+}
+
+#[test]
+fn attributes_on_created_nodes_are_bounded_and_visible_to_selectors() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let parent = d.create_element("main");
+    d.set_attribute(parent, "id", "parent");
+    d.append_child(root, parent);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const child = document.createElement('button'); child.setAttribute('id', 'dynamic'); child.setAttribute('class', 'action primary'); document.getElementById('parent').appendChild(child); let invalid = false; try { child.setAttribute('<bad>', 'x'); } catch (_) { invalid = true; } child.removeAttribute('class'); return `${child.getAttribute('id')},${document.querySelector('.primary')},${child.getAttribute('missing')},${invalid}`; })()", "<test>").unwrap();
+    assert_eq!(result, "dynamic,null,null,true");
+}
+
+#[test]
+fn scripts_can_insert_text_before_a_sibling_and_remove_children() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let parent = d.create_element("main");
+    let tail = d.create_element("span");
+    d.set_attribute(parent, "id", "parent");
+    d.set_attribute(tail, "id", "tail");
+    d.append_child(root, parent);
+    d.append_child(parent, tail);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const parent = document.getElementById('parent'); const tail = document.getElementById('tail'); const text = document.createTextNode('before'); const inserted = parent.insertBefore(text, tail); const removed = parent.removeChild(tail); return `${inserted === text},${parent.textContent},${removed === tail},${document.getElementById('tail')}`; })()", "<test>").unwrap();
+    assert_eq!(result, "true,before,true,null");
+}
+
+#[test]
+fn node_navigation_exposes_stable_tree_relationships() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let parent = d.create_element("main");
+    let first = d.create_element("span");
+    let second = d.create_element("button");
+    d.set_attribute(parent, "id", "parent");
+    d.set_attribute(first, "id", "first");
+    d.set_attribute(second, "id", "second");
+    d.append_child(root, parent);
+    d.append_child(parent, first);
+    d.append_child(parent, second);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const parent = document.getElementById('parent'); const first = document.getElementById('first'); const second = document.getElementById('second'); return `${parent.childNodes.length},${parent.firstChild === first},${parent.lastChild === second},${first.nextSibling === second},${second.previousSibling === first},${first.parentNode === parent},${first.nodeType},${first.nodeName}`; })()", "<test>").unwrap();
+    assert_eq!(result, "2,true,true,true,true,true,1,SPAN");
+}
+
+#[test]
+fn id_and_class_name_properties_update_selector_state() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let parent = d.create_element("main");
+    d.set_attribute(parent, "id", "parent");
+    d.append_child(root, parent);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const child = document.createElement('button'); child.id = 'dynamic'; child.className = 'action primary'; document.getElementById('parent').appendChild(child); return `${child.id},${child.className},${document.querySelector('#dynamic') === child},${document.querySelector('.primary') === child}`; })()", "<test>").unwrap();
+    assert_eq!(result, "dynamic,action primary,true,true");
+}
+
+#[test]
+fn matches_and_closest_reuse_the_supported_selector_grammar() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let section = d.create_element("section");
+    let button = d.create_element("button");
+    d.set_attribute(section, "class", "panel");
+    d.set_attribute(section, "id", "section");
+    d.set_attribute(button, "class", "action");
+    d.set_attribute(button, "id", "button");
+    d.append_child(root, section);
+    d.append_child(section, button);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const section = document.getElementById('section'); const button = document.getElementById('button'); return `${button.matches('section > button.action')},${button.matches('.panel')},${button.closest('.panel') === section},${button.closest('article')}`; })()", "<test>").unwrap();
+    assert_eq!(result, "true,false,true,null");
+}
+
+#[test]
+fn constructed_events_are_dispatched_by_identity() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let button = d.create_element("button");
+    d.set_attribute(button, "id", "button");
+    d.append_child(root, button);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const button = document.getElementById('button'); const event = new Event('save'); let seen = false; button.addEventListener('save', received => { seen = received === event && received.type === 'save' && received.target === button && received.currentTarget === button && !received.bubbles && !received.cancelable; }); return `${button.dispatchEvent(event)},${seen}`; })()", "<test>").unwrap();
+    assert_eq!(result, "true,true");
+}
+
+#[test]
+fn constructed_event_options_control_bubbling_and_cancellation() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let parent = d.create_element("section");
+    let button = d.create_element("button");
+    d.set_attribute(parent, "id", "parent");
+    d.set_attribute(button, "id", "button");
+    d.append_child(root, parent);
+    d.append_child(parent, button);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const parent = document.getElementById('parent'); const button = document.getElementById('button'); let bubbled = false; parent.addEventListener('save', event => { bubbled = event.bubbles; event.preventDefault(); }); const event = new Event('save', { bubbles: true, cancelable: true, ignored: true }); return `${button.dispatchEvent(event)},${bubbled},${event.defaultPrevented}`; })()", "<test>").unwrap();
+    assert_eq!(result, "false,true,true");
+}
+
+#[test]
+fn document_body_is_stable_and_accepts_dynamic_children() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let html = d.create_element("html");
+    let body = d.create_element("body");
+    d.append_child(root, html);
+    d.append_child(html, body);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const child = document.createElement('main'); child.id = 'app'; document.body.appendChild(child); return `${document.documentElement === document.querySelector('html')},${document.body === document.querySelector('body')},${document.body.querySelector('#app') === child}`; })()", "<test>").unwrap();
+    assert_eq!(result, "true,true,true");
+}
+
+#[test]
+fn class_list_is_stable_and_updates_the_class_attribute() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let element = d.create_element("div");
+    d.set_attribute(element, "class", "first first");
+    d.append_child(root, element);
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const el = document.querySelector('div'); const list = el.classList; list.add('second'); list.remove('first'); return `${list === el.classList},${list.contains('second')},${el.className}`; })()", "<test>").unwrap();
+    assert_eq!(result, "true,true,second");
+}
+
+#[test]
+fn attribute_presence_and_names_follow_live_dom_attributes() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let element = d.create_element("div");
+    d.set_attribute(element, "data-state", "ready");
+    d.set_attribute(element, "id", "panel");
+    d.append_child(root, element);
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const el = document.querySelector('div'); const before = `${el.hasAttribute('id')},${el.getAttributeNames().join(',')}`; el.removeAttribute('id'); return `${before},${el.hasAttribute('id')},${el.getAttributeNames().join(',')}`; })()", "<test>").unwrap();
+    assert_eq!(result, "true,data-state,id,false,data-state");
+}
+
+#[test]
+fn name_and_type_properties_reflect_live_attributes() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let input = d.create_element("input");
+    d.append_child(root, input);
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const input = document.querySelector('input'); input.name = 'email'; input.type = 'email'; return `${input.getAttribute('name')},${input.getAttribute('type')},${input.name},${input.type}`; })()", "<test>").unwrap();
+    assert_eq!(result, "email,email,email,email");
+}
+
+#[test]
+fn query_selector_uses_the_existing_css_selector_subset_in_document_order() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let section = d.create_element("section");
+    d.append_child(root, section);
+    let first = d.create_element("button");
+    d.set_attribute(first, "class", "claim");
+    d.set_attribute(first, "id", "first");
+    d.append_child(section, first);
+    let second = d.create_element("button");
+    d.set_attribute(second, "class", "claim");
+    d.set_attribute(second, "id", "second");
+    d.append_child(section, second);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+
+    let result = ctx
+        .eval(
+            "(() => { const all = document.querySelectorAll('section > button.claim'); return all.length + ',' + all[0].textContent + ',' + (document.querySelector('#second') === all[1]) + ',' + (all[0] === document.getElementById('first')); })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "2,,true,true");
+}
+
+#[test]
+fn element_query_selector_excludes_the_receiver_and_invalid_selectors_throw() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let container = d.create_element("div");
+    d.set_attribute(container, "id", "container");
+    d.append_child(root, container);
+    let child = d.create_element("div");
+    d.set_attribute(child, "class", "child");
+    d.append_child(container, child);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+
+    let result = ctx
+        .eval(
+            "(() => { const container = document.getElementById('container'); const found = container.querySelectorAll('div'); let invalid = false; try { document.querySelector(':not(div)'); } catch (_) { invalid = true; } return found.length + ',' + (found[0] !== container) + ',' + invalid; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "1,true,true");
 }
 
 #[test]
@@ -111,10 +363,20 @@ fn a_listener_attached_in_one_eval_call_survives_to_dispatch_in_a_later_separate
     )
     .expect("attaching the listener should eval cleanly");
 
-    let dispatched = ctx.eval("document.getElementById('greeting').dispatchEvent('click')", "<dispatch>").expect("dispatching should eval cleanly");
-    assert_eq!(dispatched, "true", "a real listener attached in an earlier eval call should still be found and called");
+    let dispatched = ctx
+        .eval(
+            "document.getElementById('greeting').dispatchEvent('click')",
+            "<dispatch>",
+        )
+        .expect("dispatching should eval cleanly");
+    assert_eq!(
+        dispatched, "true",
+        "a real listener attached in an earlier eval call should still be found and called"
+    );
 
-    let text_after = ctx.eval("document.getElementById('greeting').textContent", "<check>").expect("reading textContent should eval cleanly");
+    let text_after = ctx
+        .eval("document.getElementById('greeting').textContent", "<check>")
+        .expect("reading textContent should eval cleanly");
     assert_eq!(text_after, "clicked", "the listener's real mutation should be visible through yet another fresh getElementById call");
 }
 
@@ -145,7 +407,27 @@ fn add_event_listener_and_dispatch_event_calls_the_listener() {
 }
 
 #[test]
-fn dispatch_event_with_no_listener_returns_false() {
+fn event_listeners_run_in_registration_order_and_can_be_removed_individually() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let p = d.create_element("p");
+    d.append_child(root, p);
+    d.set_attribute(p, "id", "target");
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+
+    let result = ctx
+        .eval(
+            "(() => { const el = document.getElementById('target'); let log = ''; const first = () => { log += 'a'; }; const second = () => { log += 'b'; }; el.addEventListener('click', first); el.addEventListener('click', second); el.removeEventListener('click', first); el.dispatchEvent('click'); return log; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "b");
+}
+
+#[test]
+fn dispatch_event_with_no_listener_is_not_canceled() {
     let mut d = dom::Dom::new();
     let root = d.root();
     let p = d.create_element("p");
@@ -161,7 +443,103 @@ fn dispatch_event_with_no_listener_returns_false() {
             "<test>",
         )
         .unwrap();
-    assert_eq!(result, "false");
+    assert_eq!(result, "true");
+}
+
+#[test]
+fn events_expose_target_and_current_target_bubble_and_can_be_canceled() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let parent = d.create_element("section");
+    let child = d.create_element("button");
+    d.append_child(root, parent);
+    d.append_child(parent, child);
+    d.set_attribute(parent, "id", "parent");
+    d.set_attribute(child, "id", "child");
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const parent = document.getElementById('parent'); const child = document.getElementById('child'); let log = ''; child.addEventListener('click', event => { log += `${event.type}:${event.target === child}:${event.currentTarget === child}:${event.bubbles}:${event.cancelable}`; }); parent.addEventListener('click', event => { log += `|parent:${event.target === child}:${event.currentTarget === parent}`; event.preventDefault(); }); return `${child.dispatchEvent('click')},${log}`; })()", "<test>").unwrap();
+    assert_eq!(result, "false,click:true:true:true:true|parent:true:true");
+}
+
+#[test]
+fn stop_propagation_prevents_later_ancestors() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let outer = d.create_element("main");
+    let inner = d.create_element("section");
+    let child = d.create_element("button");
+    d.append_child(root, outer);
+    d.append_child(outer, inner);
+    d.append_child(inner, child);
+    d.set_attribute(outer, "id", "outer");
+    d.set_attribute(inner, "id", "inner");
+    d.set_attribute(child, "id", "child");
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const outer = document.getElementById('outer'); const inner = document.getElementById('inner'); const child = document.getElementById('child'); let log = ''; outer.addEventListener('click', () => { log += 'outer'; }); inner.addEventListener('click', event => { log += 'inner'; event.stopPropagation(); }); child.dispatchEvent('click'); return log; })()", "<test>").unwrap();
+    assert_eq!(result, "inner");
+}
+
+#[test]
+fn nested_dispatch_is_bounded_without_leaking_depth_between_events() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let button = d.create_element("button");
+    d.append_child(root, button);
+    d.set_attribute(button, "id", "button");
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const button = document.getElementById('button'); let calls = 0; button.addEventListener('loop', () => { calls++; button.dispatchEvent('loop'); }); let limited = false; try { button.dispatchEvent('loop'); } catch (_) { limited = true; } const first = calls; button.removeEventListener('loop'); button.addEventListener('done', () => { calls++; }); const second = button.dispatchEvent('done'); return `${first},${limited},${second},${calls}`; })()", "<test>").unwrap();
+    assert_eq!(result, "32,true,true,33");
+}
+
+#[test]
+fn event_listener_limit_throws_without_registering_an_extra_callback() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let button = d.create_element("button");
+    d.append_child(root, button);
+    d.set_attribute(button, "id", "button");
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const button = document.getElementById('button'); let calls = 0; const listener = () => { calls++; }; for (let i = 0; i < 64; i++) button.addEventListener('click', listener); let limited = false; try { button.addEventListener('click', listener); } catch (_) { limited = true; } button.dispatchEvent('click'); return `${limited},${calls}`; })()", "<test>").unwrap();
+    assert_eq!(result, "true,64");
+}
+
+#[test]
+fn event_propagation_limit_throws_for_a_deep_dom_tree() {
+    let mut d = dom::Dom::new();
+    let mut parent = d.root();
+    for _ in 0..129 {
+        let child = d.create_element("div");
+        d.append_child(parent, child);
+        parent = child;
+    }
+    d.set_attribute(parent, "id", "target");
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { try { document.getElementById('target').dispatchEvent('click'); return 'not-limited'; } catch (_) { return 'limited'; } })()", "<test>").unwrap();
+    assert_eq!(result, "limited");
+}
+
+#[test]
+fn listener_exceptions_are_rethrown_after_later_listeners_run() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let button = d.create_element("button");
+    d.append_child(root, button);
+    d.set_attribute(button, "id", "button");
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const button = document.getElementById('button'); let log = ''; button.addEventListener('click', () => { throw new Error('expected'); }); button.addEventListener('click', () => { log += 'later'; }); try { button.dispatchEvent('click'); } catch (_) { log += ':caught'; } return log; })()", "<test>").unwrap();
+    assert_eq!(result, "later:caught");
 }
 
 #[test]
@@ -236,10 +614,7 @@ fn page_visibility_and_dom_bindings_coexist_on_shared_document() {
     let ctx = Context::with_dom(&rt, d);
 
     let visibility = ctx
-        .eval(
-            "document.visibilityState + ',' + document.hidden",
-            "<test>",
-        )
+        .eval("document.visibilityState + ',' + document.hidden", "<test>")
         .unwrap();
     assert_eq!(visibility, "visible,false");
 
@@ -254,10 +629,7 @@ fn page_visibility_reports_visible() {
     let rt = Runtime::new();
     let ctx = Context::new(&rt);
     let result = ctx
-        .eval(
-            "document.visibilityState + ',' + document.hidden",
-            "<test>",
-        )
+        .eval("document.visibilityState + ',' + document.hidden", "<test>")
         .unwrap();
     assert_eq!(result, "visible,false");
 }
@@ -266,9 +638,17 @@ fn page_visibility_reports_visible() {
 fn performance_now_advances() {
     let rt = Runtime::new();
     let ctx = Context::new(&rt);
-    let first: f64 = ctx.eval("performance.now()", "<test>").unwrap().parse().unwrap();
+    let first: f64 = ctx
+        .eval("performance.now()", "<test>")
+        .unwrap()
+        .parse()
+        .unwrap();
     std::thread::sleep(std::time::Duration::from_millis(5));
-    let second: f64 = ctx.eval("performance.now()", "<test>").unwrap().parse().unwrap();
+    let second: f64 = ctx
+        .eval("performance.now()", "<test>")
+        .unwrap()
+        .parse()
+        .unwrap();
     assert!(second > first);
 }
 
@@ -283,7 +663,9 @@ fn node_value_is_real_and_independent_of_text_content() {
     let rt = Runtime::new();
     let ctx = Context::with_dom(&rt, d);
 
-    let initial = ctx.eval("document.getElementById('field').value", "<test>").unwrap();
+    let initial = ctx
+        .eval("document.getElementById('field').value", "<test>")
+        .unwrap();
     assert_eq!(initial, "");
 
     let result = ctx
@@ -311,7 +693,9 @@ fn textarea_value_falls_back_to_text_content_until_set() {
     let rt = Runtime::new();
     let ctx = Context::with_dom(&rt, d);
 
-    let value = ctx.eval("document.getElementById('notes').value", "<test>").unwrap();
+    let value = ctx
+        .eval("document.getElementById('notes').value", "<test>")
+        .unwrap();
     assert_eq!(value, "seeded");
 }
 

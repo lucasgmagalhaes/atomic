@@ -176,7 +176,11 @@ extern "C" {
     /// Returns an owned reference (per the usual `JSValue`-return
     /// convention — caller must `JS_FreeValue` it), `JS_UNDEFINED` if the
     /// property doesn't exist.
-    pub fn JS_GetPropertyStr(ctx: *mut JSContext, this_obj: JSValue, prop: *const c_char) -> JSValue;
+    pub fn JS_GetPropertyStr(
+        ctx: *mut JSContext,
+        this_obj: JSValue,
+        prop: *const c_char,
+    ) -> JSValue;
 
     /// `argv` may be null when `argc == 0`.
     pub fn JS_Call(
@@ -186,6 +190,12 @@ extern "C" {
         argc: c_int,
         argv: *mut JSValue,
     ) -> JSValue;
+
+    pub fn JS_IsFunction(ctx: *mut JSContext, val: JSValue) -> bool;
+    pub fn JS_SetConstructorBit(ctx: *mut JSContext, func_obj: JSValue, val: bool) -> bool;
+    pub fn JS_ToBool(ctx: *mut JSContext, val: JSValue) -> c_int;
+    pub fn JS_GetException(ctx: *mut JSContext) -> JSValue;
+    pub fn JS_HasException(ctx: *mut JSContext) -> bool;
 
     pub fn JS_GetRuntime(ctx: *mut JSContext) -> *mut JSRuntime;
 
@@ -197,7 +207,11 @@ extern "C" {
     /// `class_id` is already registered on this particular runtime (e.g. a
     /// second `Context` sharing the same `Runtime`) — the class definition
     /// from the first call still stands, so callers can ignore the error.
-    pub fn JS_NewClass(rt: *mut JSRuntime, class_id: JSClassID, class_def: *const JSClassDef) -> c_int;
+    pub fn JS_NewClass(
+        rt: *mut JSRuntime,
+        class_id: JSClassID,
+        class_def: *const JSClassDef,
+    ) -> c_int;
     /// Creates an instance of `class_id` using the prototype most recently
     /// set via `JS_SetClassProto` for this context.
     pub fn JS_NewObjectClass(ctx: *mut JSContext, class_id: JSClassID) -> JSValue;
@@ -245,12 +259,18 @@ extern "C" {
     /// proxies - fine for this crate's use (only ever called on values it
     /// itself constructed or received as plain arguments, never a proxy).
     pub fn JS_IsArray(val: JSValue) -> bool;
+    pub fn JS_IsStrictEqual(ctx: *mut JSContext, op1: JSValue, op2: JSValue) -> bool;
 
     pub fn JS_GetProperty(ctx: *mut JSContext, this_obj: JSValue, prop: JSAtom) -> JSValue;
     pub fn JS_GetPropertyUint32(ctx: *mut JSContext, this_obj: JSValue, idx: u32) -> JSValue;
     /// Returns `< 0` on failure. Takes ownership of `val` (consistent with
     /// every other `JS_Set*` in this binding set).
-    pub fn JS_SetPropertyUint32(ctx: *mut JSContext, this_obj: JSValue, idx: u32, val: JSValue) -> c_int;
+    pub fn JS_SetPropertyUint32(
+        ctx: *mut JSContext,
+        this_obj: JSValue,
+        idx: u32,
+        val: JSValue,
+    ) -> c_int;
 
     /// Writes `length` into `*pres`. Works for arrays and any other object
     /// with a numeric `.length` (array-likes) - used here only on real
@@ -268,7 +288,11 @@ extern "C" {
         flags: c_int,
     ) -> c_int;
     pub fn JS_FreePropertyEnum(ctx: *mut JSContext, tab: *mut JSPropertyEnum, len: u32);
-    pub fn JS_AtomToCStringLen(ctx: *mut JSContext, plen: *mut usize, atom: JSAtom) -> *const c_char;
+    pub fn JS_AtomToCStringLen(
+        ctx: *mut JSContext,
+        plen: *mut usize,
+        atom: JSAtom,
+    ) -> *const c_char;
 
     /// Creates a `Promise` plus its `resolve`/`reject` functions, written
     /// into `resolving_funcs[0]`/`[1]` (must point at a 2-element array).
@@ -324,6 +348,15 @@ pub const fn js_undefined() -> JSValue {
     JSValue {
         u: JSValueUnion { int32: 0 },
         tag: JS_TAG_UNDEFINED,
+    }
+}
+
+/// `JS_EXCEPTION` — return this from a native binding after an exception was
+/// placed on the context with `JS_Throw`.
+pub const fn js_exception() -> JSValue {
+    JSValue {
+        u: JSValueUnion { int32: 0 },
+        tag: JS_TAG_EXCEPTION,
     }
 }
 

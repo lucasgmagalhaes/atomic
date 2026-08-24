@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 quickjs-sys = { path = "quickjs-sys" }
 dom = { path = "../dom" }
+css = { path = "../css" }
 platform-apis = { path = "../platform-apis" }
 net = { path = "../net" }
 storage = { path = "../storage" }

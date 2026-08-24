@@ -905,6 +905,69 @@ fn click_at_a_real_coordinate_dispatches_a_real_click_and_changes_the_page() {
 }
 
 #[test]
+fn loaded_page_selectors_and_bubbling_events_flow_through_profile_worker() {
+    let page_addr = serve_html_once(
+        r##"<div id="parent"><button id="child" class="action">before</button></div>
+        <style>#child { width: 100px; height: 40px; }</style>
+        <script>
+          const child = document.querySelector('.action');
+          const parent = document.querySelector('#parent');
+          if (child === null || document.querySelectorAll('.action').length !== 1) throw new Error('selector failure');
+          parent.addEventListener('click', event => {
+            if (event.target === child && event.currentTarget === parent && event.type === 'click') parent.textContent = 'bubbled';
+          });
+          child.addEventListener('click', event => { if (event.currentTarget === child) child.textContent = 'target'; });
+        </script>"##,
+    );
+
+    let name = unique_shmem_name("selector-event-worker");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+    profile.navigate(&format!("http://{page_addr}/")).expect("protocol should not fail").expect("navigate should succeed");
+
+    let frame_before = profile.latest_frame().unwrap();
+    let result = profile.click_at(10.0, 10.0).expect("protocol should not fail");
+    assert!(result.is_ok(), "the selected child should receive the native click: {result:?}");
+    assert_ne!(frame_before, profile.latest_frame().unwrap(), "the parent bubbling listener should visibly update the loaded page");
+
+    profile.quit();
+}
+
+#[test]
+fn loaded_page_can_append_to_document_body_and_repaint_after_a_click() {
+    // The button is visible at the top-left before its script runs. Its
+    // listener appends a new node through `document.body`, proving that a
+    // mutation made by page JS is picked up by the command-path repaint,
+    // rather than only mutations of nodes that existed during page load.
+    let page_addr = serve_html_once(
+        r##"<button id="add">add</button>
+        <style>#add { width: 100px; height: 40px; }</style>
+        <script>
+          document.getElementById('add').addEventListener('click', () => {
+            const notice = document.createElement('p');
+            notice.textContent = 'added after load';
+            document.body.appendChild(notice);
+          });
+        </script>"##,
+    );
+
+    let name = unique_shmem_name("dynamic-body-worker");
+    // This engine still lays out inline script source as text, so the
+    // appended paragraph lands after that source. Keep the viewport tall
+    // enough to observe it in this end-to-end rendering assertion.
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 700).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+    profile.navigate(&format!("http://{page_addr}/")).expect("protocol should not fail").expect("navigate should succeed");
+
+    let frame_before = profile.latest_frame().unwrap();
+    let result = profile.click_at(10.0, 10.0).expect("protocol should not fail");
+    assert!(result.is_ok(), "the button should receive the native click: {result:?}");
+    assert_ne!(frame_before, profile.latest_frame().unwrap(), "a node appended through document.body should be included in the command-path repaint");
+
+    profile.quit();
+}
+
+#[test]
 fn click_at_a_point_with_no_element_reports_an_error() {
     // A real, deliberately tiny page - block layout means nothing here
     // extends anywhere near the bottom-right of a 300x150 frame, so that

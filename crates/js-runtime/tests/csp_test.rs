@@ -97,3 +97,44 @@ fn a_context_with_no_csp_set_allows_everything() {
     let result = ctx.eval(&format!("fetchSync('{url}').ok"), "<test>").unwrap();
     assert_eq!(result, "true");
 }
+
+#[test]
+fn multiple_delivered_policies_are_each_enforced_not_merged_into_one() {
+    let addr = serve_once("hello");
+    let url = format!("http://{addr}/");
+
+    let d = dom::Dom::new();
+    let rt = Runtime::new();
+    let mut ctx = Context::with_dom(&rt, d);
+    ctx.set_url(&url); // same-origin target, so 'self' allows it
+    ctx.add_csp_policy("connect-src 'self'");
+    let allowed_by_first = ctx.eval(&format!("fetchSync('{url}').ok"), "<test>").unwrap();
+    assert_eq!(allowed_by_first, "true");
+
+    // Appending a second policy must tighten enforcement - a request has
+    // to be allowed by every delivered policy. Joining the two strings
+    // into one ("connect-src 'self'; connect-src 'none'") would instead
+    // have found the first directive and kept allowing.
+    ctx.add_csp_policy("connect-src 'none'");
+    let blocked_by_second = ctx.eval(&format!("fetchSync('{url}').ok"), "<test>").unwrap();
+    assert_eq!(blocked_by_second, "false");
+}
+
+#[test]
+fn set_csp_replaces_the_whole_policy_list() {
+    let addr = serve_once("hello");
+    let url = format!("http://{addr}/");
+
+    let d = dom::Dom::new();
+    let rt = Runtime::new();
+    let mut ctx = Context::with_dom(&rt, d);
+    ctx.set_url(&url);
+    ctx.add_csp_policy("connect-src 'none'");
+
+    // Wholesale replace (the same convention every other setter here has):
+    // after this there is no connect-src/default-src directive anywhere in
+    // the list, so the fetch is allowed again.
+    ctx.set_csp("script-src 'self'");
+    let result = ctx.eval(&format!("fetchSync('{url}').ok"), "<test>").unwrap();
+    assert_eq!(result, "true");
+}

@@ -61,7 +61,7 @@ fn cross_origin_fetch_sync_without_cors_header_is_blocked() {
     let d = dom::Dom::new();
     let rt = Runtime::new();
     let mut ctx = Context::with_dom(&rt, d);
-    ctx.set_url("https://totally-different-origin.example/");
+    ctx.set_url("http://totally-different-origin.example/");
 
     let result = ctx.eval(&format!("JSON.stringify(fetchSync('{url}'))"), "<test>").unwrap();
     assert_eq!(result, r#"{"ok":false,"status":0,"body":""}"#);
@@ -75,7 +75,7 @@ fn cross_origin_fetch_sync_with_wildcard_cors_header_is_allowed() {
     let d = dom::Dom::new();
     let rt = Runtime::new();
     let mut ctx = Context::with_dom(&rt, d);
-    ctx.set_url("https://totally-different-origin.example/");
+    ctx.set_url("http://totally-different-origin.example/");
 
     let result = ctx.eval(&format!("fetchSync('{url}').ok"), "<test>").unwrap();
     assert_eq!(result, "true");
@@ -85,7 +85,7 @@ fn cross_origin_fetch_sync_with_wildcard_cors_header_is_allowed() {
 fn cross_origin_fetch_sync_with_matching_origin_header_is_allowed() {
     // The page's own origin (arbitrary, never fetched) must exactly equal
     // what the server sends back for this to prove anything real.
-    let page_origin = "https://real-page.example";
+    let page_origin = "http://real-page.example";
     let addr = serve_once_with_headers("hello", format!("Access-Control-Allow-Origin: {page_origin}\r\n"));
     let url = format!("http://{addr}/");
 
@@ -100,13 +100,13 @@ fn cross_origin_fetch_sync_with_matching_origin_header_is_allowed() {
 
 #[test]
 fn cross_origin_fetch_sync_with_a_different_origin_header_is_still_blocked() {
-    let addr = serve_once_with_headers("hello", "Access-Control-Allow-Origin: https://someone-else.example\r\n".to_string());
+    let addr = serve_once_with_headers("hello", "Access-Control-Allow-Origin: http://someone-else.example\r\n".to_string());
     let url = format!("http://{addr}/");
 
     let d = dom::Dom::new();
     let rt = Runtime::new();
     let mut ctx = Context::with_dom(&rt, d);
-    ctx.set_url("https://real-page.example");
+    ctx.set_url("http://real-page.example");
 
     let result = ctx.eval(&format!("fetchSync('{url}').ok"), "<test>").unwrap();
     assert_eq!(result, "false");
@@ -133,7 +133,7 @@ fn cross_origin_xhr_without_cors_header_reports_onerror_not_onload() {
     let d = dom::Dom::new();
     let rt = Runtime::new();
     let mut ctx = Context::with_dom(&rt, d);
-    ctx.set_url("https://real-page.example");
+    ctx.set_url("http://real-page.example");
 
     ctx.eval(
         &format!(

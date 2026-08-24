@@ -1,5 +1,5 @@
-//! Real (though scoped) same-origin/CORS enforcement — the "origin/
-//! security model" `JS_ENGINE_CAPABILITY_MATRIX.md` calls out as a
+//! Real (though scoped) same-origin/CORS/mixed-content enforcement — the
+//! "origin/security model" `JS_ENGINE_CAPABILITY_MATRIX.md` calls out as a
 //! prerequisite before expanding cross-origin networking any further.
 //!
 //! This engine's `fetch`/`fetchSync`/`XMLHttpRequest` only ever issue a
@@ -51,4 +51,29 @@ pub(crate) fn is_response_allowed(page_origin: Option<&str>, request_url: &str, 
         let value = value.trim();
         value == "*" || value == page_origin
     })
+}
+
+/// Real mixed-content blocking: a page loaded over `https://` must never
+/// fetch a plain `http://` subresource — a real browser blocks this
+/// outright, *before* even sending the request (unlike CORS, which sends
+/// the request but hides the response from script). `page_origin: None`
+/// (nothing to enforce — see [`page_origin`]) and a page whose own origin
+/// isn't `https://` both never block, matching a real browser's own scope
+/// (mixed-content blocking only exists to protect an otherwise-secure
+/// page). No distinction between "active" (script, fetch) and "passive"
+/// (image) mixed content — real browsers treat passive content more
+/// leniently, but this engine's `fetch`/`fetchSync`/`XMLHttpRequest` are
+/// all fetch-shaped requests a script initiated, closer in spirit to
+/// active content, so blocking all of them uniformly is the simpler,
+/// correct-enough default. `<img>` fetching (`profile-worker`'s own
+/// `net::get` calls for page resources) doesn't go through this at all —
+/// scoped to script-initiated requests only.
+pub(crate) fn is_mixed_content_blocked(page_origin: Option<&str>, request_url: &str) -> bool {
+    let Some(page_origin) = page_origin else {
+        return false;
+    };
+    if !page_origin.starts_with("https://") {
+        return false;
+    }
+    url::Url::parse(request_url).map(|u| u.scheme() == "http").unwrap_or(false)
 }

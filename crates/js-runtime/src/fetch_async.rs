@@ -142,6 +142,12 @@ unsafe extern "C" fn fetch(ctx: *mut sys::JSContext, _this_val: sys::JSValue, ar
         sys::JS_FreeValue(ctx, resolve);
         return promise;
     };
+    if crate::cors::is_mixed_content_blocked(crate::cors::page_origin(ctx).as_deref(), &url) {
+        let msg = new_js_string(ctx, "fetch: mixed content blocked (http:// request from an https:// page)");
+        call_if_present(ctx, reject, sys::js_undefined(), msg);
+        sys::JS_FreeValue(ctx, resolve);
+        return promise;
+    }
 
     let (tx, rx) = mpsc::channel();
     let request_url = url.clone();
@@ -189,6 +195,20 @@ unsafe extern "C" fn xhr_send(ctx: *mut sys::JSContext, this_val: sys::JSValue, 
         return sys::js_undefined();
     };
     sys::JS_FreeValue(ctx, url_val);
+
+    if crate::cors::is_mixed_content_blocked(crate::cors::page_origin(ctx).as_deref(), &url) {
+        // Fed straight to `pump`'s existing completion handling (never
+        // actually sent over the network) so a blocked request goes
+        // through the exact same readyState/onerror flow a real network
+        // failure would, rather than a separate synchronous error path.
+        let (tx, rx) = mpsc::channel();
+        let _ = tx.send(Err(net::Error::Request(
+            "mixed content blocked (http:// request from an https:// page)".to_string(),
+        )));
+        let xhr_obj = sys::JS_DupValue(ctx, this_val);
+        with_state(ctx, |s| s.xhrs.push(PendingXhr { xhr_obj, url, receiver: rx }));
+        return sys::js_undefined();
+    }
 
     let (tx, rx) = mpsc::channel();
     let request_url = url.clone();

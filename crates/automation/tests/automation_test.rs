@@ -2,7 +2,9 @@
 //! real spawned `profile::Profile`, `every`/`on` firing through `tick`, and
 //! `pane.fill`/`pane.click` throwing (not silently no-opping) since
 //! `profile-worker` has no input-injection protocol yet.
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::time::Duration;
 
 use automation::AutomationEngine;
@@ -62,9 +64,9 @@ fn every_and_on_fire_through_tick() {
 
 #[test]
 fn pane_goto_reaches_a_real_profile() {
-    let mut profile = spawn_demo_profile("nimble-automation-test-1");
+    let profile = Rc::new(RefCell::new(spawn_demo_profile("nimble-automation-test-1")));
     let mut panes = HashMap::new();
-    panes.insert("acc1".to_string(), &mut profile);
+    panes.insert("acc1".to_string(), profile.clone());
 
     let runtime = Runtime::new();
     let engine = AutomationEngine::new(&runtime, panes);
@@ -79,9 +81,9 @@ fn pane_goto_reaches_a_real_profile() {
 
 #[test]
 fn pane_fill_and_click_reach_a_real_element_on_the_demo_page() {
-    let mut profile = spawn_demo_profile("nimble-automation-test-2");
+    let profile = Rc::new(RefCell::new(spawn_demo_profile("nimble-automation-test-2")));
     let mut panes = HashMap::new();
-    panes.insert("acc1".to_string(), &mut profile);
+    panes.insert("acc1".to_string(), profile.clone());
 
     let runtime = Runtime::new();
     let engine = AutomationEngine::new(&runtime, panes);
@@ -96,9 +98,9 @@ fn pane_fill_and_click_reach_a_real_element_on_the_demo_page() {
 
 #[test]
 fn pane_fill_and_click_throw_on_an_unknown_id_or_selector() {
-    let mut profile = spawn_demo_profile("nimble-automation-test-3");
+    let profile = Rc::new(RefCell::new(spawn_demo_profile("nimble-automation-test-3")));
     let mut panes = HashMap::new();
-    panes.insert("acc1".to_string(), &mut profile);
+    panes.insert("acc1".to_string(), profile.clone());
 
     let runtime = Runtime::new();
     let engine = AutomationEngine::new(&runtime, panes);
@@ -137,6 +139,41 @@ fn cron_fires_at_most_once_per_minute_and_rejects_bad_expressions() {
 
     let bad_expr = engine.run(r#"cron("not enough fields", () => {})"#, "test.js");
     assert!(bad_expr.is_err(), "malformed cron expression should throw, not silently register nothing");
+}
+
+#[test]
+fn rebind_lets_the_same_engine_control_a_pane_added_after_construction() {
+    let runtime = Runtime::new();
+    let mut engine = AutomationEngine::new(&runtime, HashMap::new());
+
+    // No panes yet - the engine's own JS state (globals it may have set)
+    // must survive the rebind below, not just the pane map.
+    engine.run("globalThis.marker = 'still here';", "setup.js").expect("script should eval cleanly");
+
+    let profile = Rc::new(RefCell::new(spawn_demo_profile("nimble-automation-test-rebind")));
+    let mut panes = HashMap::new();
+    panes.insert("acc1".to_string(), profile.clone());
+    engine.rebind(panes);
+
+    let marker = engine.run("globalThis.marker", "check.js").unwrap();
+    assert_eq!(marker, "still here", "rebind must not reset the JS context's own state");
+
+    assert!(engine.run(r##"pane("acc1").fill("#counter", "rebound")"##, "test.js").is_ok(), "a pane added via rebind should be reachable by pane(...)");
+}
+
+#[test]
+fn rebind_removes_access_to_a_pane_no_longer_present() {
+    let profile = Rc::new(RefCell::new(spawn_demo_profile("nimble-automation-test-rebind-remove")));
+    let mut panes = HashMap::new();
+    panes.insert("acc1".to_string(), profile.clone());
+
+    let runtime = Runtime::new();
+    let mut engine = AutomationEngine::new(&runtime, panes);
+    assert!(engine.run(r##"pane("acc1").fill("#counter", "x")"##, "test.js").is_ok());
+
+    engine.rebind(HashMap::new());
+    let result = engine.run(r#"pane("acc1").goto("https://example.com")"#, "test.js");
+    assert!(result.is_err(), "a pane rebound away should no longer be reachable");
 }
 
 #[test]

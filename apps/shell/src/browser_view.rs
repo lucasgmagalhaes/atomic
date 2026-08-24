@@ -28,7 +28,9 @@
 //! `net::get_via_proxy`, a genuine `CONNECT` tunnel - see that crate's own
 //! docs) - a proxy is fixed for a profile's process lifetime, so changing
 //! it means spawning a fresh `BrowserView`, not mutating a running one.
+use std::cell::RefCell;
 use std::path::PathBuf;
+use std::rc::Rc;
 
 /// Locates the `profile-worker` binary that should already exist next to
 /// this executable (a real workspace build via `cargo build --workspace`
@@ -61,7 +63,16 @@ pub fn rgba_to_color_image(pixels: &[u8], width: u32, height: u32) -> egui::Colo
 /// Owns one live profile process and the texture built from its most
 /// recently seen frame.
 pub struct BrowserView {
-    profile: Option<profile::Profile>,
+    // `Rc<RefCell<...>>`, not owned outright: `automation::AutomationEngine`
+    // needs a real shared handle to the same live profile so a script can
+    // drive it while this view keeps polling/displaying it - a clone of
+    // this `Rc` (via `profile_handle`) is what lets a long-lived engine
+    // (ticked every GUI frame - see `main.rs`'s `tick_automation_engine`)
+    // reach the current pane's profile without holding a borrow of
+    // `NimbleApp::panes` open across frames. `RefCell` gives real
+    // runtime-checked mutable access instead of raw pointers into
+    // something that might move.
+    profile: Option<Rc<RefCell<profile::Profile>>>,
     texture: Option<egui::TextureHandle>,
     last_generation: u32,
     width: u32,
@@ -141,7 +152,7 @@ impl BrowserView {
     fn spawn_with_shmem_name(shmem_name: &str, width: u32, height: u32, proxy: Option<&str>, gpu_adapter: Option<usize>) -> Self {
         let (profile, error) = match worker_binary_path() {
             Ok(path) => match profile::Profile::spawn_full(&path.to_string_lossy(), shmem_name, width, height, proxy, None, gpu_adapter) {
-                Ok(p) => (Some(p), None),
+                Ok(p) => (Some(Rc::new(RefCell::new(p))), None),
                 Err(e) => (None, Some(e.to_string())),
             },
             Err(e) => (None, Some(e)),
@@ -162,20 +173,21 @@ impl BrowserView {
         &self.current_url
     }
 
-    /// Lends the live profile process to a caller that needs to drive it
-    /// directly — e.g. `automation::AutomationEngine`, which borrows
-    /// (rather than owns) the panes it controls precisely so a profile can
-    /// still be displayed while a script also drives it. `None` if this
-    /// view failed to spawn (see [`error`](Self::error)).
-    pub fn profile_mut(&mut self) -> Option<&mut profile::Profile> {
-        self.profile.as_mut()
+    /// Clones a real shared handle to the live profile process for a
+    /// caller that needs to drive it directly — e.g.
+    /// `automation::AutomationEngine::rebind`, which holds these handles
+    /// (not borrows) precisely so a profile can still be displayed by this
+    /// view while a script also drives it. `None` if this view failed to
+    /// spawn (see [`error`](Self::error)).
+    pub fn profile_handle(&self) -> Option<Rc<RefCell<profile::Profile>>> {
+        self.profile.clone()
     }
 
     /// The live profile process's OS pid, for real per-process telemetry
     /// (see `platform_apis::process_stats`) - `None` if this view failed
     /// to spawn.
     pub fn pid(&self) -> Option<u32> {
-        self.profile.as_ref().map(|p| p.pid())
+        self.profile.as_ref().map(|p| p.borrow().pid())
     }
 
     /// The live profile process's current frame generation (see
@@ -184,12 +196,12 @@ impl BrowserView {
     /// counter advances, not for texture-upload logic (`poll_texture`
     /// already tracks its own generation internally).
     pub fn frame_generation(&self) -> Option<u32> {
-        self.profile.as_ref().map(|p| p.frame_generation())
+        self.profile.as_ref().map(|p| p.borrow().frame_generation())
     }
 
     pub fn reload(&mut self) {
-        if let Some(profile) = &mut self.profile {
-            let _ = profile.reload();
+        if let Some(profile) = &self.profile {
+            let _ = profile.borrow_mut().reload();
         }
     }
 
@@ -200,10 +212,10 @@ impl BrowserView {
     /// the protocol command failed outright (a dead worker).
     pub fn navigate(&mut self, url: &str) {
         self.current_url = url.to_string();
-        let Some(profile) = &mut self.profile else {
+        let Some(profile) = &self.profile else {
             return;
         };
-        match profile.navigate(url) {
+        match profile.borrow_mut().navigate(url) {
             Ok(Ok(())) => self.navigation_error = None,
             Ok(Err(message)) => self.navigation_error = Some(message),
             Err(io_error) => self.navigation_error = Some(io_error.to_string()),
@@ -216,6 +228,7 @@ impl BrowserView {
     /// frame arrives.
     pub fn poll_texture(&mut self, ctx: &egui::Context) -> Option<&egui::TextureHandle> {
         if let Some(profile) = &self.profile {
+            let profile = profile.borrow();
             let generation = profile.frame_generation();
             if generation != self.last_generation {
                 if let Some(pixels) = profile.latest_frame() {

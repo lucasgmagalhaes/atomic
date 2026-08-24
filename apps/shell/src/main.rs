@@ -61,6 +61,21 @@ struct NimbleApp {
     /// `Ok(result)` from the last automation script's top-level eval, or
     /// `Err(message)` if it raised. `None` before any script has run.
     automation_result: Option<Result<String, String>>,
+    /// App-lifetime automation engine - genuinely never dropped for as
+    /// long as `NimbleApp` runs, so `every`/`on`/`cron` callbacks a script
+    /// registers via `run_automation_script` keep firing on every
+    /// subsequent `tick_automation_engine` call, closing the automation
+    /// crate's own long-documented "ephemeral per run" gap. Borrows a
+    /// `js_runtime::Runtime` that's `Box::leak`ed once at startup (see
+    /// `Default::default`) - a real, deliberate leak, not a bug: this
+    /// runtime needs to outlive `AutomationEngine`, which needs to live as
+    /// long as `NimbleApp` itself, and `NimbleApp` isn't guaranteed not to
+    /// move after construction (`eframe` owns it behind a `Box<dyn App>`)
+    /// - leaking is the same "give it a stable heap address, app-lifetime,
+    /// no cleanup needed before process exit" trade this workspace's
+    /// native quickjs bindings already make for their own opaque pointers,
+    /// just via a safe `Box::leak` instead of raw allocation.
+    automation_engine: automation::AutomationEngine<'static>,
     /// The active UI language - see `shell::i18n`. Toggled via the EN/PT
     /// buttons in the toolbar, applied immediately (every string is looked
     /// up fresh each `update()` frame, so there's no restart/re-render step
@@ -166,6 +181,12 @@ impl Default for NimbleApp {
         let mut workspace = WorkspaceManager::new();
         let panes = vec![spawn_pane(&mut workspace, "pane-1".to_string())];
 
+        // See `automation_engine`'s own doc for why this leak is
+        // deliberate: the runtime must outlive an app-lifetime engine,
+        // and `NimbleApp` isn't guaranteed a stable address of its own.
+        let automation_runtime: &'static js_runtime::Runtime = Box::leak(Box::new(js_runtime::Runtime::new()));
+        let automation_engine = automation::AutomationEngine::new(automation_runtime, std::collections::HashMap::new());
+
         NimbleApp {
             panes,
             selected: 0,
@@ -174,6 +195,7 @@ impl Default for NimbleApp {
             workspace,
             automation_script: String::new(),
             automation_result: None,
+            automation_engine,
             locale: Locale::En,
             download_url_text: String::new(),
             performance: PerformanceSettings::new(),
@@ -260,9 +282,9 @@ impl NimbleApp {
     /// its default).
     fn apply_fps_cap_to_all_panes(&mut self) {
         let Some(fps) = self.performance.fps_cap else { return };
-        for pane in &mut self.panes {
-            if let Some(profile) = pane.browser.profile_mut() {
-                match profile.set_fps_cap(fps) {
+        for pane in &self.panes {
+            if let Some(profile) = pane.browser.profile_handle() {
+                match profile.borrow_mut().set_fps_cap(fps) {
                     Ok(Ok(())) => self.performance_error = None,
                     Ok(Err(message)) => self.performance_error = Some(message),
                     Err(io_error) => self.performance_error = Some(io_error.to_string()),
@@ -314,13 +336,44 @@ impl NimbleApp {
         self.address_bar_text.clear();
     }
 
-    /// Runs `self.automation_script` once via [`automation_bridge::run_script`]
-    /// against every live pane (not just the selected one - a script names
-    /// whichever pane it wants via `pane("pane-N")`) and stores the result
-    /// for the panel below to display.
+    /// Runs `self.automation_script`'s top-level code once against
+    /// `self.automation_engine` - the app-lifetime engine every `update()`
+    /// tick pumps (see `tick_automation_engine`) - scoped to every live
+    /// pane (not just the selected one; a script names whichever pane it
+    /// wants via `pane("pane-N")`). Unlike `run_automation_script_for_pane`
+    /// (ephemeral, one pane, dropped when it returns), a script run here
+    /// registers real `every`/`on`/cron callbacks that keep firing on
+    /// every subsequent frame, because this engine is never dropped - see
+    /// `automation_bridge::run_script`'s own doc for why the two entry
+    /// points genuinely need to stay different tools.
     fn run_automation_script(&mut self) {
-        let panes = self.panes.iter_mut().map(|p| (p.id.as_str(), &mut p.browser));
-        self.automation_result = Some(automation_bridge::run_script(&self.workspace, panes, &self.automation_script));
+        self.rebind_automation_engine();
+        self.automation_result = Some(self.automation_engine.run(&self.automation_script, "shell-script.js").map_err(|e| e.to_string()));
+    }
+
+    /// Refreshes which real profiles `pane(...)` resolves to inside
+    /// `self.automation_engine`, from whatever the active workspace's live
+    /// panes are *right now* - called before every script run and every
+    /// frame's `tick_automation_engine` so a pane added/closed/moved since
+    /// the engine last ran is reflected without losing any JS state
+    /// (registered callbacks, globals a script set) a fresh `AutomationEngine`
+    /// would have lost.
+    fn rebind_automation_engine(&mut self) {
+        let panes = automation_bridge::scoped_panes(&self.workspace, self.panes.iter().map(|p| (p.id.as_str(), &p.browser)));
+        self.automation_engine.rebind(panes);
+    }
+
+    /// Called once per `update()` frame (see `eframe::App::update`) - pumps
+    /// `self.automation_engine`'s due timers/`requestAnimationFrame`/cron
+    /// triggers (`AutomationEngine::tick`'s own doc), the real primitive
+    /// that makes a script's `every`/`on`/`cron` registrations actually
+    /// keep firing instead of only ever running once at eval time - closing
+    /// the last half of the spec's automation-scripting gap (see
+    /// CLAUDE.md). Rebinds first so a pane that just appeared/disappeared
+    /// this frame is reflected before ticking against it.
+    fn tick_automation_engine(&mut self) {
+        self.rebind_automation_engine();
+        self.automation_engine.tick();
     }
 
     /// Downloads `self.download_url_text` (real `net::download`, see
@@ -521,8 +574,8 @@ impl NimbleApp {
     /// gap), so this reuses the one shared script box scoped to one pane
     /// rather than pretending a per-profile script exists.
     fn run_automation_script_for_pane(&mut self, index: usize) {
-        let pane = &mut self.panes[index];
-        let panes = std::iter::once((pane.id.as_str(), &mut pane.browser));
+        let pane = &self.panes[index];
+        let panes = std::iter::once((pane.id.as_str(), &pane.browser));
         self.automation_result = Some(automation_bridge::run_script(&self.workspace, panes, &self.automation_script));
     }
 
@@ -616,8 +669,9 @@ impl NimbleApp {
     /// workspace membership might have changed is cheap and safe.
     fn apply_visibility_throttling(&mut self) {
         let visible = self.active_workspace_pane_indices();
-        for (index, pane) in self.panes.iter_mut().enumerate() {
-            let Some(profile) = pane.browser.profile_mut() else { continue };
+        for (index, pane) in self.panes.iter().enumerate() {
+            let Some(profile) = pane.browser.profile_handle() else { continue };
+            let mut profile = profile.borrow_mut();
             if visible.contains(&index) {
                 let _ = profile.resume();
             } else {
@@ -645,6 +699,7 @@ impl eframe::App for NimbleApp {
         // cadence rather than only reacting to user input, or newly
         // published frames would sit unseen between interactions.
         ctx.request_repaint_after(Duration::from_millis(16));
+        self.tick_automation_engine();
 
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             ui.horizontal(|ui| {

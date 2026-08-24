@@ -18,6 +18,16 @@
 //! rather than a new primitive. `on`/`emit` and `cron` are real,
 //! host-driven event/schedule primitives — see `events` and `cron`
 //! modules.
+//!
+//! No longer ephemeral-only: [`AutomationEngine::rebind`] lets a
+//! long-lived host (`apps/shell`'s GUI loop) keep one engine alive across
+//! however many frames it wants, re-pointing `pane(...)` at whatever
+//! panes are currently live each frame without losing registered
+//! `every`/`on`/cron callbacks or JS-side state — closes the crate's own
+//! former "ephemeral per run" gap for callers that want it; a caller that
+//! just wants one script's top-level code to run once (e.g. a one-shot
+//! "auto login" scoped to a single pane) still can via a fresh, dropped-
+//! immediately `AutomationEngine`, same as before.
 mod cron;
 mod events;
 mod pane;
@@ -25,25 +35,30 @@ mod pane;
 pub use cron::CronError;
 
 use js_runtime::{Context, EvalError, Runtime};
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 /// One running automation script: its own JS context, the set of panes
-/// (named, *borrowed* `profile::Profile` handles — see below) it's allowed
+/// (named, *shared* `profile::Profile` handles — see below) it's allowed
 /// to control, and the cron/event state `tick()` drives.
-pub struct AutomationEngine<'rt, 'p> {
+pub struct AutomationEngine<'rt> {
     ctx: Context<'rt>,
     // Boxed so the heap address stays valid for the raw pointer stashed via
     // `JS_SetContextOpaque` even though `AutomationEngine` itself may move
     // (e.g. returned out of `new`) — same convention as js-runtime's own
     // `Context::_host_state`.
     //
-    // Borrowed (`&'p mut Profile`), not owned: a real host (`apps/shell`)
-    // already owns each running profile for rendering/IPC — a `Profile`'s
-    // stdin/stdout pipe has exactly one writer, so it can't also be handed
-    // to this engine by value without taking it away from whatever's
-    // displaying it. Lending a `&mut` for the duration of a script run (or
-    // a `tick()`) lets the same profile serve both.
-    panes: Box<HashMap<String, &'p mut profile::Profile>>,
+    // `Rc<RefCell<Profile>>`, not a borrowed `&mut` — a real host
+    // (`apps/shell`) needs to keep displaying/polling the same profile
+    // while a script also drives it, and (for a long-lived engine kept
+    // alive across GUI frames — see [`rebind`](Self::rebind)) needs to
+    // hand this engine a *fresh* set of panes every frame without holding
+    // a borrow of its own pane list open the whole time. Shared ownership
+    // with runtime-checked mutable access is the safe way to let both
+    // sides reach the same `Profile` without a self-referential struct or
+    // raw pointers into a `Vec` that might reallocate between frames.
+    panes: Box<HashMap<String, Rc<RefCell<profile::Profile>>>>,
 }
 
 // A plain alias, not a wrapper — so `every` keeps `setInterval`'s real
@@ -55,7 +70,7 @@ pub struct AutomationEngine<'rt, 'p> {
 // assumed the other one.
 const PRELUDE: &str = r#"globalThis.every = setInterval;"#;
 
-impl<'rt, 'p> AutomationEngine<'rt, 'p> {
+impl<'rt> AutomationEngine<'rt> {
     /// `panes` are the profiles this script is allowed to name via
     /// `pane("name")` — deliberately explicit rather than "every profile in
     /// the workspace": a script's blast radius should be whatever the host
@@ -64,11 +79,11 @@ impl<'rt, 'p> AutomationEngine<'rt, 'p> {
     /// host with a `workspace::WorkspaceManager` (`apps/shell`) would build
     /// this from the active workspace's profile ids, keeping only the ones
     /// it actually has a live `Profile` for.
-    pub fn new(runtime: &'rt Runtime, panes: HashMap<String, &'p mut profile::Profile>) -> Self {
+    pub fn new(runtime: &'rt Runtime, panes: HashMap<String, Rc<RefCell<profile::Profile>>>) -> Self {
         let ctx = Context::new(runtime);
         let mut panes = Box::new(panes);
         unsafe {
-            pane::register(ctx.as_raw(), panes.as_mut() as *mut HashMap<String, &mut profile::Profile>);
+            pane::register(ctx.as_raw(), panes.as_mut() as *mut HashMap<String, Rc<RefCell<profile::Profile>>>);
             events::register(ctx.as_raw());
             cron::register(ctx.as_raw());
         }
@@ -78,6 +93,24 @@ impl<'rt, 'p> AutomationEngine<'rt, 'p> {
             .eval(PRELUDE, "automation-prelude.js")
             .expect("prelude is static and must not fail to eval");
         engine
+    }
+
+    /// Replaces which real profiles `pane("name")` resolves to, in place —
+    /// the primitive a long-lived host (`apps/shell`'s GUI loop, ticking
+    /// this same engine every frame so a script's `every`/`on`/`cron`
+    /// callbacks actually keep firing, not just registering once and never
+    /// running — see `apps/shell/src/main.rs`'s `tick_automation_engine`)
+    /// needs to keep pane membership current as panes are added/closed/
+    /// moved between workspaces, *without* dropping and recreating the
+    /// engine (which would lose every registered `every`/`on`/cron
+    /// callback and any JS-side state a script built up).
+    ///
+    /// Replaces the `HashMap`'s *contents*, not the `Box` itself — the
+    /// native `pane` binding's opaque pointer (set once in [`new`](Self::new))
+    /// points at the `Box`'s stable heap address, which this must not
+    /// move.
+    pub fn rebind(&mut self, panes: HashMap<String, Rc<RefCell<profile::Profile>>>) {
+        *self.panes = panes;
     }
 
     /// Runs a user script's top-level code once (registers its
@@ -112,7 +145,7 @@ impl<'rt, 'p> AutomationEngine<'rt, 'p> {
     }
 }
 
-impl Drop for AutomationEngine<'_, '_> {
+impl Drop for AutomationEngine<'_> {
     fn drop(&mut self) {
         // Must run before `self.ctx` itself drops (which calls
         // `JS_FreeContext`) — same ordering requirement `timers::cleanup`/

@@ -51,15 +51,12 @@ unsafe fn with_pane<R>(
     f: impl FnOnce(&mut profile::Profile) -> R,
 ) -> Result<R, String> {
     let name = pane_name(class_id, this_val).ok_or("pane object missing its name")?;
-    let panes = sys::JS_GetContextOpaque(ctx) as *mut std::collections::HashMap<String, &mut profile::Profile>;
+    let panes = sys::JS_GetContextOpaque(ctx) as *mut std::collections::HashMap<String, std::rc::Rc<std::cell::RefCell<profile::Profile>>>;
     if panes.is_null() {
         return Err("automation engine not initialized".to_string());
     }
-    match (*panes).get_mut(name) {
-        // `profile` is `&mut &mut Profile` (a mutable ref into the map's
-        // borrowed value) — reborrow through it rather than moving the
-        // inner `&mut Profile` out, which the map still owns.
-        Some(profile) => Ok(f(&mut **profile)),
+    match (*panes).get(name) {
+        Some(cell) => Ok(f(&mut cell.borrow_mut())),
         None => Err(format!("no pane named \"{name}\"")),
     }
 }
@@ -203,7 +200,7 @@ unsafe extern "C" fn pane_constructor(
 /// never `with_dom`/`with_storage`.
 pub(crate) unsafe fn register(
     ctx: *mut sys::JSContext,
-    panes: *mut std::collections::HashMap<String, &mut profile::Profile>,
+    panes: *mut std::collections::HashMap<String, std::rc::Rc<std::cell::RefCell<profile::Profile>>>,
 ) {
     sys::JS_SetContextOpaque(ctx, panes as *mut c_void);
     ensure_pane_class(ctx);

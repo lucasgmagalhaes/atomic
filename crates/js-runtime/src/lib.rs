@@ -146,7 +146,7 @@ impl<'rt> Context<'rt> {
             url: None,
             layout_rects: std::collections::HashMap::new(),
             computed_styles: std::collections::HashMap::new(),
-            csp: None,
+            csp: Vec::new(),
             permissions_policy: None,
         });
         let raw = state.as_mut() as *mut host_state::HostState as *mut std::os::raw::c_void;
@@ -314,14 +314,36 @@ impl<'rt> Context<'rt> {
         }
     }
 
-    /// Sets the real `Content-Security-Policy` text `fetch`/`fetchSync`/
-    /// `XMLHttpRequest` check before sending a request (see `csp`). No-op
-    /// on a plain [`Context::new`]/`with_dom` that never calls it — nothing
+    /// Replaces this context's `Content-Security-Policy` policy list with
+    /// the single given policy, checked by `fetch`/`fetchSync`/
+    /// `XMLHttpRequest` before sending a request (see `csp`). No-op on a
+    /// plain [`Context::new`]/`with_dom` that never calls it — nothing
     /// enforces a CSP until a host provides one, same pattern
     /// [`Context::set_url`] already has.
+    ///
+    /// Wholesale replace (like every other setter here) — a host that
+    /// delivers *several* real policies (repeated response headers,
+    /// `<meta http-equiv>` tags) and needs them enforced together calls
+    /// [`Context::add_csp_policy`] per delivery instead, which appends.
     pub fn set_csp(&mut self, policy: &str) {
         if let Some(state) = self._host_state.as_mut() {
-            state.csp = Some(policy.to_string());
+            state.csp = vec![policy.to_string()];
+        }
+    }
+
+    /// Appends one delivered `Content-Security-Policy` policy to the list
+    /// `fetch`/`fetchSync`/`XMLHttpRequest` check — a request must be
+    /// allowed by *every* delivered policy (real CSP's multiple-policy
+    /// model: policies intersect, they don't merge, so two policies are
+    /// kept as two entries rather than joined into one string). A host
+    /// (`profile-worker`'s `Page::load`) calls this once per repeated
+    /// `Content-Security-Policy` response header and once per
+    /// `<meta http-equiv="Content-Security-Policy">` tag, in delivery
+    /// order. No-op on a plain [`Context::new`], same as
+    /// [`Context::set_csp`].
+    pub fn add_csp_policy(&mut self, policy: &str) {
+        if let Some(state) = self._host_state.as_mut() {
+            state.csp.push(policy.to_string());
         }
     }
 

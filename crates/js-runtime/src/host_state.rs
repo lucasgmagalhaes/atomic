@@ -58,12 +58,16 @@ pub(crate) struct HostState {
     /// `set_computed_styles`) reads as an empty style, same
     /// degrade-gracefully pattern as `layout_rects`/`url`.
     pub computed_styles: HashMap<dom::NodeId, HashMap<String, String>>,
-    /// Raw `Content-Security-Policy` policy text, checked by
+    /// Raw `Content-Security-Policy` policy texts, each checked by
     /// `crate::csp::is_connect_allowed` before `fetch`/`fetchSync`/
-    /// `XMLHttpRequest` send a request. `None` (a plain `Context::with_dom`,
-    /// or a host that never calls `Context::set_csp`) enforces nothing —
-    /// same degrade-gracefully pattern as `url`/`layout_rects`.
-    pub csp: Option<String>,
+    /// `XMLHttpRequest` send a request — a request must be allowed by
+    /// *every* entry (real CSP's multiple-policy model: several delivered
+    /// policies — repeated response headers, `<meta http-equiv>` tags —
+    /// intersect, they don't merge). Empty (a plain `Context::with_dom`,
+    /// or a host that never calls `Context::set_csp`/`add_csp_policy`)
+    /// enforces nothing — same degrade-gracefully pattern as
+    /// `url`/`layout_rects`.
+    pub csp: Vec<String>,
     /// Raw `Permissions-Policy` response-policy text. Native capability
     /// bindings consult it immediately before performing their privileged
     /// operation; `None` means the host did not provide a policy and leaves

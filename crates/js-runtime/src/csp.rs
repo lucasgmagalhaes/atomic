@@ -19,31 +19,38 @@
 //! meaningfully restrict here, since there's no separate script-loading or
 //! image-fetch policy hook to gate).
 //!
-//! Wiring gap, documented rather than half-done: nothing in this crate or
-//! `profile-worker` extracts a real `Content-Security-Policy` HTTP
-//! response header or `<meta http-equiv="Content-Security-Policy">` tag
-//! and calls [`crate::Context::set_csp`] yet — a host that wants real
-//! enforcement has to call it itself (same shape `set_url`/
-//! `set_computed_styles` already have: a real, tested primitive a host
-//! wires in when ready, not a fake one).
+//! Wiring (item 7's former gap, closed): `profile-worker`'s page load now
+//! extracts a real `Content-Security-Policy` HTTP response header from the
+//! document fetch and every real `<meta http-equiv="Content-Security-Policy">`
+//! tag in the parsed DOM, calling [`crate::Context::add_csp_policy`] for
+//! each *before any page script runs* — so a fetched page's own fetches are
+//! gated by its server's policy without the host having to opt in. Several
+//! delivered policies stay several entries (`HostState::csp` is a `Vec`):
+//! real CSP policies intersect rather than merge, so
+//! joining them into one string would silently *loosen* enforcement (e.g.
+//! `connect-src *` alongside `default-src 'none'`). A host that wants to
+//! set one policy itself can still call [`crate::Context::set_csp`]
+//! directly.
 
 use quickjs_sys as sys;
 
 /// `true` if `request_url` should be blocked before it's even sent — the
 /// same boolean-blocked convention `cors::is_mixed_content_blocked`
 /// already uses at every one of `fetch`/`fetchSync`/`XMLHttpRequest`'s
-/// call sites, so this slots in right next to it. A context with no CSP
-/// set (`HostState.csp: None`) never blocks.
+/// call sites, so this slots in right next to it. A request must be
+/// allowed by *every* delivered policy (real CSP's multiple-policy
+/// model); a context with no policies at all (`HostState.csp` empty)
+/// never blocks.
 pub(crate) unsafe fn is_request_blocked(ctx: *mut sys::JSContext, request_url: &str) -> bool {
     let state = crate::host_state::get(ctx);
     if state.is_null() {
         return false;
     }
-    let Some(policy) = (*state).csp.as_deref() else {
+    if (*state).csp.is_empty() {
         return false;
-    };
+    }
     let page_origin = crate::cors::page_origin(ctx);
-    !is_connect_allowed(policy, request_url, page_origin.as_deref())
+    (*state).csp.iter().any(|policy| !is_connect_allowed(policy, request_url, page_origin.as_deref()))
 }
 
 fn find_directive<'a>(policy: &'a str, name: &str) -> Option<Vec<&'a str>> {

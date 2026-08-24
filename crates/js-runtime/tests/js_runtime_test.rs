@@ -293,8 +293,22 @@ fn nested_dispatch_is_bounded_without_leaking_depth_between_events() {
 
     let rt = Runtime::new();
     let ctx = Context::with_dom(&rt, d);
-    let result = ctx.eval("(() => { const button = document.getElementById('button'); let calls = 0; button.addEventListener('loop', () => { calls++; button.dispatchEvent('loop'); }); button.dispatchEvent('loop'); const first = calls; button.removeEventListener('loop'); button.addEventListener('done', () => { calls++; }); const second = button.dispatchEvent('done'); return `${first},${second},${calls}`; })()", "<test>").unwrap();
-    assert_eq!(result, "32,true,33");
+    let result = ctx.eval("(() => { const button = document.getElementById('button'); let calls = 0; button.addEventListener('loop', () => { calls++; button.dispatchEvent('loop'); }); let limited = false; try { button.dispatchEvent('loop'); } catch (_) { limited = true; } const first = calls; button.removeEventListener('loop'); button.addEventListener('done', () => { calls++; }); const second = button.dispatchEvent('done'); return `${first},${limited},${second},${calls}`; })()", "<test>").unwrap();
+    assert_eq!(result, "32,true,true,33");
+}
+
+#[test]
+fn event_listener_limit_throws_without_registering_an_extra_callback() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let button = d.create_element("button");
+    d.append_child(root, button);
+    d.set_attribute(button, "id", "button");
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const button = document.getElementById('button'); let calls = 0; const listener = () => { calls++; }; for (let i = 0; i < 64; i++) button.addEventListener('click', listener); let limited = false; try { button.addEventListener('click', listener); } catch (_) { limited = true; } button.dispatchEvent('click'); return `${limited},${calls}`; })()", "<test>").unwrap();
+    assert_eq!(result, "true,64");
 }
 
 #[test]

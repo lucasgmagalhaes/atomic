@@ -288,9 +288,12 @@ unsafe extern "C" fn add(
     };
     let mut len = 0;
     sys::JS_GetLength(ctx, list, &mut len);
-    if len < MAX_LISTENERS_PER_TYPE {
-        sys::JS_SetPropertyUint32(ctx, list, len as u32, sys::JS_DupValue(ctx, callback));
+    if len >= MAX_LISTENERS_PER_TYPE {
+        sys::JS_FreeValue(ctx, list);
+        sys::JS_FreeValue(ctx, all);
+        return type_error(ctx, "event listener limit exceeded");
     }
+    sys::JS_SetPropertyUint32(ctx, list, len as u32, sys::JS_DupValue(ctx, callback));
     sys::JS_FreeValue(ctx, list);
     sys::JS_FreeValue(ctx, all);
     sys::js_undefined()
@@ -377,6 +380,7 @@ unsafe fn dispatch_at(
 }
 pub(crate) unsafe fn dispatch(ctx: *mut sys::JSContext, node: sys::JSValue, kind: &str) -> bool {
     let Some(_dispatch_guard) = begin_dispatch(ctx) else {
+        type_error(ctx, "nested event dispatch limit exceeded");
         return false;
     };
     let Some(target_id) = crate::dom_bindings::node_id(ctx, node) else {
@@ -392,6 +396,7 @@ pub(crate) unsafe fn dispatch(ctx: *mut sys::JSContext, node: sys::JSValue, kind
         let Some(id) = current else { break };
         let p = state(ctx, event);
         if (*p).propagation_stopped {
+            current = None;
             break;
         }
         (*p).current_target = Some(id);
@@ -406,6 +411,10 @@ pub(crate) unsafe fn dispatch(ctx: *mut sys::JSContext, node: sys::JSValue, kind
     }
     let canceled = (*state(ctx, event)).default_prevented;
     sys::JS_FreeValue(ctx, event);
+    if current.is_some() {
+        type_error(ctx, "event propagation limit exceeded");
+        return false;
+    }
     if let Some(exception) = first_exception {
         sys::JS_Throw(ctx, exception);
         return false;

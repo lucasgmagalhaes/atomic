@@ -11,11 +11,25 @@ use std::path::PathBuf;
 /// real `Io` error from those if it doesn't, same as any other bad path).
 #[cfg(windows)]
 pub fn default_profile_dir() -> Option<PathBuf> {
-    std::env::var_os("LOCALAPPDATA").map(|dir| PathBuf::from(dir).join("Google").join("Chrome").join("User Data").join("Default"))
+    default_user_data_dir().map(|dir| dir.join("Default"))
 }
 
 #[cfg(not(windows))]
 pub fn default_profile_dir() -> Option<PathBuf> {
+    None
+}
+
+/// Chrome's top-level `User Data` directory - the parent of `Default`/
+/// other profile directories. `Local State` (the real master-key source,
+/// see [`crate::master_key`]) lives here, shared across every profile,
+/// not inside a profile directory itself.
+#[cfg(windows)]
+pub fn default_user_data_dir() -> Option<PathBuf> {
+    std::env::var_os("LOCALAPPDATA").map(|dir| PathBuf::from(dir).join("Google").join("Chrome").join("User Data"))
+}
+
+#[cfg(not(windows))]
+pub fn default_user_data_dir() -> Option<PathBuf> {
     None
 }
 
@@ -25,4 +39,12 @@ pub fn bookmarks_path(profile_dir: &std::path::Path) -> PathBuf {
 
 pub fn history_path(profile_dir: &std::path::Path) -> PathBuf {
     profile_dir.join("History")
+}
+
+pub fn cookies_path(profile_dir: &std::path::Path) -> PathBuf {
+    profile_dir.join("Network").join("Cookies")
+}
+
+pub fn login_data_path(profile_dir: &std::path::Path) -> PathBuf {
+    profile_dir.join("Login Data")
 }

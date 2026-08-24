@@ -2153,7 +2153,10 @@ dependencies = [
 name = "import"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm",
+ "base64",
  "rusqlite",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3750,6 +3753,7 @@ dependencies = [
  "profile",
  "render",
  "security",
+ "storage",
  "url",
 ]
 

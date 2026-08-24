@@ -175,6 +175,20 @@ fn matches_and_closest_reuse_the_supported_selector_grammar() {
 }
 
 #[test]
+fn constructed_events_are_dispatched_by_identity() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let button = d.create_element("button");
+    d.set_attribute(button, "id", "button");
+    d.append_child(root, button);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const button = document.getElementById('button'); const event = new Event('save'); let seen = false; button.addEventListener('save', received => { seen = received === event && received.type === 'save' && received.target === button && received.currentTarget === button && !received.bubbles && !received.cancelable; }); return `${button.dispatchEvent(event)},${seen}`; })()", "<test>").unwrap();
+    assert_eq!(result, "true,true");
+}
+
+#[test]
 fn query_selector_uses_the_existing_css_selector_subset_in_document_order() {
     let mut d = dom::Dom::new();
     let root = d.root();

@@ -52,7 +52,7 @@ fn begin_dispatch(ctx: *mut sys::JSContext) -> Option<DispatchGuard> {
 
 struct EventState {
     event_type: String,
-    target: dom::NodeId,
+    target: Option<dom::NodeId>,
     current_target: Option<dom::NodeId>,
     bubbles: bool,
     cancelable: bool,
@@ -109,7 +109,7 @@ unsafe fn event_node(ctx: *mut sys::JSContext, value: sys::JSValue, current: boo
     let id = if current {
         (*p).current_target
     } else {
-        Some((*p).target)
+        (*p).target
     };
     id.map(|id| {
         crate::dom_bindings::node_object(
@@ -187,6 +187,20 @@ unsafe fn getter(ctx: *mut sys::JSContext, proto: sys::JSValue, name: &str, func
     );
     sys::JS_FreeAtom(ctx, atom)
 }
+unsafe extern "C" fn event_constructor(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 1 {
+        return type_error(ctx, "event type is required");
+    }
+    let Some(kind) = read_string(ctx, *argv) else {
+        return type_error(ctx, "event type must be a string");
+    };
+    make_event(ctx, None, &kind, false, false)
+}
 pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     let rt = sys::JS_GetRuntime(ctx);
     let class_name = CString::new("Event").unwrap();
@@ -221,9 +235,28 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
             sys::JS_NewCFunction2(ctx, func, name.as_ptr(), 0, sys::JS_CFUNC_GENERIC, 0),
         );
     }
-    sys::JS_SetClassProto(ctx, id, proto)
+    sys::JS_SetClassProto(ctx, id, proto);
+    let name = CString::new("Event").unwrap();
+    let constructor = sys::JS_NewCFunction2(
+        ctx,
+        event_constructor,
+        name.as_ptr(),
+        1,
+        sys::JS_CFUNC_GENERIC,
+        0,
+    );
+    sys::JS_SetConstructorBit(ctx, constructor, true);
+    let global = sys::JS_GetGlobalObject(ctx);
+    sys::JS_SetPropertyStr(ctx, global, name.as_ptr(), constructor);
+    sys::JS_FreeValue(ctx, global);
 }
-unsafe fn make_event(ctx: *mut sys::JSContext, target: dom::NodeId, kind: &str) -> sys::JSValue {
+unsafe fn make_event(
+    ctx: *mut sys::JSContext,
+    target: Option<dom::NodeId>,
+    kind: &str,
+    bubbles: bool,
+    cancelable: bool,
+) -> sys::JSValue {
     let e = sys::JS_NewObjectClass(
         ctx,
         crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), EVENT_CLASS_KIND),
@@ -235,8 +268,8 @@ unsafe fn make_event(ctx: *mut sys::JSContext, target: dom::NodeId, kind: &str) 
         event_type: kind.into(),
         target,
         current_target: None,
-        bubbles: true,
-        cancelable: true,
+        bubbles,
+        cancelable,
         default_prevented: false,
         propagation_stopped: false,
     };
@@ -386,7 +419,7 @@ pub(crate) unsafe fn dispatch(ctx: *mut sys::JSContext, node: sys::JSValue, kind
     let Some(target_id) = crate::dom_bindings::node_id(ctx, node) else {
         return true;
     };
-    let event = make_event(ctx, target_id, kind);
+    let event = make_event(ctx, Some(target_id), kind, true, true);
     if sys::js_is_exception(&event) {
         return false;
     }
@@ -421,6 +454,56 @@ pub(crate) unsafe fn dispatch(ctx: *mut sys::JSContext, node: sys::JSValue, kind
     }
     !canceled
 }
+
+unsafe fn dispatch_existing(
+    ctx: *mut sys::JSContext,
+    node: sys::JSValue,
+    event: sys::JSValue,
+) -> bool {
+    let Some(_dispatch_guard) = begin_dispatch(ctx) else {
+        type_error(ctx, "nested event dispatch limit exceeded");
+        return false;
+    };
+    let Some(target_id) = crate::dom_bindings::node_id(ctx, node) else {
+        return true;
+    };
+    let event_state = state(ctx, event);
+    if event_state.is_null() {
+        type_error(ctx, "dispatchEvent requires an Event");
+        return false;
+    }
+    (*event_state).target = Some(target_id);
+    (*event_state).current_target = None;
+    (*event_state).propagation_stopped = false;
+    let mut current = Some(target_id);
+    let mut first_exception = None;
+    for _ in 0..MAX_BUBBLE_DEPTH {
+        let Some(id) = current else { break };
+        let p = state(ctx, event);
+        if (*p).propagation_stopped {
+            current = None;
+            break;
+        }
+        (*p).current_target = Some(id);
+        let current_node = crate::dom_bindings::node_object(
+            ctx,
+            crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), "Node"),
+            id,
+        );
+        dispatch_at(ctx, current_node, event, &mut first_exception);
+        sys::JS_FreeValue(ctx, current_node);
+        current = crate::dom_bindings::parent_node_id(ctx, id);
+    }
+    if current.is_some() {
+        type_error(ctx, "event propagation limit exceeded");
+        return false;
+    }
+    if let Some(exception) = first_exception {
+        sys::JS_Throw(ctx, exception);
+        return false;
+    }
+    !(*state(ctx, event)).default_prevented
+}
 unsafe extern "C" fn dispatch_event(
     ctx: *mut sys::JSContext,
     node: sys::JSValue,
@@ -430,10 +513,15 @@ unsafe extern "C" fn dispatch_event(
     if argc < 1 {
         return sys::js_bool(true);
     }
-    let Some(kind) = read_string(ctx, *argv) else {
-        return type_error(ctx, "event type must be a string");
+    let supplied = *argv;
+    let result = if !state(ctx, supplied).is_null() {
+        dispatch_existing(ctx, node, supplied)
+    } else {
+        let Some(kind) = read_string(ctx, supplied) else {
+            return type_error(ctx, "event type must be a string or Event");
+        };
+        dispatch(ctx, node, &kind)
     };
-    let result = dispatch(ctx, node, &kind);
     if sys::JS_HasException(ctx) {
         sys::js_exception()
     } else {

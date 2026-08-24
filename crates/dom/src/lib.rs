@@ -56,6 +56,20 @@ pub struct Dom {
     /// fires on commit — blur after the value actually moved — not on
     /// every keystroke, unlike `input`).
     focused_value_snapshot: Option<String>,
+    /// Bumped by every structural/content mutation (`append_child`,
+    /// `insert_before`, `remove_from_parent`, `remove`, `set_attribute`,
+    /// `remove_attribute`, `append_text`, `set_text_content`, `set_value`)
+    /// — deliberately *not* by `focus`/`blur`/`clear_focus`, which don't
+    /// affect anything `layout-engine` computes (no focus-ring rendering
+    /// exists). Lets a caller (`profile-worker`'s `Page::layout`) detect
+    /// "has anything relevant to layout changed since I last laid this
+    /// page out" with one cheap integer comparison instead of diffing the
+    /// whole tree — the real backing signal for incremental layout
+    /// invalidation. Wrapping add is fine: a `u64` wrapping around during
+    /// one process's lifetime is not a real scenario, and even a wrapped
+    /// value still changes on every mutation, which is all a caller
+    /// actually checks (equality, not ordering).
+    mutations: u64,
 }
 
 impl Default for Dom {
@@ -85,7 +99,15 @@ impl Dom {
             root: root_id,
             focused: None,
             focused_value_snapshot: None,
+            mutations: 0,
         }
+    }
+
+    /// See the `mutations` field's own doc — a caller compares two
+    /// snapshots of this for equality to know whether anything layout-
+    /// relevant changed in between, without diffing the tree itself.
+    pub fn mutation_count(&self) -> u64 {
+        self.mutations
     }
 
     fn insert(&mut self, data: NodeData) -> NodeId {
@@ -135,6 +157,7 @@ impl Dom {
     }
 
     pub fn append_child(&mut self, parent: NodeId, child: NodeId) {
+        self.mutations = self.mutations.wrapping_add(1);
         self.detach(child);
         if let Some(node) = self.get_mut(child) {
             node.parent = Some(parent);
@@ -150,6 +173,7 @@ impl Dom {
     /// `TreeSink::append_before_sibling`, which never calls this on a
     /// node without one.
     pub fn insert_before(&mut self, sibling: NodeId, new_node: NodeId) {
+        self.mutations = self.mutations.wrapping_add(1);
         let parent = self
             .get(sibling)
             .and_then(|n| n.parent)
@@ -173,6 +197,7 @@ impl Dom {
     /// reattached elsewhere. Use [`Dom::remove`] to actually delete a
     /// subtree instead.
     pub fn remove_from_parent(&mut self, child: NodeId) {
+        self.mutations = self.mutations.wrapping_add(1);
         self.detach(child);
     }
 
@@ -190,6 +215,7 @@ impl Dom {
 
     /// Removes a node and its whole subtree, freeing slots for reuse (generation bumped).
     pub fn remove(&mut self, id: NodeId) {
+        self.mutations = self.mutations.wrapping_add(1);
         let children = self.get(id).map(|n| n.children.clone()).unwrap_or_default();
         for child in children {
             self.remove(child);
@@ -231,6 +257,7 @@ impl Dom {
     }
 
     pub fn set_attribute(&mut self, id: NodeId, name: &str, value: &str) {
+        self.mutations = self.mutations.wrapping_add(1);
         if let Some(Node {
             data:
                 NodeData::Element {
@@ -267,6 +294,7 @@ impl Dom {
     /// its independent form value, so clearing that attribute clears the
     /// mirror as well.
     pub fn remove_attribute(&mut self, id: NodeId, name: &str) -> bool {
+        self.mutations = self.mutations.wrapping_add(1);
         if let Some(Node {
             data:
                 NodeData::Element {
@@ -291,6 +319,7 @@ impl Dom {
     /// character tokens land in the same DOM text node rather than each
     /// getting their own. No-op if `id` isn't a `Text` node.
     pub fn append_text(&mut self, id: NodeId, more: &str) {
+        self.mutations = self.mutations.wrapping_add(1);
         if let Some(Node {
             data: NodeData::Text(text),
             ..
@@ -372,6 +401,7 @@ impl Dom {
     /// unlike the pre-existing `set_text_content`. No-op on a non-`Element`
     /// node.
     pub fn set_value(&mut self, id: NodeId, value: &str) {
+        self.mutations = self.mutations.wrapping_add(1);
         if let Some(Node {
             data: NodeData::Element {
                 value: value_field, ..

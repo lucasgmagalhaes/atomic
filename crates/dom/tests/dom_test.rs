@@ -476,3 +476,35 @@ fn adopt_deep_clones_a_subtree_into_a_different_dom() {
     assert_eq!(dest.attribute(cloned, "class"), Some("changed"));
     assert_eq!(source.attribute(src_root, "class"), Some("widget"));
 }
+
+#[test]
+fn mutation_count_changes_on_structural_and_content_mutations_only() {
+    let mut dom = Dom::new();
+    let root = dom.root();
+    let el = dom.create_element("div");
+    let before_append = dom.mutation_count();
+    dom.append_child(root, el);
+    assert_ne!(dom.mutation_count(), before_append);
+
+    let before_attr = dom.mutation_count();
+    dom.set_attribute(el, "class", "x");
+    assert_ne!(dom.mutation_count(), before_attr);
+
+    let before_text = dom.mutation_count();
+    dom.set_text_content(el, "hello");
+    assert_ne!(dom.mutation_count(), before_text);
+
+    let before_remove = dom.mutation_count();
+    dom.remove(el);
+    assert_ne!(dom.mutation_count(), before_remove);
+
+    // focus/blur don't affect anything layout-engine computes - must not
+    // bump the counter, or a caller using it to skip relayout would
+    // relayout on every keystroke's focus churn for no reason.
+    let other = dom.create_element("input");
+    dom.append_child(root, other);
+    dom.focus(other);
+    let before_blur = dom.mutation_count();
+    dom.blur(other);
+    assert_eq!(dom.mutation_count(), before_blur);
+}

@@ -722,6 +722,23 @@ struct Page<'rt> {
     /// underneath it without a fresh navigation" convention its
     /// stylesheet already follows).
     images: HashMap<NodeId, Rc<DecodedImage>>,
+    /// Real incremental layout invalidation: the last computed tree, plus
+    /// the exact inputs it was computed from. `layout()` reuses it
+    /// (a clone — far cheaper than re-running `build_box_tree_with_viewport`
+    /// + text shaping/flex resolution + `layout_block` from scratch) when
+    /// none of `width`/`dom.mutation_count()`/`adopted_stylesheet_text()`
+    /// have changed since. `RefCell` because `layout()` is called from
+    /// both `&self` methods (`content_height`, `hit_test_at`) and `&mut
+    /// self` ones (`render`) — a shared cache needs interior mutability
+    /// either way. `None` before the first `layout()` call.
+    layout_cache: std::cell::RefCell<Option<LayoutCache>>,
+}
+
+struct LayoutCache {
+    width: u32,
+    dom_mutations: u64,
+    adopted_text: String,
+    tree: LayoutBox,
 }
 
 impl<'rt> Page<'rt> {
@@ -785,7 +802,7 @@ impl<'rt> Page<'rt> {
         // real browser's own ordering (see `Context::dispatch_lifecycle_events`'s
         // doc for the scope this crate cuts relative to the full spec).
         ctx.dispatch_lifecycle_events();
-        Page { ctx, html_el, sheet, images }
+        Page { ctx, html_el, sheet, images, layout_cache: std::cell::RefCell::new(None) }
     }
 
     /// Builds and lays out this page's real box tree against `width` —
@@ -798,15 +815,24 @@ impl<'rt> Page<'rt> {
     /// box-tree-construction step itself fails.
     fn layout(&self, width: u32) -> Option<LayoutBox> {
         let dom = self.ctx.dom()?;
+        let dom_mutations = dom.mutation_count();
         // Real `document.adoptedStyleSheets` mutation support (see
         // `js_runtime::cssom_stylesheet`): re-read every adopted sheet's
-        // rules and merge them on top of the page's own base stylesheet
-        // every layout pass, since a script can call `insertRule`/
-        // `deleteRule` at any time between renders. Cloning `self.sheet`
-        // rather than mutating it in place keeps the base stylesheet
-        // (built once at `load()` time) untouched if a later render has
-        // nothing adopted anymore.
+        // rules so a script's `insertRule`/`deleteRule` (which don't bump
+        // `dom.mutation_count()` - they touch a `CSSStyleSheet`, not the
+        // DOM) still invalidates the cache below.
         let adopted_text = self.ctx.adopted_stylesheet_text();
+
+        if let Some(cached) = self.layout_cache.borrow().as_ref() {
+            if cached.width == width && cached.dom_mutations == dom_mutations && cached.adopted_text == adopted_text {
+                return Some(cached.tree.clone());
+            }
+        }
+
+        // Merges the page's own base stylesheet (built once at `load()`
+        // time) with whatever's currently adopted - cloning rather than
+        // mutating `self.sheet` in place keeps the base untouched if a
+        // later layout has nothing adopted anymore.
         let sheet = if adopted_text.is_empty() {
             std::borrow::Cow::Borrowed(&self.sheet)
         } else {
@@ -817,6 +843,8 @@ impl<'rt> Page<'rt> {
         let mut tree = build_box_tree_with_viewport(dom, self.html_el, &sheet, width as f64)?;
         apply_image_sizes(dom, &mut tree, &self.images);
         layout_block(&mut tree, width as f64, 0.0, 0.0);
+
+        *self.layout_cache.borrow_mut() = Some(LayoutCache { width, dom_mutations, adopted_text, tree: tree.clone() });
         Some(tree)
     }
 

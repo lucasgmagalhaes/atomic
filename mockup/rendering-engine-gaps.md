@@ -9,11 +9,9 @@ Convenção: **REAL** = implementado e testado. **FALTANDO** = confirmado ausent
 ### Seletores (`parser.rs`)
 - REAL: tipo (`div`), id (`#foo`), classe (`.foo`), universal (`*`) — `parser.rs:420-452`
 - REAL: combinador descendente (espaço) — `parser.rs:405-418`
-- FALTANDO: combinador filho `>`
-- FALTANDO: combinadores irmão `+`/`~`
-- FALTANDO: pseudo-classes (`:hover`, `:first-child`, `:nth-child`, `:not()`, etc.) — lexer não tokeniza nada além do `:` já usado como separador `property:value`
+- **Fechado desde então (commit `dd8467c`, não datado neste doc originalmente — corrigido 2026-08-25):** combinador filho `>`, combinadores irmão `+`/`~` (encadeáveis), seletores de atributo (`[attr]`/`[attr=val]`), e pseudo-classes estruturais `:first-child`/`:last-child`/`:nth-child()` (inteiro, `odd`/`even`, e a fórmula geral `An+B`) — todos reais e testados (`crates/css/tests/selectors_test.rs`). `:hover`/`:focus` parseiam (contam pra especificidade) mas nunca casam — documentado, já que não existe estado de interação nenhum pra eles refletirem.
+- FALTANDO: `:not()`
 - FALTANDO: pseudo-elementos (`::before`, `::after`)
-- FALTANDO: seletores de atributo (`[attr=val]`, `[attr~=val]`, ...) — tokens `[`/`]` nem existem no lexer
 
 ### At-rules
 - REAL: `@import` (URL + media condicional opcional) — `parser.rs:247-288`
@@ -130,7 +128,13 @@ Consequência prática: um humano não consegue clicar num link ou digitar num c
 
 ## 7. Scroll
 
-**Gap total.** `overflow` não é propriedade de `ComputedStyle`. Sem clipping, sem viewport scrollável maior que o pane, sem barra de rolagem, sem `scrollTop`/`scrollIntoView`. Documentado só em comentário (`display_list.rs:6`), sem nenhum código de suporte.
+**Parcialmente fechado (2026-08-25), real: scroll de viewport (a página inteira, não containers internos com `overflow`).** `profile-worker` ganhou um comando `SCROLL <dy>` real (`crates/profile/src/bin/profile_worker.rs`): um `scroll_top: f64` por página (resetado a `0` em `RELOAD`/`NAVIGATE`, igual `focused_id`), clampado em `[0, content_height - viewport_height]` via `Page::content_height` (a altura real do box raiz já laid-out — layout em si sempre calcula o conteúdo inteiro, sem cortar no viewport; scroll é só uma janela de pintura sobre isso). `Page::render` desloca cada `Rect`/`ImageQuad`/`PositionedGlyph` já pintado por `-scroll_top` antes de compositar (os três compositors — `render_to_rgba`/`composite_images`/`composite_glyphs` — já clipavam silenciosamente qualquer coisa fora de `[0, height)`, então não precisou de clipping novo); `Page::hit_test_at` soma `scroll_top` de volta em `y` antes de testar, então `CLICK_AT` continua acertando o elemento real sob o cursor mesmo com a página rolada. `Page::render`/`hit_test_at` agora passam por um `Page::layout` único (mesmo que a sessão anterior já unificou pra imagens), garantindo que pintura e hit-test concordam sobre a mesma árvore. `profile::Profile::scroll_by(dy)` expõe isso pro host; `apps/shell`'s grade de panes agora rota o scroll real do mouse (`egui`'s `raw_scroll_delta`, sinal invertido pra bater com a convenção do protocolo) pro pane que está sob o cursor (`hovered()`, não foco — igual um browser real rola o que está sob o mouse).
+
+- FALTANDO: `overflow` como propriedade de `ComputedStyle` — scroll continua sendo só do viewport/documento inteiro, um `<div style="overflow:auto">` interno não tem scroll próprio (precisaria virar sua própria "janela de pintura" recursiva, não só uma no nível da página)
+- FALTANDO: barra de rolagem visual (nenhum indicador de posição/tamanho de scroll é desenhado)
+- FALTANDO: `scrollTop`/`scrollLeft`/`scrollIntoView`/`scroll()` como API JS em `document`/`Node` — o scroll só existe no lado do host (protocolo `SCROLL`), nada em `js-runtime` expõe isso pra um script da própria página ler ou setar
+- FALTANDO: scroll horizontal — o protocolo e o clamping só cobrem o eixo vertical, e o box model deste engine não tem noção de conteúdo mais largo que o container de qualquer forma
+- FALTANDO: scroll suave/momentum — cada `SCROLL` aplica o delta e repinta imediatamente, sem animação
 
 ## 8. Formulários / elementos de input
 

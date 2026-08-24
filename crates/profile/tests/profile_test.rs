@@ -350,6 +350,127 @@ fn navigate_with_an_unfetchable_img_src_still_renders_the_rest_of_the_page() {
 }
 
 #[test]
+fn scroll_by_shifts_the_painted_viewport_through_taller_content() {
+    let html = r#"<style>#a { background-color: #ff0000; width: 100px; height: 150px; } #b { background-color: #0000ff; width: 100px; height: 150px; }</style><div id="a"></div><div id="b"></div>"#;
+    let addr = serve_html_once(html);
+    let page_url = format!("http://{addr}/");
+
+    let name = unique_shmem_name("scroll");
+    let mut profile = Profile::spawn(worker_path(), &name, 100, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let result = profile.navigate(&page_url).expect("protocol should not fail");
+    assert!(result.is_ok(), "navigate should succeed: {result:?}");
+
+    let before = profile.latest_frame().unwrap();
+    assert_eq!(&before[0..4], &[255, 0, 0, 255], "unscrolled viewport should show #a (red) first, got {:?}", &before[0..4]);
+
+    let scroll_result = profile.scroll_by(150.0).expect("protocol should not fail");
+    assert!(scroll_result.is_ok(), "scroll should succeed: {scroll_result:?}");
+
+    let after = profile.latest_frame().unwrap();
+    assert_eq!(
+        &after[0..4],
+        &[0, 0, 255, 255],
+        "scrolling down by #a's own height should bring #b (blue) to the top of the viewport, got {:?}",
+        &after[0..4]
+    );
+
+    // A huge further delta should clamp at the real content height (still
+    // #b, not scrolled past into empty/background space).
+    let clamp_result = profile.scroll_by(10_000.0).expect("protocol should not fail");
+    assert!(clamp_result.is_ok(), "scroll should succeed: {clamp_result:?}");
+    let clamped = profile.latest_frame().unwrap();
+    assert_eq!(
+        &clamped[0..4],
+        &[0, 0, 255, 255],
+        "scrolling far past the content should clamp at the bottom, not reveal empty space, got {:?}",
+        &clamped[0..4]
+    );
+
+    profile.quit();
+}
+
+#[test]
+fn scroll_by_a_negative_delta_clamps_back_to_the_top() {
+    let html = r#"<style>#a { background-color: #ff0000; width: 100px; height: 150px; } #b { background-color: #0000ff; width: 100px; height: 150px; }</style><div id="a"></div><div id="b"></div>"#;
+    let addr = serve_html_once(html);
+    let page_url = format!("http://{addr}/");
+
+    let name = unique_shmem_name("scroll-clamp-top");
+    let mut profile = Profile::spawn(worker_path(), &name, 100, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let result = profile.navigate(&page_url).expect("protocol should not fail");
+    assert!(result.is_ok(), "navigate should succeed: {result:?}");
+
+    let _ = profile.scroll_by(150.0).expect("protocol should not fail");
+    let scroll_result = profile.scroll_by(-10_000.0).expect("protocol should not fail");
+    assert!(scroll_result.is_ok(), "scroll should succeed: {scroll_result:?}");
+
+    let pixels = profile.latest_frame().unwrap();
+    assert_eq!(
+        &pixels[0..4],
+        &[255, 0, 0, 255],
+        "a large negative scroll should clamp back to the real top (#a, red), not go negative, got {:?}",
+        &pixels[0..4]
+    );
+
+    profile.quit();
+}
+
+#[test]
+fn reload_resets_scroll_to_the_top() {
+    let html = r#"<style>#a { background-color: #ff0000; width: 100px; height: 150px; } #b { background-color: #0000ff; width: 100px; height: 150px; }</style><div id="a"></div><div id="b"></div>"#;
+    let addr = serve_html_once(html);
+    let page_url = format!("http://{addr}/");
+
+    let name = unique_shmem_name("scroll-reload-reset");
+    let mut profile = Profile::spawn(worker_path(), &name, 100, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let result = profile.navigate(&page_url).expect("protocol should not fail");
+    assert!(result.is_ok(), "navigate should succeed: {result:?}");
+    let _ = profile.scroll_by(150.0).expect("protocol should not fail");
+
+    profile.reload().expect("protocol should not fail");
+
+    let pixels = profile.latest_frame().unwrap();
+    assert_eq!(
+        &pixels[0..4],
+        &[255, 0, 0, 255],
+        "a fresh page (post-reload) should always start scrolled to the top, got {:?}",
+        &pixels[0..4]
+    );
+
+    profile.quit();
+}
+
+#[test]
+fn click_at_hit_tests_against_the_scrolled_document_not_the_pre_scroll_one() {
+    let html = r#"<style>#a { background-color: #ff0000; width: 100px; height: 150px; } #b { background-color: #0000ff; width: 100px; height: 150px; }</style><div id="a"></div><div id="b"></div>"#;
+    let addr = serve_html_once(html);
+    let page_url = format!("http://{addr}/");
+
+    let name = unique_shmem_name("scroll-hit-test");
+    let mut profile = Profile::spawn(worker_path(), &name, 100, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let result = profile.navigate(&page_url).expect("protocol should not fail");
+    assert!(result.is_ok(), "navigate should succeed: {result:?}");
+    let _ = profile.scroll_by(150.0).expect("protocol should not fail");
+
+    // After scrolling by #a's own height, on-screen (0,0) is #b's own
+    // top-left in document space - a real hit test must add the scroll
+    // offset back in to land on #b, not (incorrectly) on whatever was at
+    // document-space (0,0) before any scroll happened (#a).
+    let click_result = profile.click_at(10.0, 10.0).expect("protocol should not fail");
+    assert!(click_result.is_ok(), "click should land on a real id-addressable element: {click_result:?}");
+
+    profile.quit();
+}
+
+#[test]
 fn navigate_resolves_a_relative_link_href_against_the_page_url() {
     let html = r#"<div id="box">hi</div><link rel="stylesheet" href="style.css">"#;
     let css = "#box { background-color: #0000ff; width: 300px; height: 150px; }".to_string();

@@ -78,6 +78,13 @@
 //!   `FILLED`/`ERROR <message>`. `value` may not contain a newline (this
 //!   protocol is newline-delimited) - `profile::Profile::fill` rejects
 //!   that before it would corrupt the stream.
+//! - `SCROLL <dy>` -> real viewport scroll: shifts the page's scroll
+//!   offset by `dy` pixels (positive = down), clamped to
+//!   `[0, content_height - viewport_height]` (`0` if the page is shorter
+//!   than the viewport) - see `Page::render`/`hit_test_at`'s own docs for
+//!   how painting/hit-testing account for it. Replies `SCROLLED`, or
+//!   `ERROR <message>` if `dy` doesn't parse as a number. Reset to `0` by
+//!   `RELOAD`/`NAVIGATE`, same as `focused_id`. No horizontal scroll.
 //! - `QUIT` -> exits cleanly
 //! - anything else -> ignored
 use std::collections::HashMap;
@@ -91,8 +98,8 @@ use css::{parse_stylesheet, Stylesheet};
 use dom::{Dom, NodeData, NodeId};
 use image_decode::DecodedImage;
 use js_runtime::{Context, Runtime};
-use layout_engine::{apply_image_sizes, build_box_tree_with_viewport, layout_block, LayoutBox};
-use render::{build_display_list, build_glyph_list, build_image_list, composite_glyphs, composite_images, GpuRenderer};
+use layout_engine::{apply_image_sizes, build_box_tree_with_viewport, layout_block, LayoutBox, PositionedGlyph};
+use render::{build_display_list, build_glyph_list, build_image_list, composite_glyphs, composite_images, GpuRenderer, ImageQuad, Rect};
 
 const TARGET_FPS: u32 = 60;
 const FRAME_INTERVAL: Duration = Duration::from_nanos(1_000_000_000 / TARGET_FPS as u64);
@@ -652,6 +659,16 @@ impl<'rt> Page<'rt> {
         Some(tree)
     }
 
+    /// This page's real total content height at `width` — the root box's
+    /// own laid-out height, which already includes every descendant
+    /// (block layout stacks children downward with no clamping to any
+    /// viewport). Used to clamp `SCROLL`'s offset to real content, not an
+    /// arbitrary range. `0.0` if layout itself fails (same "nothing to
+    /// scroll" outcome as a page shorter than its viewport).
+    fn content_height(&self, width: u32) -> f64 {
+        self.layout(width).map(|tree| tree.dimensions.height).unwrap_or(0.0)
+    }
+
     /// Re-layouts and re-rasterizes from the DOM's *current* state (which
     /// may have just been mutated by a JS timer callback) against an
     /// already-initialized `renderer` — creating a `GpuRenderer` opens a
@@ -663,12 +680,27 @@ impl<'rt> Page<'rt> {
     /// order (background, then replaced content, then inline text) this
     /// worker's existing two-pass (GPU rects, then CPU glyphs) pipeline
     /// can give without a bigger repaint-ordering rework.
-    fn render(&self, renderer: &GpuRenderer, width: u32, height: u32) -> Vec<u8> {
+    ///
+    /// `scroll_top` is a real viewport scroll offset (see the `SCROLL`
+    /// command's own doc): every painted rect/image/glyph is shifted up
+    /// by this many pixels before compositing, so what's actually visible
+    /// in `[0, height)` is the document's `[scroll_top, scroll_top +
+    /// height)` slice — layout itself is unaffected (boxes keep their
+    /// real absolute document-space positions; only the paint step
+    /// windows into them), which is also why `build_display_list`/
+    /// `build_image_list`/`build_glyph_list` don't need a `scroll_top`
+    /// parameter of their own. `render`/`gpu`/`text`'s own compositors
+    /// already clip anything outside `[0, height)` silently (real
+    /// clipping, not new for this), so a shifted rect above or below the
+    /// viewport is simply not drawn - no separate clip step needed here.
+    fn render(&self, renderer: &GpuRenderer, width: u32, height: u32, scroll_top: f64) -> Vec<u8> {
         let tree = self.layout(width).expect("parsed HTML always produces a box");
+        let offset = scroll_top as f32;
 
-        let rects = build_display_list(&tree);
-        let images = build_image_list(&tree);
-        let glyphs = build_glyph_list(&tree);
+        let rects: Vec<Rect> = build_display_list(&tree).into_iter().map(|r| Rect { y: r.y - offset, ..r }).collect();
+        let images: Vec<ImageQuad> = build_image_list(&tree).into_iter().map(|q| ImageQuad { y: q.y - offset, ..q }).collect();
+        let glyphs: Vec<PositionedGlyph> =
+            build_glyph_list(&tree).into_iter().map(|g| PositionedGlyph { y: g.y - scroll_top as i32, ..g }).collect();
 
         let mut pixels = renderer.render_to_rgba(&rects, width, height, [0.08, 0.09, 0.13, 1.0]);
         composite_images(&mut pixels, width, height, &images);
@@ -679,15 +711,20 @@ impl<'rt> Page<'rt> {
     /// Real coordinate-to-DOM-node hit test — lays out the same box tree
     /// `render` does (via `self.layout`, against `width`, the pane's own
     /// real frame width, so the caller's `(x, y)` must already be in that
-    /// same pixel space) and walks it via `layout_engine::hit_test`.
-    /// `None` covers both "point is outside every box" and "the parse/
-    /// layout step itself failed" — a caller can't distinguish those from
-    /// this return value alone, matching this method's only real use
-    /// (`CLICK_AT`, where both cases report the same "nothing there"
-    /// outcome anyway).
-    fn hit_test_at(&self, width: u32, x: f64, y: f64) -> Option<NodeId> {
+    /// same on-screen pixel space) and walks it via
+    /// `layout_engine::hit_test`. `scroll_top` converts `y` from that
+    /// on-screen space back to the document's own absolute space (the
+    /// inverse of the shift `render` applies when painting) before
+    /// hit-testing, so a click against a scrolled page still lands on the
+    /// real element under the cursor, not whatever was there before any
+    /// `SCROLL`. `None` covers both "point is outside every box" and "the
+    /// parse/layout step itself failed" — a caller can't distinguish
+    /// those from this return value alone, matching this method's only
+    /// real use (`CLICK_AT`, where both cases report the same "nothing
+    /// there" outcome anyway).
+    fn hit_test_at(&self, width: u32, x: f64, y: f64, scroll_top: f64) -> Option<NodeId> {
         let tree = self.layout(width)?;
-        layout_engine::hit_test(&tree, x, y)
+        layout_engine::hit_test(&tree, x, y + scroll_top)
     }
 }
 
@@ -723,8 +760,8 @@ fn nearest_id_ancestor(dom: &Dom, node: NodeId) -> Option<String> {
 /// when a click lands somewhere non-focusable). Still no tab order
 /// (`Tab`/`Shift+Tab` moving focus) - only click-driven and JS-driven
 /// (`.focus()`/`.blur()`) focus changes exist.
-fn dispatch_click_at(page: &mut Page, width: u32, x: f64, y: f64) -> Result<Option<String>, String> {
-    let node = page.hit_test_at(width, x, y).ok_or("no element at that point")?;
+fn dispatch_click_at(page: &mut Page, width: u32, x: f64, y: f64, scroll_top: f64) -> Result<Option<String>, String> {
+    let node = page.hit_test_at(width, x, y, scroll_top).ok_or("no element at that point")?;
     let click_id = {
         let dom_ref = page.ctx.dom().ok_or("no DOM available")?;
         nearest_id_ancestor(dom_ref, node).ok_or("no id-addressable element at or above that point")?
@@ -865,7 +902,7 @@ fn main() {
     };
 
     let mut writer = ipc::FrameWriter::new(shmem_name, width, height).expect("failed to create/open shared memory");
-    writer.publish(&page.render(&renderer, width, height));
+    writer.publish(&page.render(&renderer, width, height, 0.0));
 
     // Commands arrive on a dedicated thread so a slow/absent stdin stream
     // never blocks the render loop below - `try_recv` drains whatever's
@@ -904,6 +941,11 @@ fn main() {
     // fresh DOM the old id might not even exist in anymore (a fresh
     // `dom::Dom` starts with no focus of its own either).
     let mut focused_id: Option<String> = None;
+    // Real viewport scroll offset (see `SCROLL`'s own handling below and
+    // `Page::render`/`hit_test_at`'s docs) - reset to `0.0` on
+    // `RELOAD`/`NAVIGATE` same as `focused_id`, since a fresh page always
+    // starts scrolled to the top.
+    let mut scroll_top: f64 = 0.0;
 
     'render_loop: loop {
         while let Ok(line) = cmd_rx.try_recv() {
@@ -924,7 +966,8 @@ fn main() {
                 let (loaded, error) = load_source(&runtime, &current_source, width as f64, &storage_root, proxy.as_ref(), dns_server);
                 page = loaded;
                 focused_id = None;
-                writer.publish(&page.render(&renderer, width, height));
+                scroll_top = 0.0;
+                writer.publish(&page.render(&renderer, width, height, scroll_top));
                 match error {
                     Some(message) => {
                         let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
@@ -939,7 +982,8 @@ fn main() {
                 let (loaded, error) = load_source(&runtime, &current_source, width as f64, &storage_root, proxy.as_ref(), dns_server);
                 page = loaded;
                 focused_id = None;
-                writer.publish(&page.render(&renderer, width, height));
+                scroll_top = 0.0;
+                writer.publish(&page.render(&renderer, width, height, scroll_top));
                 match error {
                     Some(message) => {
                         let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
@@ -951,7 +995,7 @@ fn main() {
                 let _ = stdout.flush();
             } else if let Some(rest) = line.strip_prefix("CLICK ") {
                 let result = dispatch_click(&page.ctx, rest.trim());
-                writer.publish(&page.render(&renderer, width, height));
+                writer.publish(&page.render(&renderer, width, height, scroll_top));
                 match result {
                     Ok(()) => {
                         let _ = writeln!(stdout, "CLICKED");
@@ -966,8 +1010,8 @@ fn main() {
                 let coords = parts.next().zip(parts.next()).and_then(|(x, y)| Some((x.parse::<f64>().ok()?, y.parse::<f64>().ok()?)));
                 match coords {
                     Some((x, y)) => {
-                        let result = dispatch_click_at(&mut page, width, x, y);
-                        writer.publish(&page.render(&renderer, width, height));
+                        let result = dispatch_click_at(&mut page, width, x, y, scroll_top);
+                        writer.publish(&page.render(&renderer, width, height, scroll_top));
                         match result {
                             Ok(focus) => {
                                 focused_id = focus;
@@ -987,7 +1031,7 @@ fn main() {
                 match &focused_id {
                     Some(id) => {
                         let result = type_key(&page.ctx, id, key);
-                        writer.publish(&page.render(&renderer, width, height));
+                        writer.publish(&page.render(&renderer, width, height, scroll_top));
                         match result {
                             Ok(()) => {
                                 let _ = writeln!(stdout, "TYPED");
@@ -1007,13 +1051,26 @@ fn main() {
                 let selector = parts.next().unwrap_or("").trim();
                 let value = parts.next().unwrap_or("");
                 let result = fill_element(&page.ctx, selector, value);
-                writer.publish(&page.render(&renderer, width, height));
+                writer.publish(&page.render(&renderer, width, height, scroll_top));
                 match result {
                     Ok(()) => {
                         let _ = writeln!(stdout, "FILLED");
                     }
                     Err(message) => {
                         let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
+                    }
+                }
+                let _ = stdout.flush();
+            } else if let Some(rest) = line.strip_prefix("SCROLL ") {
+                match rest.trim().parse::<f64>() {
+                    Ok(dy) => {
+                        let max_scroll = (page.content_height(width) - height as f64).max(0.0);
+                        scroll_top = (scroll_top + dy).clamp(0.0, max_scroll);
+                        writer.publish(&page.render(&renderer, width, height, scroll_top));
+                        let _ = writeln!(stdout, "SCROLLED");
+                    }
+                    Err(_) => {
+                        let _ = writeln!(stdout, "ERROR SCROLL requires a numeric delta");
                     }
                 }
                 let _ = stdout.flush();
@@ -1044,7 +1101,7 @@ fn main() {
         }
 
         page.ctx.run_pending_timers();
-        writer.publish(&page.render(&renderer, width, height));
+        writer.publish(&page.render(&renderer, width, height, scroll_top));
 
         // Fixed-cadence scheduling, not `sleep(frame_interval)` in a loop -
         // that drifts by however long each tick's own work took. If a tick

@@ -85,6 +85,13 @@ pub const JS_CFUNC_GETTER_MAGIC: c_int = 10;
 /// `JSCFunctionEnum::JS_CFUNC_setter` — see [`JS_CFUNC_GETTER`]; dispatches
 /// to `(ctx, this_val, value) -> JSValue`.
 pub const JS_CFUNC_SETTER: c_int = 9;
+/// `JSCFunctionEnum::JS_CFUNC_setter_magic` — a `(ctx, this_val, value,
+/// magic) -> JSValue` setter, same magic-sharing idea as
+/// [`JS_CFUNC_GETTER_MAGIC`]/[`JS_CFUNC_GENERIC_MAGIC`] (one native
+/// implementation serving several JS-visible accessors that only differ by
+/// which property they act on, e.g. `element.style`'s per-property
+/// setters).
+pub const JS_CFUNC_SETTER_MAGIC: c_int = 11;
 
 pub const JS_PROP_CONFIGURABLE: c_int = 1 << 0;
 pub const JS_PROP_ENUMERABLE: c_int = 1 << 2;

@@ -124,6 +124,7 @@ unsafe fn evict_node_object(ctx: *mut sys::JSContext, id: dom::NodeId) {
     let cached = ATTRS_OBJECTS.with(|reg| reg.borrow_mut().get_mut(&(ctx as usize)).and_then(|nodes| nodes.remove(&id)));
     if let Some(object) = cached { sys::JS_FreeValue(ctx, object); }
     ATTRS_LENGTHS.with(|reg| { if let Some(nodes) = reg.borrow_mut().get_mut(&(ctx as usize)) { nodes.remove(&id); } });
+    crate::css_style::evict(ctx, id);
 }
 
 /// Frees every cached `Node` object for `ctx` — must run before
@@ -148,6 +149,7 @@ pub(crate) unsafe fn cleanup(ctx: *mut sys::JSContext) {
         for (_, obj) in objects { sys::JS_FreeValue(ctx, obj); }
     }
     ATTRS_LENGTHS.with(|reg| { reg.borrow_mut().remove(&(ctx as usize)); });
+    crate::css_style::cleanup(ctx);
 }
 
 /// See `crate::class_registry` - one registry entry per `JSRuntime`, not
@@ -1852,6 +1854,7 @@ unsafe fn ensure_node_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
     define_class_list(ctx, proto);
     define_dataset(ctx, proto);
     define_attributes_collection(ctx, proto);
+    crate::css_style::define_style(ctx, proto);
     define_navigation(ctx, proto);
     define_value(ctx, proto);
     define_inner_outer_html(ctx, proto);

@@ -12,6 +12,7 @@ mod blob;
 mod class_registry;
 mod clipboard;
 mod crypto;
+mod css_style;
 mod document;
 mod document_cookie;
 mod dom_bindings;

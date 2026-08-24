@@ -223,8 +223,9 @@ fn focus_and_blur_track_active_element() {
     dom.focus(input);
     assert_eq!(dom.active_element(), Some(input));
 
-    dom.blur(input);
+    let result = dom.blur(input);
     assert_eq!(dom.active_element(), None);
+    assert_eq!(result, Some(false));
 }
 
 #[test]
@@ -234,9 +235,25 @@ fn blur_is_a_no_op_for_a_node_that_is_not_the_focused_one() {
     let b = dom.create_element("input");
 
     dom.focus(a);
-    dom.blur(b);
+    let result = dom.blur(b);
 
     assert_eq!(dom.active_element(), Some(a));
+    assert_eq!(result, None);
+}
+
+#[test]
+fn blur_reports_whether_value_changed_since_focus() {
+    let mut dom = Dom::new();
+    let input = dom.create_element("input");
+
+    dom.focus(input);
+    dom.set_value(input, "typed");
+    let changed = dom.blur(input);
+    assert_eq!(changed, Some(true));
+
+    dom.focus(input);
+    let unchanged = dom.blur(input);
+    assert_eq!(unchanged, Some(false));
 }
 
 #[test]

@@ -50,6 +50,12 @@ pub struct Dom {
     /// `tabindex` model yet: this only tracks *which* node is focused, not
     /// how focus moves between them.
     focused: Option<NodeId>,
+    /// `.value` at the moment [`Dom::focus`] was called on `focused`, kept
+    /// only so [`Dom::blur`]/[`Dom::clear_focus`] can tell a caller whether
+    /// a real `"change"` event should fire (real DOM semantics: `change`
+    /// fires on commit — blur after the value actually moved — not on
+    /// every keystroke, unlike `input`).
+    focused_value_snapshot: Option<String>,
 }
 
 impl Default for Dom {
@@ -78,6 +84,7 @@ impl Dom {
             free: vec![],
             root: root_id,
             focused: None,
+            focused_value_snapshot: None,
         }
     }
 
@@ -182,6 +189,7 @@ impl Dom {
         }
         if self.focused == Some(id) {
             self.focused = None;
+            self.focused_value_snapshot = None;
         }
         self.detach(id);
         if id.index < self.slots.len() && self.slots[id.index].generation == id.generation {
@@ -340,28 +348,47 @@ impl Dom {
     /// (see [`Dom::active_element`]). No-op if `id` doesn't exist. No real
     /// tab order/`tabindex` model: this only records *which* node is
     /// focused, a caller (JS `.focus()`, or `profile-worker`'s coordinate
-    /// click routing) decides *when*.
+    /// click routing) decides *when*. Also snapshots the node's current
+    /// `.value`, so a later [`Dom::blur`]/[`Dom::clear_focus`] can tell
+    /// whether it moved (real `"change"`-event semantics).
     pub fn focus(&mut self, id: NodeId) {
         if self.get(id).is_some() {
             self.focused = Some(id);
+            self.focused_value_snapshot = Some(self.value(id));
         }
     }
 
     /// Real `Node.prototype.blur()` — clears focus only if `id` is the
     /// currently focused node (matches the real DOM: blurring an element
-    /// that isn't focused is a no-op).
-    pub fn blur(&mut self, id: NodeId) {
+    /// that isn't focused is a no-op). Returns `None` for that no-op case
+    /// (a caller uses this to know a real `"blur"` event must *not*
+    /// dispatch — the real DOM doesn't fire one for an already-unfocused
+    /// element), `Some(changed)` when it actually blurred, where `changed`
+    /// is whether `.value` moved since the matching [`Dom::focus`] call
+    /// (a caller uses this to decide whether to also dispatch a real
+    /// `"change"` event).
+    pub fn blur(&mut self, id: NodeId) -> Option<bool> {
         if self.focused == Some(id) {
+            let changed = self.focused_value_snapshot.as_deref() != Some(self.value(id).as_str());
             self.focused = None;
+            self.focused_value_snapshot = None;
+            Some(changed)
+        } else {
+            None
         }
     }
 
     /// Clears focus unconditionally, regardless of which node (if any) is
     /// currently focused — used when a click lands on a non-focusable
     /// element, matching a real browser blurring whatever was focused
-    /// before.
-    pub fn clear_focus(&mut self) {
+    /// before. Returns the node that was blurred, if any, and whether its
+    /// `.value` changed since it was focused (see [`Dom::blur`]).
+    pub fn clear_focus(&mut self) -> Option<(NodeId, bool)> {
+        let id = self.focused?;
+        let changed = self.focused_value_snapshot.as_deref() != Some(self.value(id).as_str());
         self.focused = None;
+        self.focused_value_snapshot = None;
+        Some((id, changed))
     }
 
     /// Real `document.activeElement` read side. Filters out a stale id

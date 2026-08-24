@@ -222,9 +222,13 @@ impl<'rt> Context<'rt> {
     }
 
     /// Mutable counterpart to [`Context::dom`] — lets a host mutate the DOM
-    /// directly from Rust (not through `eval`), e.g. `profile-worker`
-    /// setting real focus state (`dom::Dom::focus`/`clear_focus`) from a
-    /// coordinate click before any JS runs.
+    /// directly from Rust (not through `eval`). Not currently used by
+    /// `profile-worker`'s own focus handling: that goes through the real
+    /// `.focus()`/`.blur()` JS bindings instead (`focus_element`/
+    /// `blur_element` in `profile_worker.rs`), so the real `"focus"`/
+    /// `"blur"`/`"change"` events dispatch too, which a direct
+    /// `dom::Dom::focus`/`blur` call bypasses. Kept for a host that
+    /// genuinely needs to mutate DOM state without touching JS at all.
     pub fn dom_mut(&mut self) -> Option<&mut dom::Dom> {
         self._host_state.as_mut().map(|s| &mut s.dom)
     }

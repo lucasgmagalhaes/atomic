@@ -87,6 +87,30 @@ unsafe extern "C" fn remove_event_listener(
     sys::js_undefined()
 }
 
+/// Runs whatever listener is registered for `event_type` on `this_val`,
+/// same lookup/call the JS-facing `dispatchEvent(type)` binding does.
+/// Shared by that binding and by host-Rust callers that need to fire a
+/// real event without going through a JS-eval'd `el.dispatchEvent(...)`
+/// call — e.g. `dom_bindings`'s native `.focus()`/`.blur()`/`.value =`
+/// implementations, which already hold `ctx`/`this_val` in scope. Returns
+/// whether a listener was found and called.
+pub(crate) unsafe fn dispatch(ctx: *mut sys::JSContext, this_val: sys::JSValue, event_type: &str) -> bool {
+    let listeners = get_or_create_listeners(ctx, this_val);
+    let type_name = CString::new(event_type).unwrap_or_default();
+    let listener = sys::JS_GetPropertyStr(ctx, listeners, type_name.as_ptr());
+    sys::JS_FreeValue(ctx, listeners);
+
+    if listener.tag == sys::JS_TAG_UNDEFINED {
+        sys::JS_FreeValue(ctx, listener);
+        return false;
+    }
+
+    let result = sys::JS_Call(ctx, listener, this_val, 0, std::ptr::null_mut());
+    sys::JS_FreeValue(ctx, result);
+    sys::JS_FreeValue(ctx, listener);
+    true
+}
+
 unsafe extern "C" fn dispatch_event(
     ctx: *mut sys::JSContext,
     this_val: sys::JSValue,
@@ -100,20 +124,7 @@ unsafe extern "C" fn dispatch_event(
         return sys::js_bool(false);
     };
 
-    let listeners = get_or_create_listeners(ctx, this_val);
-    let type_name = CString::new(event_type).unwrap_or_default();
-    let listener = sys::JS_GetPropertyStr(ctx, listeners, type_name.as_ptr());
-    sys::JS_FreeValue(ctx, listeners);
-
-    if listener.tag == sys::JS_TAG_UNDEFINED {
-        sys::JS_FreeValue(ctx, listener);
-        return sys::js_bool(false);
-    }
-
-    let result = sys::JS_Call(ctx, listener, this_val, 0, std::ptr::null_mut());
-    sys::JS_FreeValue(ctx, result);
-    sys::JS_FreeValue(ctx, listener);
-    sys::js_bool(true)
+    sys::js_bool(dispatch(ctx, this_val, &event_type))
 }
 
 /// Adds `addEventListener`/`removeEventListener`/`dispatchEvent` to

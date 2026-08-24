@@ -1109,6 +1109,99 @@ unsafe extern "C" fn node_query_selector_all(
     query_selector_all(ctx, start, &selector, false)
 }
 
+fn node_matches_selector(
+    dom: &dom::Dom,
+    id: dom::NodeId,
+    selector: &str,
+) -> Result<bool, &'static str> {
+    if selector.is_empty() || selector.len() > MAX_SELECTOR_LENGTH {
+        return Err("selector is empty or exceeds the maximum length");
+    }
+    if !matches!(
+        dom.get(id).map(|node| &node.data),
+        Some(dom::NodeData::Element { .. })
+    ) {
+        return Ok(false);
+    }
+    let stylesheet = css::parse_stylesheet(&format!("{selector} {{}}"));
+    let Some(rule) = stylesheet.rules.first() else {
+        return Err("unsupported selector syntax");
+    };
+    if stylesheet.rules.len() != 1 || rule.selectors.0.is_empty() {
+        return Err("unsupported selector syntax");
+    }
+    let chain = selector_chain(dom, id).ok_or("invalid DOM ancestry")?;
+    Ok(rule
+        .selectors
+        .0
+        .iter()
+        .any(|candidate| css::selector_matches(candidate, &chain)))
+}
+
+unsafe extern "C" fn node_matches(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 1 {
+        return throw_type_error(ctx, "selector is required");
+    }
+    let Some(selector) = read_js_string(ctx, *argv) else {
+        return throw_type_error(ctx, "selector must be a string");
+    };
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_bool(false);
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return sys::js_bool(false);
+    }
+    match node_matches_selector(&*dom, id, &selector) {
+        Ok(matches) => sys::js_bool(matches),
+        Err(message) => throw_type_error(ctx, message),
+    }
+}
+
+unsafe extern "C" fn node_closest(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 1 {
+        return throw_type_error(ctx, "selector is required");
+    }
+    let Some(selector) = read_js_string(ctx, *argv) else {
+        return throw_type_error(ctx, "selector must be a string");
+    };
+    let Some(mut current) = node_id(ctx, this_val) else {
+        return sys::js_null();
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return sys::js_null();
+    }
+    for _ in 0..MAX_SELECTOR_VISITS {
+        match node_matches_selector(&*dom, current, &selector) {
+            Ok(true) => {
+                return node_object(
+                    ctx,
+                    crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NODE_CLASS_KIND),
+                    current,
+                )
+            }
+            Ok(false) => {}
+            Err(message) => return throw_type_error(ctx, message),
+        }
+        let Some(parent) = (*dom).get(current).and_then(|node| node.parent) else {
+            return sys::js_null();
+        };
+        current = parent;
+    }
+    throw_type_error(ctx, "selector traversal limit exceeded")
+}
+
 unsafe fn define_selector_methods(ctx: *mut sys::JSContext, proto: sys::JSValue) {
     for (name, function) in [
         ("querySelector", node_query_selector as sys::JSCFunction),
@@ -1116,6 +1209,8 @@ unsafe fn define_selector_methods(ctx: *mut sys::JSContext, proto: sys::JSValue)
             "querySelectorAll",
             node_query_selector_all as sys::JSCFunction,
         ),
+        ("matches", node_matches as sys::JSCFunction),
+        ("closest", node_closest as sys::JSCFunction),
     ] {
         let name = CString::new(name).unwrap();
         let value =

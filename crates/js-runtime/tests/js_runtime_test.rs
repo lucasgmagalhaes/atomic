@@ -156,6 +156,25 @@ fn id_and_class_name_properties_update_selector_state() {
 }
 
 #[test]
+fn matches_and_closest_reuse_the_supported_selector_grammar() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let section = d.create_element("section");
+    let button = d.create_element("button");
+    d.set_attribute(section, "class", "panel");
+    d.set_attribute(section, "id", "section");
+    d.set_attribute(button, "class", "action");
+    d.set_attribute(button, "id", "button");
+    d.append_child(root, section);
+    d.append_child(section, button);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const section = document.getElementById('section'); const button = document.getElementById('button'); return `${button.matches('section > button.action')},${button.matches('.panel')},${button.closest('.panel') === section},${button.closest('article')}`; })()", "<test>").unwrap();
+    assert_eq!(result, "true,false,true,null");
+}
+
+#[test]
 fn query_selector_uses_the_existing_css_selector_subset_in_document_order() {
     let mut d = dom::Dom::new();
     let root = d.root();

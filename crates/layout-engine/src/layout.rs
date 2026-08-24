@@ -10,10 +10,14 @@
 //! `layout_block`/`layout_children`'s own docs for exactly what's
 //! modeled. `fixed`/`sticky` aren't.
 //!
-//! `Dimensions` stores the padding box (content + padding, no border since
-//! border isn't modeled) — the box a renderer would actually paint.
+//! `border-width`/`border-style`/`border-color` are real now too: a
+//! bordered box's `border-width` genuinely grows `Dimensions` (real
+//! box-model space, not just a paint-time decoration) — `Dimensions` is
+//! the border box (content + padding + border) rather than the padding
+//! box it used to be. `border-radius`/per-side border colors/styles
+//! aren't modeled (see `style::ComputedStyle::border_color`'s own doc).
 use crate::flex::layout_flex_children;
-use crate::style::{Display, Length, Position};
+use crate::style::{BorderStyle, Display, Length, Position};
 use crate::text::{layout_inline, layout_text, InlineSpan};
 use crate::tree::LayoutBox;
 
@@ -152,24 +156,40 @@ pub fn layout_block(box_: &mut LayoutBox, containing_width: f64, x: f64, y: f64)
     let padding_right = resolve_edge(box_.style.padding.right, containing_width);
     let padding_bottom = resolve_edge(box_.style.padding.bottom, containing_width);
     let padding_left = resolve_edge(box_.style.padding.left, containing_width);
+    // `border_width` is `0` on every side whose `border-style` is `None`
+    // (the real spec's own rule: a border with no style renders as if its
+    // width were `0`, regardless of what `border-width` itself says) -
+    // real box-model growth, not just a paint-time decoration, so a
+    // bordered box genuinely takes more space than an unbordered one with
+    // otherwise-identical CSS (see `render::build_display_list` for the
+    // actual stroke painting).
+    let (border_top, border_right, border_bottom, border_left) = if box_.style.border_style == BorderStyle::None {
+        (0.0, 0.0, 0.0, 0.0)
+    } else {
+        (
+            resolve_edge(box_.style.border_width.top, containing_width),
+            resolve_edge(box_.style.border_width.right, containing_width),
+            resolve_edge(box_.style.border_width.bottom, containing_width),
+            resolve_edge(box_.style.border_width.left, containing_width),
+        )
+    };
+    box_.border = crate::tree::ResolvedBorder { top: border_top, right: border_right, bottom: border_bottom, left: border_left };
 
     // CSS's `width` property (content-box model, the only one this crate
     // models) sizes the *content* box. `auto` follows CSS 2.1 §10.3.3:
-    // margin + padding + width is made to equal containing_width.
+    // margin + border + padding + width is made to equal containing_width.
     let content_width = match box_.style.width {
         Length::Px(px) => px,
         Length::Percent(pct) => containing_width * pct / 100.0,
-        Length::Auto => {
-            (containing_width - margin_left - margin_right - padding_left - padding_right).max(0.0)
-        }
+        Length::Auto => (containing_width - margin_left - margin_right - border_left - border_right - padding_left - padding_right).max(0.0),
     };
 
     box_.dimensions.x = x + margin_left;
     box_.dimensions.y = y + margin_top;
-    box_.dimensions.width = content_width + padding_left + padding_right;
+    box_.dimensions.width = content_width + padding_left + padding_right + border_left + border_right;
 
-    let content_x = box_.dimensions.x + padding_left;
-    let content_y = box_.dimensions.y + padding_top;
+    let content_x = box_.dimensions.x + border_left + padding_left;
+    let content_y = box_.dimensions.y + border_top + padding_top;
 
     let content_height = layout_children(box_, content_width, content_x, content_y);
 
@@ -183,7 +203,7 @@ pub fn layout_block(box_: &mut LayoutBox, containing_width: f64, x: f64, y: f64)
         Length::Percent(_) => content_height,
         Length::Auto => content_height,
     };
-    box_.dimensions.height = resolved_content_height + padding_top + padding_bottom;
+    box_.dimensions.height = resolved_content_height + padding_top + padding_bottom + border_top + border_bottom;
 
     margin_top + box_.dimensions.height + margin_bottom
 }

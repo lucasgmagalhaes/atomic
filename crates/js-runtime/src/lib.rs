@@ -16,6 +16,7 @@ mod crypto;
 mod cors;
 mod csp;
 mod css_style;
+mod cssom_stylesheet;
 mod document;
 mod document_cookie;
 mod dom_bindings;
@@ -109,6 +110,7 @@ impl<'rt> Context<'rt> {
             fetch_async::register(ptr);
             timers::register(ptr);
             document_cookie::register(ptr);
+            cssom_stylesheet::register(ptr);
             indexed_db_bindings::register(ptr);
             local_storage_bindings::register(ptr);
             blob::register(ptr);
@@ -318,6 +320,43 @@ impl<'rt> Context<'rt> {
     pub fn set_csp(&mut self, policy: &str) {
         if let Some(state) = self._host_state.as_mut() {
             state.csp = Some(policy.to_string());
+        }
+    }
+
+    /// Every rule text from every real `CSSStyleSheet` instance currently
+    /// in `document.adoptedStyleSheets`, concatenated with newlines — a
+    /// host (`profile-worker`'s `Page::layout`) parses this and merges it
+    /// into the real cascade before laying out, so a page's own
+    /// `sheet.insertRule(...)`/`deleteRule(...)` calls actually change what
+    /// gets rendered on the next frame. A non-`CSSStyleSheet` entry in the
+    /// array (nothing validates what a page assigns there) is silently
+    /// skipped. Empty string on a plain [`Context::new`]/`with_dom` with
+    /// nothing adopted.
+    pub fn adopted_stylesheet_text(&self) -> String {
+        unsafe {
+            let global = sys::JS_GetGlobalObject(self.ptr);
+            let doc_name = CString::new("document").unwrap();
+            let document = sys::JS_GetPropertyStr(self.ptr, global, doc_name.as_ptr());
+            sys::JS_FreeValue(self.ptr, global);
+            let sheets_name = CString::new("adoptedStyleSheets").unwrap();
+            let sheets = sys::JS_GetPropertyStr(self.ptr, document, sheets_name.as_ptr());
+            sys::JS_FreeValue(self.ptr, document);
+
+            let mut len: i64 = 0;
+            sys::JS_GetLength(self.ptr, sheets, &mut len);
+            let mut text = String::new();
+            for i in 0..len.max(0) as u32 {
+                let sheet = sys::JS_GetPropertyUint32(self.ptr, sheets, i);
+                if let Some(rules) = cssom_stylesheet::rules_of(self.ptr, sheet) {
+                    for rule in rules {
+                        text.push_str(&rule);
+                        text.push('\n');
+                    }
+                }
+                sys::JS_FreeValue(self.ptr, sheet);
+            }
+            sys::JS_FreeValue(self.ptr, sheets);
+            text
         }
     }
 

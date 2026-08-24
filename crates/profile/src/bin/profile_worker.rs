@@ -798,7 +798,23 @@ impl<'rt> Page<'rt> {
     /// box-tree-construction step itself fails.
     fn layout(&self, width: u32) -> Option<LayoutBox> {
         let dom = self.ctx.dom()?;
-        let mut tree = build_box_tree_with_viewport(dom, self.html_el, &self.sheet, width as f64)?;
+        // Real `document.adoptedStyleSheets` mutation support (see
+        // `js_runtime::cssom_stylesheet`): re-read every adopted sheet's
+        // rules and merge them on top of the page's own base stylesheet
+        // every layout pass, since a script can call `insertRule`/
+        // `deleteRule` at any time between renders. Cloning `self.sheet`
+        // rather than mutating it in place keeps the base stylesheet
+        // (built once at `load()` time) untouched if a later render has
+        // nothing adopted anymore.
+        let adopted_text = self.ctx.adopted_stylesheet_text();
+        let sheet = if adopted_text.is_empty() {
+            std::borrow::Cow::Borrowed(&self.sheet)
+        } else {
+            let mut merged = self.sheet.clone();
+            merged.rules.extend(parse_stylesheet(&adopted_text).rules);
+            std::borrow::Cow::Owned(merged)
+        };
+        let mut tree = build_box_tree_with_viewport(dom, self.html_el, &sheet, width as f64)?;
         apply_image_sizes(dom, &mut tree, &self.images);
         layout_block(&mut tree, width as f64, 0.0, 0.0);
         Some(tree)

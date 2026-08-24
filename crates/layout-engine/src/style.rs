@@ -1,14 +1,17 @@
 //! Cascaded declarations → typed computed style. Scoped property set:
 //! `display` (block/inline/flex/none), `width`/`height`, `margin`/
 //! `padding` (shorthands + longhands), `position` (`static`/`relative`/
-//! `absolute`) with `top`/`right`/`bottom`/`left`, and the flex properties
-//! `flex-direction`/`justify-content`/`align-items`/`flex-grow`/
-//! `flex-shrink`/`flex-basis`, `background-color` (also accepted as
-//! `background`, but only the solid-color form — no gradients/images),
-//! `font-size` (px only), and `color`. `font-size` and `color` are the
-//! only properties this crate inherits — every other property resolves
-//! independently of the parent's computed style. No `flex` shorthand
-//! (only the longhands).
+//! `absolute`) with `top`/`right`/`bottom`/`left`, `border-width`/
+//! `border-style`/`border-color` (plus the `border` shorthand — solid
+//! only, one color for all four sides, real box-model growth not just a
+//! paint decoration), and the flex properties `flex-direction`/
+//! `justify-content`/`align-items`/`flex-grow`/`flex-shrink`/
+//! `flex-basis`, `background-color` (also accepted as `background`, but
+//! only the solid-color form — no gradients/images), `font-size` (px
+//! only), and `color`. `font-size` and `color` are the only properties
+//! this crate inherits — every other property resolves independently of
+//! the parent's computed style. No `flex`/`border` per-side-longhand
+//! shorthand beyond what's listed above.
 use css::{Declaration, MatchedDeclarations, Token};
 
 /// Straight (non-premultiplied) sRGB + alpha, each channel `0..=255`.
@@ -86,6 +89,17 @@ pub enum Position {
     Absolute,
 }
 
+/// `dashed`/`dotted`/`double`/`groove`/... aren't modeled — a border only
+/// ever paints as a solid rectangle (see `render::build_display_list`),
+/// matching this crate's existing "flat solid quads only" painting model
+/// (no stroke/dash patterns anywhere, same scope `background-color`
+/// already has).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BorderStyle {
+    None,
+    Solid,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlexDirection {
     Row,
@@ -150,6 +164,22 @@ pub struct ComputedStyle {
     pub right: Length,
     pub bottom: Length,
     pub left: Length,
+    /// `Auto`/`Percent` are never produced by real `border-width` CSS (the
+    /// property only accepts a length or a `thin`/`medium`/`thick`
+    /// keyword, neither of which this crate parses) - reuses `EdgeSizes`/
+    /// `Length` purely for its existing shorthand-parsing machinery
+    /// (`parse_edge_shorthand`), not because those variants are
+    /// meaningful here. Real box-model space when `border_style` isn't
+    /// `None` — see `layout::layout_block`.
+    pub border_width: EdgeSizes,
+    pub border_style: BorderStyle,
+    /// One color for all four sides - real per-side colors
+    /// (`border-top-color`, ...) aren't modeled. Initial value is black,
+    /// not the spec's `currentColor` (which would need reading back
+    /// `color` at border-paint time, not just at cascade time) - a
+    /// documented simplification, same shape as `font-size`'s own
+    /// "px only, no keyword sizes" scope cut.
+    pub border_color: Color,
     /// Only meaningful when this box's own `display` is `Flex` - controls
     /// how *its* children are arranged.
     pub flex_direction: FlexDirection,
@@ -185,6 +215,9 @@ impl ComputedStyle {
             right: Length::Auto,
             bottom: Length::Auto,
             left: Length::Auto,
+            border_width: EdgeSizes::zero(),
+            border_style: BorderStyle::None,
+            border_color: Color { r: 0, g: 0, b: 0, a: 255 },
             flex_direction: FlexDirection::Row,
             justify_content: JustifyContent::Start,
             align_items: AlignItems::Stretch,
@@ -243,6 +276,42 @@ fn parse_edge_shorthand(tokens: &[Token]) -> Option<EdgeSizes> {
         },
         [] => unreachable!("checked non-empty above"),
     })
+}
+
+/// Real `border: <width> <style> <color>` shorthand — real CSS accepts
+/// the three components in any order, and each is individually optional
+/// (an omitted component leaves whatever it already cascaded to
+/// unchanged, matching the other shorthands in this file - `background`/
+/// `margin` don't reset unspecified sub-properties to their initial
+/// value either). Sets all four sides identically - no way to express
+/// per-side values through this one property, same as real CSS's own
+/// `border` shorthand.
+fn apply_border_shorthand(style: &mut ComputedStyle, tokens: &[Token]) {
+    let mut width = None;
+    let mut border_style = None;
+    let mut color = None;
+    for token in tokens {
+        if let Some(l) = parse_length(token) {
+            width = Some(l);
+            continue;
+        }
+        match token {
+            Token::Ident(v) if v == "none" => border_style = Some(BorderStyle::None),
+            Token::Ident(v) if v == "solid" => border_style = Some(BorderStyle::Solid),
+            Token::Ident(name) => color = color.or(Color::named(name)),
+            Token::Hash(hex) => color = color.or(Color::from_hex(hex)),
+            _ => {}
+        }
+    }
+    if let Some(w) = width {
+        style.border_width = EdgeSizes { top: w, right: w, bottom: w, left: w };
+    }
+    if let Some(s) = border_style {
+        style.border_style = s;
+    }
+    if let Some(c) = color {
+        style.border_color = c;
+    }
 }
 
 fn apply_declaration(style: &mut ComputedStyle, decl: &Declaration) {
@@ -425,6 +494,31 @@ fn apply_declaration(style: &mut ComputedStyle, decl: &Declaration) {
                 style.left = l;
             }
         }
+        "border-width" => {
+            if let Some(e) = parse_edge_shorthand(&decl.value) {
+                style.border_width = e;
+            }
+        }
+        "border-style" => {
+            if let Some(Token::Ident(v)) = decl.value.first() {
+                style.border_style = match v.as_str() {
+                    "none" => BorderStyle::None,
+                    "solid" => BorderStyle::Solid,
+                    _ => return,
+                };
+            }
+        }
+        "border-color" => {
+            let color = match decl.value.first() {
+                Some(Token::Ident(name)) => Color::named(name),
+                Some(Token::Hash(hex)) => Color::from_hex(hex),
+                _ => None,
+            };
+            if let Some(c) = color {
+                style.border_color = c;
+            }
+        }
+        "border" => apply_border_shorthand(style, &decl.value),
         _ => {}
     }
 }

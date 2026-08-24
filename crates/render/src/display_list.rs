@@ -1,10 +1,12 @@
 //! Flattens a `layout_engine::LayoutBox` tree into paint commands - a
 //! "display list" in browser-engine terminology, decoupled from any GPU
 //! API so it's testable without a device/adapter. Scoped to solid-color
-//! rectangles (a box's padding box, filled with its `background_color`)
-//! plus glyph instances (positioned, not yet rasterized) — no borders,
-//! no images, no shadows, no clipping/scrolling.
-use layout_engine::{Color, LayoutBox, PositionedGlyph};
+//! rectangles (a box's border box, filled with its `background_color`,
+//! plus up to 4 more solid rects framing it as a real border - see
+//! `collect`'s own doc) plus glyph instances (positioned, not yet
+//! rasterized) — no border-radius, no images composited here (see
+//! `build_image_list`), no shadows, no clipping/scrolling.
+use layout_engine::{BorderStyle, Color, LayoutBox, PositionedGlyph};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Rect {
@@ -36,8 +38,41 @@ fn collect(box_: &LayoutBox, out: &mut Vec<Rect>) {
             color: box_.style.background_color,
         });
     }
+    if box_.style.border_style != BorderStyle::None && box_.style.border_color.a > 0 {
+        push_border_rects(box_, out);
+    }
     for child in &box_.children {
         collect(child, out);
+    }
+}
+
+/// Real, but flat: paints `box_`'s border as up to 4 solid-color strips
+/// hugging the outer edge of its (already border-inclusive, see
+/// `layout_engine::layout::layout_block`'s own doc) `dimensions` - no
+/// `border-radius` (a rounded corner would need real anti-aliased or
+/// masked geometry this engine's "flat rects only" pipeline doesn't
+/// have), no per-side colors/styles. A side with `0` resolved width
+/// (`layout_engine::ResolvedBorder`) contributes no rect, same as a
+/// transparent background contributing none. The 4 strips' corners
+/// slightly overlap (e.g. the top strip's own left end sits under the
+/// left strip's top end) rather than being mitered - harmless since
+/// every side shares one solid `border_color`, so double-painting the
+/// same pixel with the same color is a no-op.
+fn push_border_rects(box_: &LayoutBox, out: &mut Vec<Rect>) {
+    let d = box_.dimensions;
+    let b = box_.border;
+    let color = box_.style.border_color;
+    if b.top > 0.0 {
+        out.push(Rect { x: d.x as f32, y: d.y as f32, width: d.width as f32, height: b.top as f32, color });
+    }
+    if b.bottom > 0.0 {
+        out.push(Rect { x: d.x as f32, y: (d.y + d.height - b.bottom) as f32, width: d.width as f32, height: b.bottom as f32, color });
+    }
+    if b.left > 0.0 {
+        out.push(Rect { x: d.x as f32, y: d.y as f32, width: b.left as f32, height: d.height as f32, color });
+    }
+    if b.right > 0.0 {
+        out.push(Rect { x: (d.x + d.width - b.right) as f32, y: d.y as f32, width: b.right as f32, height: d.height as f32, color });
     }
 }
 

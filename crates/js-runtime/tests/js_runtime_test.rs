@@ -234,6 +234,20 @@ fn class_list_is_stable_and_updates_the_class_attribute() {
 }
 
 #[test]
+fn attribute_presence_and_names_follow_live_dom_attributes() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let element = d.create_element("div");
+    d.set_attribute(element, "data-state", "ready");
+    d.set_attribute(element, "id", "panel");
+    d.append_child(root, element);
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const el = document.querySelector('div'); const before = `${el.hasAttribute('id')},${el.getAttributeNames().join(',')}`; el.removeAttribute('id'); return `${before},${el.hasAttribute('id')},${el.getAttributeNames().join(',')}`; })()", "<test>").unwrap();
+    assert_eq!(result, "true,data-state,id,false,data-state");
+}
+
+#[test]
 fn query_selector_uses_the_existing_css_selector_subset_in_document_order() {
     let mut d = dom::Dom::new();
     let root = d.root();

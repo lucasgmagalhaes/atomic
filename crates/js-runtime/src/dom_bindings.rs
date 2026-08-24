@@ -966,6 +966,36 @@ unsafe extern "C" fn node_get_attribute(
         .unwrap_or_else(sys::js_null)
 }
 
+unsafe extern "C" fn node_has_attribute(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 1 { return throw_type_error(ctx, "attribute name is required"); }
+    let Some(name) = read_js_string(ctx, *argv) else { return throw_type_error(ctx, "attribute name must be a string"); };
+    if !valid_attribute_name(&name) { return throw_type_error(ctx, "invalid attribute name"); }
+    let Some(id) = node_id(ctx, this_val) else { return sys::js_bool(false); };
+    let dom = dom_opaque(ctx);
+    sys::js_bool(!dom.is_null() && (*dom).attribute(id, &name).is_some())
+}
+
+unsafe extern "C" fn node_get_attribute_names(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let array = sys::JS_NewArray(ctx);
+    let Some(id) = node_id(ctx, this_val) else { return array; };
+    let dom = dom_opaque(ctx);
+    let Some(dom::NodeData::Element { attributes, .. }) = (!dom.is_null()).then(|| (*dom).get(id).map(|node| &node.data)).flatten() else { return array; };
+    let mut names: Vec<_> = attributes.keys().collect();
+    names.sort_unstable();
+    for (index, name) in names.into_iter().enumerate() { sys::JS_SetPropertyUint32(ctx, array, index as u32, new_js_string(ctx, name)); }
+    array
+}
+
 unsafe extern "C" fn node_insert_before(
     ctx: *mut sys::JSContext,
     this_val: sys::JSValue,
@@ -1110,6 +1140,8 @@ unsafe fn define_mutation_methods(ctx: *mut sys::JSContext, proto: sys::JSValue)
     for (name, function, arity) in [
         ("appendChild", node_append_child as sys::JSCFunction, 1),
         ("getAttribute", node_get_attribute as sys::JSCFunction, 1),
+        ("hasAttribute", node_has_attribute as sys::JSCFunction, 1),
+        ("getAttributeNames", node_get_attribute_names as sys::JSCFunction, 0),
         ("setAttribute", node_set_attribute as sys::JSCFunction, 2),
         (
             "removeAttribute",

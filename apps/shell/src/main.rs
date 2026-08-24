@@ -1209,13 +1209,35 @@ impl eframe::App for NimbleApp {
                     }
                 }
                 if response.has_focus() {
+                    // Without this, egui's own focus-cycling steals `Tab`
+                    // the moment this pane has focus - it never reaches
+                    // `i.events` below, and focus silently jumps to
+                    // whatever egui widget it considers "next" (not
+                    // necessarily another pane). `EventFilter { tab: true,
+                    // .. }` tells egui this widget wants real `Tab`
+                    // keypresses delivered as normal key events instead -
+                    // same mechanism `egui::TextEdit` itself uses (see its
+                    // own `set_focus_lock_filter` call). Called every
+                    // frame the pane has focus, matching `TextEdit`'s own
+                    // convention - `set_focus_lock_filter` no-ops unless
+                    // the widget already had focus last frame too, so a
+                    // freshly-focused pane takes one extra frame before
+                    // its own `Tab` handling below actually fires (an
+                    // imperceptible ~16ms at a real frame rate).
+                    cell_ui.memory_mut(|mem| {
+                        mem.set_focus_lock_filter(response.id, egui::EventFilter { tab: true, ..Default::default() });
+                    });
                     // Real keyboard-to-DOM routing: whichever pane's
                     // click most recently called `request_focus()` above
                     // gets typed characters/backspace forwarded to
                     // `profile::Profile::type_key` - a no-op on the
                     // worker side (see its own `focused_id` doc) unless
                     // that pane's last `click_at` actually landed on a
-                    // real `<input>`/`<textarea>`.
+                    // real `<input>`/`<textarea>`. `Tab`/`Shift+Tab` move
+                    // real focus between the page's own focusable
+                    // elements instead (`BrowserView::tab`, real
+                    // `dom::Dom::tab_order` on the worker side) - not
+                    // typed as a character.
                     for event in cell_ui.input(|i| i.events.clone()) {
                         match event {
                             egui::Event::Text(text) => {
@@ -1225,6 +1247,9 @@ impl eframe::App for NimbleApp {
                             }
                             egui::Event::Key { key: egui::Key::Backspace, pressed: true, .. } => {
                                 let _ = self.panes[index].browser.type_key("Backspace");
+                            }
+                            egui::Event::Key { key: egui::Key::Tab, pressed: true, modifiers, .. } => {
+                                let _ = self.panes[index].browser.tab(modifiers.shift);
                             }
                             _ => {}
                         }

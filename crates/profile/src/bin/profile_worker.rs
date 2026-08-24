@@ -791,9 +791,8 @@ fn nearest_id_ancestor(dom: &Dom, node: NodeId) -> Option<String> {
 /// (`blur` on the old element before `focus` on the new one). A click that
 /// lands back on the already-focused element is a no-op for focus (no
 /// redundant `blur`+`focus` pair), matching a real browser not re-firing
-/// focus on a click to a field that already has it. Still no tab order
-/// (`Tab`/`Shift+Tab` moving focus) - only click-driven and JS-driven
-/// (`.focus()`/`.blur()`) focus changes exist.
+/// focus on a click to a field that already has it. See `tab_focus` for
+/// the other way focus moves - a real `Tab`/`Shift+Tab` press.
 fn dispatch_click_at(page: &mut Page, width: u32, x: f64, y: f64, scroll_top: f64) -> Result<Option<String>, String> {
     let node = page.hit_test_at(width, x, y, scroll_top).ok_or("no element at that point")?;
     let click_id = {
@@ -859,6 +858,56 @@ fn type_key(ctx: &Context, focused_id: &str, key: &str) -> Result<(), String> {
         value = js_string_literal(&updated),
     );
     ctx.eval(&script, "<pane key>").map(|_| ()).map_err(|_| format!("no element with id \"{focused_id}\" (or its keydown handler threw)"))
+}
+
+/// Real `Tab` (`reverse: false`) / `Shift+Tab` (`reverse: true`) focus
+/// movement — computes the next target via `dom::Dom::next_focus_target`'s
+/// own cycling rule, then blurs whatever was focused before and focuses
+/// the new target through the real JS `.blur()`/`.focus()` bindings
+/// (`blur_element`/`focus_element`, same as `dispatch_click_at`), so real
+/// `"blur"`/`"change"`/`"focus"` events fire. Real limitation shared with
+/// every other id-addressed command in this protocol (`CLICK`/`FILL`/
+/// `CLICK_AT`): a tab-order target with no `id` attribute can't be
+/// reached through a `document.getElementById`-based `eval()` script, so
+/// this walks the tab order from the computed starting point in the same
+/// direction (wrapping at most once around the whole list) until it finds
+/// one with a real `id`, rather than silently landing on an unreachable
+/// target. `Ok(None)` when the tab order is empty or every element in it
+/// lacks an `id` - both report as "nothing to tab to" to the caller, same
+/// as `hit_test_at`'s "nothing there" convention for `CLICK_AT`.
+fn tab_focus(page: &mut Page, reverse: bool) -> Result<Option<String>, String> {
+    let (target_id, previously_focused_id) = {
+        let dom_ref = page.ctx.dom().ok_or("no DOM available")?;
+        let order = dom_ref.tab_order();
+        if order.is_empty() {
+            return Ok(None);
+        }
+        let current_index = dom_ref.active_element().and_then(|id| order.iter().position(|&n| n == id));
+        let start = match (current_index, reverse) {
+            (Some(i), false) => (i + 1) % order.len(),
+            (Some(i), true) => (i + order.len() - 1) % order.len(),
+            (None, false) => 0,
+            (None, true) => order.len() - 1,
+        };
+        let step: i64 = if reverse { -1 } else { 1 };
+        let target_id = (0..order.len()).find_map(|offset| {
+            let index = (start as i64 + step * offset as i64).rem_euclid(order.len() as i64) as usize;
+            dom_ref.attribute(order[index], "id").map(str::to_string)
+        });
+        let previously_focused_id = dom_ref.active_element().and_then(|prev| dom_ref.attribute(prev, "id").map(str::to_string));
+        (target_id, previously_focused_id)
+    };
+
+    let Some(target_id) = target_id else {
+        return Ok(None);
+    };
+    if let Some(prev_id) = previously_focused_id {
+        if prev_id != target_id {
+            let _ = blur_element(&page.ctx, &prev_id);
+        }
+    }
+    focus_element(&page.ctx, &target_id)?;
+    Ok(Some(target_id))
 }
 
 /// Loads `source`, returning the built page and `Some(error)` if the
@@ -1085,6 +1134,23 @@ fn main() {
                     }
                     None => {
                         let _ = writeln!(stdout, "ERROR no element focused - CLICK_AT an <input>/<textarea> first");
+                    }
+                }
+                let _ = stdout.flush();
+            } else if line == "TAB" || line == "TAB_REVERSE" {
+                let reverse = line == "TAB_REVERSE";
+                let result = tab_focus(&mut page, reverse);
+                writer.publish(&page.render(&renderer, width, height, scroll_top));
+                match result {
+                    Ok(Some(id)) => {
+                        focused_id = Some(id);
+                        let _ = writeln!(stdout, "TABBED");
+                    }
+                    Ok(None) => {
+                        let _ = writeln!(stdout, "ERROR no focusable element with an id on this page");
+                    }
+                    Err(message) => {
+                        let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
                     }
                 }
                 let _ = stdout.flush();

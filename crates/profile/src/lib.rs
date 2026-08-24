@@ -336,6 +336,31 @@ impl Profile {
         }
     }
 
+    /// Real `Tab` (`reverse: false`) / `Shift+Tab` (`reverse: true`) focus
+    /// movement, per the real (scoped) tab order `dom::Dom::tab_order`
+    /// computes worker-side (`<input>`/`<textarea>` plus any element with
+    /// an explicit non-negative `tabindex`, positive-`tabindex` group
+    /// first). Blurs whatever was focused before and focuses the next
+    /// target through the real `.blur()`/`.focus()` JS bindings, so real
+    /// `"blur"`/`"change"`/`"focus"` events fire the same as a
+    /// [`click_at`](Self::click_at)-driven focus change - a caller can
+    /// [`type_key`](Self::type_key) into the newly focused field right
+    /// after. `Ok(Err(message))` if the tab order is empty or every
+    /// element in it lacks a real `id` (see `profile-worker`'s
+    /// `tab_focus` doc for why an `id` is required to reach a target
+    /// through this protocol).
+    pub fn tab(&mut self, reverse: bool) -> std::io::Result<Result<(), String>> {
+        writeln!(self.stdin, "{}", if reverse { "TAB_REVERSE" } else { "TAB" })?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        let line = line.trim();
+        match line.strip_prefix("ERROR ") {
+            Some(message) => Ok(Err(message.to_string())),
+            None => Ok(Ok(())),
+        }
+    }
+
     /// Real page (viewport) scroll: shifts the worker's scroll offset by
     /// `dy` pixels (positive scrolls down, matching a mouse wheel's own
     /// sign convention), clamped worker-side to `[0, content_height -

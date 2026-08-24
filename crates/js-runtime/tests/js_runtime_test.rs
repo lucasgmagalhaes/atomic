@@ -248,6 +248,18 @@ fn attribute_presence_and_names_follow_live_dom_attributes() {
 }
 
 #[test]
+fn name_and_type_properties_reflect_live_attributes() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let input = d.create_element("input");
+    d.append_child(root, input);
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const input = document.querySelector('input'); input.name = 'email'; input.type = 'email'; return `${input.getAttribute('name')},${input.getAttribute('type')},${input.name},${input.type}`; })()", "<test>").unwrap();
+    assert_eq!(result, "email,email,email,email");
+}
+
+#[test]
 fn query_selector_uses_the_existing_css_selector_subset_in_document_order() {
     let mut d = dom::Dom::new();
     let root = d.root();

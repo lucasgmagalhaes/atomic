@@ -41,6 +41,21 @@ pub struct Dimensions {
     pub height: f64,
 }
 
+/// Real resolved (pixel) border thickness per side, set by
+/// `layout::layout_block` once it knows `containing_width` — `style.
+/// border_width` alone (still a `Length`, possibly a percentage) isn't
+/// enough for a renderer to paint a border stroke without redoing that
+/// resolution itself. All-zero (the `Default`) for a box whose
+/// `border_style` is `None`, same as `layout_block`'s own box-model math
+/// already treats it.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct ResolvedBorder {
+    pub top: f64,
+    pub right: f64,
+    pub bottom: f64,
+    pub left: f64,
+}
+
 /// One already-styled run of text within a synthetic inline box
 /// (`LayoutBox::inline_spans`) — see the module doc. Built by
 /// `collect_inline_spans`, consumed by `text::layout_inline` (converted to
@@ -59,6 +74,9 @@ pub struct LayoutBox {
     pub style: ComputedStyle,
     pub children: Vec<LayoutBox>,
     pub dimensions: Dimensions,
+    /// See [`ResolvedBorder`]. Set by `layout::layout_block`; zero for
+    /// every box until layout actually runs.
+    pub border: ResolvedBorder,
     /// `Some` only for boxes built from a single `dom::NodeData::Text`
     /// node with no inline-element siblings next to it (the common "just
     /// text inside a block element" case). Mutually exclusive with
@@ -238,11 +256,13 @@ fn is_inline_level(
     }
 }
 
-/// Builds the `LayoutBox` children of an element/root whose own children
-/// list is `child_ids`, grouping consecutive inline-level runs (see
-/// [`is_inline_level`]) into one synthetic inline box each rather than one
-/// box per DOM child — the core of this module's inline-formatting-context
-/// support.
+/// Builds every child box of `node` in one pass, grouping consecutive
+/// inline-level children (see [`is_inline_level`]) into a single
+/// [`InlineSpanSource`]-carrying box instead of one box per child — the
+/// real inline formatting context this module's doc describes. A run of
+/// exactly one plain-text child (no inline element siblings) still takes
+/// the cheaper pre-existing `text: Some(...)` path via `build` instead,
+/// unchanged from before multi-span runs existed.
 fn build_children(
     dom: &Dom,
     child_ids: &[NodeId],
@@ -259,28 +279,18 @@ fn build_children(
         if run.is_empty() {
             return;
         }
-        // A lone plain-text child (the overwhelmingly common case, and the
-        // only shape this crate supported before inline formatting
-        // contexts existed) takes the plain `text: Some(...)` path
-        // unchanged - cheaper (skips rich-text shaping machinery for a
-        // single span) and keeps `LayoutBox::text`'s existing contract for
-        // callers/tests that only ever dealt with that case. Only an
-        // actual multi-node or inline-element run needs the synthetic
-        // `inline_spans` box.
-        if run.len() == 1 && matches!(dom.get(run[0]).map(|n| &n.data), Some(NodeData::Text(_))) {
-            let id = run[0];
-            run.clear();
-            if let Some(b) = build(dom, id, sheet, viewport_width, chain, parent_font_size, parent_color) {
-                result.push(b);
+        if run.len() == 1 {
+            if let Some(NodeData::Text(_)) = dom.get(run[0]).map(|n| &n.data) {
+                if let Some(b) = build(dom, run[0], sheet, viewport_width, chain, parent_font_size, parent_color) {
+                    result.push(b);
+                }
+                run.clear();
+                return;
             }
-            return;
         }
 
-        // Identifies the run by its first source node - see
-        // `LayoutBox::inline_spans`'s doc on why this isn't semantically
-        // meaningful beyond "some node in this run".
-        let first_node = run[0];
         let mut spans = Vec::new();
+        let first_node = run[0];
         for &id in run.iter() {
             collect_inline_spans(dom, id, sheet, viewport_width, chain, parent_font_size, parent_color, &mut spans);
         }
@@ -302,6 +312,7 @@ fn build_children(
                 style,
                 children: Vec::new(),
                 dimensions: Dimensions::default(),
+                border: ResolvedBorder::default(),
                 text: None,
                 inline_spans: Some(spans),
                 glyphs: Vec::new(),
@@ -348,6 +359,7 @@ fn build(
             style,
             children: Vec::new(),
             dimensions: Dimensions::default(),
+            border: ResolvedBorder::default(),
             text: Some(text.clone()),
             inline_spans: None,
             glyphs: Vec::new(),
@@ -378,6 +390,7 @@ fn build(
         style,
         children,
         dimensions: Dimensions::default(),
+        border: ResolvedBorder::default(),
         text: None,
         inline_spans: None,
         glyphs: Vec::new(),
@@ -385,22 +398,13 @@ fn build(
     })
 }
 
-/// A reasonable desktop-ish default for callers that don't care about
-/// media queries (every existing call site before this crate supported
-/// `@media` at all) — [`build_box_tree`] uses this; callers that actually
-/// know their real viewport width (`profile-worker`, primarily) should
-/// use [`build_box_tree_with_viewport`] instead so `(min-width: ...)`/
-/// `(max-width: ...)` rules evaluate against the truth instead of a guess.
-pub const DEFAULT_VIEWPORT_WIDTH: f64 = 1024.0;
+/// Real, viewport-width-agnostic box tree construction - defaults to a
+/// hardcoded 1280px viewport (see [`DEFAULT_VIEWPORT_WIDTH`]) for any
+/// `@media` rule in `sheet` that references one, since the caller hasn't
+/// supplied a real one. Prefer [`build_box_tree_with_viewport`] whenever
+/// the caller has a real viewport width on hand.
+pub const DEFAULT_VIEWPORT_WIDTH: f64 = 1280.0;
 
-/// Builds the box tree rooted at `node` (typically an `<html>`-equivalent
-/// element, or any element for testing in isolation). Returns `None` if
-/// `node` doesn't exist or isn't an element/non-empty-text node (includes
-/// `display: none`, which produces no box at all per CSS box generation).
-/// `node`'s inherited `font-size` starts at the CSS initial value (16px),
-/// same as a real document root. Media queries evaluate against
-/// [`DEFAULT_VIEWPORT_WIDTH`] — use [`build_box_tree_with_viewport`] to
-/// pass a real one.
 pub fn build_box_tree(dom: &Dom, node: NodeId, sheet: &Stylesheet) -> Option<LayoutBox> {
     build_box_tree_with_viewport(dom, node, sheet, DEFAULT_VIEWPORT_WIDTH)
 }

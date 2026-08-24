@@ -64,6 +64,11 @@ pub(crate) struct HostState {
     /// or a host that never calls `Context::set_csp`) enforces nothing —
     /// same degrade-gracefully pattern as `url`/`layout_rects`.
     pub csp: Option<String>,
+    /// Raw `Permissions-Policy` response-policy text. Native capability
+    /// bindings consult it immediately before performing their privileged
+    /// operation; `None` means the host did not provide a policy and leaves
+    /// the feature available.
+    pub permissions_policy: Option<String>,
 }
 
 /// Reads the `HostState` behind `ctx`'s opaque slot, or null if unset

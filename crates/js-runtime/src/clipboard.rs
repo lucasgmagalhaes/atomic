@@ -70,6 +70,9 @@ unsafe fn settled_promise(ctx: *mut sys::JSContext, result: Result<sys::JSValue,
 }
 
 unsafe extern "C" fn write_text(ctx: *mut sys::JSContext, _this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
+    if !crate::permissions_policy::is_allowed(ctx, "clipboard-write") {
+        return settled_promise(ctx, Err("clipboard write is blocked by Permissions Policy".to_string()));
+    }
     let text = if argc >= 1 { read_js_string(ctx, *argv) } else { None };
     let Some(text) = text else {
         return settled_promise(ctx, Err("writeText: missing text argument".to_string()));
@@ -82,6 +85,9 @@ unsafe extern "C" fn write_text(ctx: *mut sys::JSContext, _this_val: sys::JSValu
 }
 
 unsafe extern "C" fn read_text(ctx: *mut sys::JSContext, _this_val: sys::JSValue, _argc: c_int, _argv: *mut sys::JSValue) -> sys::JSValue {
+    if !crate::permissions_policy::is_allowed(ctx, "clipboard-read") {
+        return settled_promise(ctx, Err("clipboard read is blocked by Permissions Policy".to_string()));
+    }
     match platform_apis::clipboard_read_text() {
         Ok(text) => settled_promise(ctx, Ok(new_js_string(ctx, &text))),
         Err(e) => settled_promise(ctx, Err(format!("readText failed: {e}"))),

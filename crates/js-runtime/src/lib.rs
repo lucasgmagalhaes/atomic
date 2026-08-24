@@ -33,6 +33,7 @@ mod location;
 mod notifications;
 mod page_visibility;
 mod performance;
+mod permissions_policy;
 mod timers;
 mod value_bridge;
 mod web_audio;
@@ -146,6 +147,7 @@ impl<'rt> Context<'rt> {
             layout_rects: std::collections::HashMap::new(),
             computed_styles: std::collections::HashMap::new(),
             csp: None,
+            permissions_policy: None,
         });
         let raw = state.as_mut() as *mut host_state::HostState as *mut std::os::raw::c_void;
         unsafe {
@@ -320,6 +322,17 @@ impl<'rt> Context<'rt> {
     pub fn set_csp(&mut self, policy: &str) {
         if let Some(state) = self._host_state.as_mut() {
             state.csp = Some(policy.to_string());
+        }
+    }
+
+    /// Sets the page's `Permissions-Policy` text. The policy is checked at
+    /// the native boundary before this context uses clipboard or notification
+    /// capabilities, so page JavaScript cannot bypass it by retaining a
+    /// reference to either API. No-op on a plain [`Context::new`], which has
+    /// no navigated document to associate with a response policy.
+    pub fn set_permissions_policy(&mut self, policy: &str) {
+        if let Some(state) = self._host_state.as_mut() {
+            state.permissions_policy = Some(policy.to_string());
         }
     }
 

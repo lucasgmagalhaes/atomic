@@ -43,3 +43,13 @@ pub(crate) fn is_feature_allowed(policy: Option<&str>, feature: &str) -> bool {
         .split_whitespace()
         .any(|token| token == "*" || token.trim_matches('"') == "self")
 }
+
+/// Checks the response policy attached to `ctx`'s document. Keeping this at
+/// the native capability boundary means JavaScript cannot bypass a policy by
+/// caching `navigator.clipboard` or `Notification` before the host installs
+/// it. Contexts without a DOM-host state have no response policy and remain
+/// unrestricted, matching `csp`'s existing degradation behavior.
+pub(crate) unsafe fn is_allowed(ctx: *mut quickjs_sys::JSContext, feature: &str) -> bool {
+    let state = crate::host_state::get(ctx);
+    state.is_null() || is_feature_allowed((*state).permissions_policy.as_deref(), feature)
+}

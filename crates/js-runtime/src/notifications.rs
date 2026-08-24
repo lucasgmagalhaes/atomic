@@ -98,6 +98,9 @@ unsafe extern "C" fn notification_constructor(
     argc: c_int,
     argv: *mut sys::JSValue,
 ) -> sys::JSValue {
+    if !crate::permissions_policy::is_allowed(ctx, "notifications") {
+        return sys::JS_Throw(ctx, permission_error(ctx));
+    }
     let class_id = crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NOTIFICATION_CLASS_KIND);
     let obj = sys::JS_NewObjectClass(ctx, class_id);
     if sys::js_is_exception(&obj) {
@@ -123,6 +126,22 @@ unsafe extern "C" fn notification_constructor(
     obj
 }
 
+/// Builds the regular JavaScript error used when a response policy blocks a
+/// privileged notification operation. `quickjs-sys` intentionally does not
+/// bind QuickJS's variadic `JS_ThrowTypeError`, so construct the standard
+/// `Error` object directly and pass it to `JS_Throw` instead.
+unsafe fn permission_error(ctx: *mut sys::JSContext) -> sys::JSValue {
+    let global = sys::JS_GetGlobalObject(ctx);
+    let error_name = CString::new("Error").unwrap();
+    let error_ctor = sys::JS_GetPropertyStr(ctx, global, error_name.as_ptr());
+    sys::JS_FreeValue(ctx, global);
+    let mut message = new_js_string(ctx, "notifications are blocked by Permissions Policy");
+    let error = sys::JS_Call(ctx, error_ctor, sys::js_undefined(), 1, &mut message);
+    sys::JS_FreeValue(ctx, message);
+    sys::JS_FreeValue(ctx, error_ctor);
+    error
+}
+
 unsafe extern "C" fn notification_close(ctx: *mut sys::JSContext, this_val: sys::JSValue, _argc: c_int, _argv: *mut sys::JSValue) -> sys::JSValue {
     let ptr = notification_opaque(sys::JS_GetRuntime(ctx), this_val);
     if !ptr.is_null() {
@@ -145,6 +164,9 @@ unsafe fn resolved_string_promise(ctx: *mut sys::JSContext, value: &str) -> sys:
 }
 
 unsafe extern "C" fn request_permission(ctx: *mut sys::JSContext, _this_val: sys::JSValue, _argc: c_int, _argv: *mut sys::JSValue) -> sys::JSValue {
+    if !crate::permissions_policy::is_allowed(ctx, "notifications") {
+        return resolved_string_promise(ctx, "denied");
+    }
     // Real browsers ask the OS/user for real consent; this crate has no
     // permission-prompt UI yet, so every request auto-grants (documented
     // module-level deviation) - what's real is that `permission` only

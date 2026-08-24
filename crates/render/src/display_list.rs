@@ -2,10 +2,11 @@
 //! "display list" in browser-engine terminology, decoupled from any GPU
 //! API so it's testable without a device/adapter. Scoped to solid-color
 //! rectangles (a box's border box, filled with its `background_color`,
-//! plus up to 4 more solid rects framing it as a real border - see
-//! `collect`'s own doc) plus glyph instances (positioned, not yet
+//! plus up to 4 more solid rects framing it as a real border, plus one
+//! more solid rect behind it all for a real (but blur-less) `box-shadow`
+//! - see `collect`'s own doc) plus glyph instances (positioned, not yet
 //! rasterized) — no border-radius, no images composited here (see
-//! `build_image_list`), no shadows.
+//! `build_image_list`).
 //!
 //! Real clipping now, for `overflow: hidden`/`auto`/`scroll` (see
 //! `layout_engine::Overflow`'s own doc for the auto/scroll scope cut):
@@ -22,7 +23,23 @@
 //! `crate::text::composite_glyphs` to intersect against their own
 //! per-pixel destination bounds check - real exact clipping there too,
 //! not an approximation, since both already iterate pixel-by-pixel.
+//!
+//! Real `opacity` too, per-primitive rather than per-group (see
+//! `layout_engine::ComputedStyle::opacity`'s own doc for exactly what
+//! that means and diverges from the spec) - every `collect_*` walk also
+//! threads an accumulated `f64` multiplier alongside `clip`, updated to
+//! `parent_opacity * box_.style.opacity` at each box and applied to that
+//! box's own paint primitives' alpha before they're emitted.
 use layout_engine::{BorderStyle, Color, LayoutBox, Overflow, PositionedGlyph};
+
+/// Scales `color`'s alpha channel by `opacity` (`1.0` = unchanged) -
+/// shared by every paint primitive's opacity handling in this module.
+fn scale_alpha(color: Color, opacity: f64) -> Color {
+    Color {
+        a: (color.a as f64 * opacity).round().clamp(0.0, 255.0) as u8,
+        ..color
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Rect {
@@ -107,25 +124,31 @@ fn tighten_clip(box_: &LayoutBox, clip: Option<ClipRect>) -> ClipRect {
 /// rect — nothing downstream needs to know they exist.
 pub fn build_display_list(box_: &LayoutBox) -> Vec<Rect> {
     let mut list = Vec::new();
-    collect(box_, &mut list, None);
+    collect(box_, &mut list, None, 1.0);
     list
 }
 
-fn collect(box_: &LayoutBox, out: &mut Vec<Rect>, clip: Option<ClipRect>) {
+fn collect(box_: &LayoutBox, out: &mut Vec<Rect>, clip: Option<ClipRect>, parent_opacity: f64) {
+    let opacity = parent_opacity * box_.style.opacity;
+    if let Some(shadow) = box_.style.box_shadow {
+        if shadow.color.a > 0 {
+            push_box_shadow_rect(box_, shadow, out, clip, opacity);
+        }
+    }
     if box_.style.background_color.a > 0 {
         let rect = Rect {
             x: box_.dimensions.x as f32,
             y: box_.dimensions.y as f32,
             width: box_.dimensions.width as f32,
             height: box_.dimensions.height as f32,
-            color: box_.style.background_color,
+            color: scale_alpha(box_.style.background_color, opacity),
         };
         if let Some(clipped) = clip_rect(rect, clip) {
             out.push(clipped);
         }
     }
     if box_.style.border_style != BorderStyle::None && box_.style.border_color.a > 0 {
-        push_border_rects(box_, out, clip);
+        push_border_rects(box_, out, clip, opacity);
     }
     let child_clip = if box_.style.overflow == Overflow::Hidden {
         Some(tighten_clip(box_, clip))
@@ -133,7 +156,29 @@ fn collect(box_: &LayoutBox, out: &mut Vec<Rect>, clip: Option<ClipRect>) {
         clip
     };
     for child in &box_.children {
-        collect(child, out, child_clip);
+        collect(child, out, child_clip, opacity);
+    }
+}
+
+/// Real, but flat and blur-less: paints one solid rect behind `box_`'s
+/// border box, offset by `shadow.offset_x`/`offset_y` and grown on every
+/// side by `shadow.spread` - see `layout_engine::BoxShadow`'s own doc for
+/// why `blur-radius` isn't modeled. Pushed before the background/border
+/// rects in `collect`, so real paint order (background/border on top of
+/// the shadow) falls out naturally from this pipeline's existing
+/// "later rects paint over earlier ones" convention - no explicit
+/// z-ordering needed.
+fn push_box_shadow_rect(box_: &LayoutBox, shadow: layout_engine::BoxShadow, out: &mut Vec<Rect>, clip: Option<ClipRect>, opacity: f64) {
+    let d = box_.dimensions;
+    let rect = Rect {
+        x: (d.x + shadow.offset_x - shadow.spread) as f32,
+        y: (d.y + shadow.offset_y - shadow.spread) as f32,
+        width: (d.width + shadow.spread * 2.0).max(0.0) as f32,
+        height: (d.height + shadow.spread * 2.0).max(0.0) as f32,
+        color: scale_alpha(shadow.color, opacity),
+    };
+    if let Some(clipped) = clip_rect(rect, clip) {
+        out.push(clipped);
     }
 }
 
@@ -149,10 +194,10 @@ fn collect(box_: &LayoutBox, out: &mut Vec<Rect>, clip: Option<ClipRect>) {
 /// left strip's top end) rather than being mitered - harmless since
 /// every side shares one solid `border_color`, so double-painting the
 /// same pixel with the same color is a no-op.
-fn push_border_rects(box_: &LayoutBox, out: &mut Vec<Rect>, clip: Option<ClipRect>) {
+fn push_border_rects(box_: &LayoutBox, out: &mut Vec<Rect>, clip: Option<ClipRect>, opacity: f64) {
     let d = box_.dimensions;
     let b = box_.border;
-    let color = box_.style.border_color;
+    let color = scale_alpha(box_.style.border_color, opacity);
     let mut push = |rect: Rect| {
         if let Some(clipped) = clip_rect(rect, clip) {
             out.push(clipped);
@@ -172,19 +217,22 @@ fn push_border_rects(box_: &LayoutBox, out: &mut Vec<Rect>, clip: Option<ClipRec
     }
 }
 
-/// A shaped glyph plus the clip region in effect where it's painted -
-/// `None` when no `overflow`-clipping ancestor applies. A thin wrapper
-/// rather than a `clip` field on `layout_engine::PositionedGlyph` itself:
-/// that type is built one box at a time deep inside `layout_engine`'s own
-/// text shaping, with no notion of an ancestor's clip region - only this
-/// crate's tree walk (`collect_glyphs`) accumulates that.
-/// `crate::text::composite_glyphs` intersects `clip` against its own
-/// per-pixel destination bounds check, real exact clipping since it
-/// already iterates pixel-by-pixel.
+/// A shaped glyph plus the clip region in effect where it's painted
+/// (`None` when no `overflow`-clipping ancestor applies) and the real
+/// accumulated `opacity` in effect there (`1.0` = fully opaque, no
+/// ancestor set `opacity` below `1.0`). A thin wrapper rather than fields
+/// on `layout_engine::PositionedGlyph` itself: that type is built one box
+/// at a time deep inside `layout_engine`'s own text shaping, with no
+/// notion of an ancestor's clip region or opacity - only this crate's
+/// tree walk (`collect_glyphs`) accumulates those. `crate::text::composite_glyphs`
+/// intersects `clip` against its own per-pixel destination bounds check
+/// and multiplies each pixel's alpha by `opacity`, both real and exact
+/// since it already iterates pixel-by-pixel.
 #[derive(Debug, Clone, Copy)]
 pub struct ClippedGlyph {
     pub glyph: PositionedGlyph,
     pub clip: Option<ClipRect>,
+    pub opacity: f64,
 }
 
 /// Same paint-order walk as [`build_display_list`], but collects glyphs
@@ -194,16 +242,18 @@ pub struct ClippedGlyph {
 /// callers don't need to track box offsets themselves.
 pub fn build_glyph_list(box_: &LayoutBox) -> Vec<ClippedGlyph> {
     let mut list = Vec::new();
-    collect_glyphs(box_, &mut list, None);
+    collect_glyphs(box_, &mut list, None, 1.0);
     list
 }
 
-fn collect_glyphs(box_: &LayoutBox, out: &mut Vec<ClippedGlyph>, clip: Option<ClipRect>) {
+fn collect_glyphs(box_: &LayoutBox, out: &mut Vec<ClippedGlyph>, clip: Option<ClipRect>, parent_opacity: f64) {
+    let opacity = parent_opacity * box_.style.opacity;
     let ox = box_.dimensions.x as i32;
     let oy = box_.dimensions.y as i32;
     out.extend(box_.glyphs.iter().map(|g| ClippedGlyph {
         glyph: PositionedGlyph { x: g.x + ox, y: g.y + oy, ..*g },
         clip,
+        opacity,
     }));
     let child_clip = if box_.style.overflow == Overflow::Hidden {
         Some(tighten_clip(box_, clip))
@@ -211,7 +261,7 @@ fn collect_glyphs(box_: &LayoutBox, out: &mut Vec<ClippedGlyph>, clip: Option<Cl
         clip
     };
     for child in &box_.children {
-        collect_glyphs(child, out, child_clip);
+        collect_glyphs(child, out, child_clip, opacity);
     }
 }
 
@@ -225,7 +275,9 @@ fn collect_glyphs(box_: &LayoutBox, out: &mut Vec<ClippedGlyph>, clip: Option<Cl
 /// `height` themselves, since those also drive `composite_images`' own
 /// source-pixel scale factor and shrinking them would distort the image;
 /// `composite_images` intersects `clip` against its own per-pixel
-/// destination bounds check instead.
+/// destination bounds check instead. `opacity` is the real accumulated
+/// opacity in effect where this quad is painted (`1.0` = fully opaque) -
+/// `composite_images` multiplies it into each sampled pixel's alpha.
 #[derive(Clone)]
 pub struct ImageQuad {
     pub x: f32,
@@ -234,6 +286,7 @@ pub struct ImageQuad {
     pub height: f32,
     pub image: std::rc::Rc<image_decode::DecodedImage>,
     pub clip: Option<ClipRect>,
+    pub opacity: f64,
 }
 
 /// Same paint-order walk as [`build_display_list`]/[`build_glyph_list`],
@@ -244,11 +297,12 @@ pub struct ImageQuad {
 /// [`Rect`].
 pub fn build_image_list(box_: &LayoutBox) -> Vec<ImageQuad> {
     let mut list = Vec::new();
-    collect_images(box_, &mut list, None);
+    collect_images(box_, &mut list, None, 1.0);
     list
 }
 
-fn collect_images(box_: &LayoutBox, out: &mut Vec<ImageQuad>, clip: Option<ClipRect>) {
+fn collect_images(box_: &LayoutBox, out: &mut Vec<ImageQuad>, clip: Option<ClipRect>, parent_opacity: f64) {
+    let opacity = parent_opacity * box_.style.opacity;
     if let Some(image) = &box_.image {
         out.push(ImageQuad {
             x: box_.dimensions.x as f32,
@@ -257,6 +311,7 @@ fn collect_images(box_: &LayoutBox, out: &mut Vec<ImageQuad>, clip: Option<ClipR
             height: box_.dimensions.height as f32,
             image: image.clone(),
             clip,
+            opacity,
         });
     }
     let child_clip = if box_.style.overflow == Overflow::Hidden {
@@ -265,6 +320,6 @@ fn collect_images(box_: &LayoutBox, out: &mut Vec<ImageQuad>, clip: Option<ClipR
         clip
     };
     for child in &box_.children {
-        collect_images(child, out, child_clip);
+        collect_images(child, out, child_clip, opacity);
     }
 }

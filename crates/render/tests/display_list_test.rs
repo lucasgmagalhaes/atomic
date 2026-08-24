@@ -289,3 +289,163 @@ fn overflow_hidden_clip_propagates_through_a_nested_ancestor() {
     assert_eq!(list[0].width, 30.0);
     assert_eq!(list[0].height, 30.0);
 }
+
+#[test]
+fn box_shadow_paints_one_offset_rect_behind_the_box() {
+    let mut d = Dom::new();
+    let root = d.root();
+    let div = d.create_element("div");
+    d.append_child(root, div);
+
+    let sheet = parse_stylesheet("div { width: 50px; height: 50px; background-color: #ffff00; box-shadow: 5px 10px blue; }");
+    let mut tree = build_box_tree(&d, div, &sheet).unwrap();
+    layout_block(&mut tree, 800.0, 0.0, 0.0);
+
+    let list = build_display_list(&tree);
+    // Shadow first (paints behind, per real box-shadow stacking), then
+    // the box's own background on top of it.
+    assert_eq!(list.len(), 2);
+    assert_eq!(list[0].x, 5.0);
+    assert_eq!(list[0].y, 10.0);
+    assert_eq!(list[0].width, 50.0);
+    assert_eq!(list[0].height, 50.0);
+    assert_eq!(list[0].color, Color { r: 0, g: 0, b: 255, a: 255 });
+    assert_eq!(list[1].color, Color { r: 255, g: 255, b: 0, a: 255 });
+}
+
+#[test]
+fn box_shadow_spread_grows_the_shadow_rect_on_every_side() {
+    let mut d = Dom::new();
+    let root = d.root();
+    let div = d.create_element("div");
+    d.append_child(root, div);
+
+    let sheet = parse_stylesheet("div { width: 50px; height: 50px; box-shadow: 0px 0px 0px 5px red; }");
+    let mut tree = build_box_tree(&d, div, &sheet).unwrap();
+    layout_block(&mut tree, 800.0, 0.0, 0.0);
+
+    let list = build_display_list(&tree);
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].x, -5.0);
+    assert_eq!(list[0].y, -5.0);
+    assert_eq!(list[0].width, 60.0);
+    assert_eq!(list[0].height, 60.0);
+}
+
+#[test]
+fn box_shadow_none_produces_no_shadow_rect() {
+    let mut d = Dom::new();
+    let root = d.root();
+    let div = d.create_element("div");
+    d.append_child(root, div);
+
+    let sheet = parse_stylesheet("div { width: 50px; height: 50px; box-shadow: none; }");
+    let mut tree = build_box_tree(&d, div, &sheet).unwrap();
+    layout_block(&mut tree, 800.0, 0.0, 0.0);
+
+    assert!(build_display_list(&tree).is_empty());
+}
+
+#[test]
+fn box_shadow_is_clipped_by_an_overflow_hidden_ancestor() {
+    let mut d = Dom::new();
+    let root = d.root();
+    let parent = d.create_element("div");
+    let child = d.create_element("span");
+    d.append_child(root, parent);
+    d.append_child(parent, child);
+
+    let sheet = parse_stylesheet(
+        "div { width: 20px; height: 20px; overflow: hidden; } \
+         span { width: 20px; height: 20px; box-shadow: 100px 100px red; }",
+    );
+    let mut tree = build_box_tree(&d, parent, &sheet).unwrap();
+    layout_block(&mut tree, 800.0, 0.0, 0.0);
+
+    // The shadow is offset 100px past the 20x20 clip region - entirely
+    // clipped away, same as any other paint primitive under an
+    // overflow: hidden ancestor.
+    assert!(build_display_list(&tree).is_empty());
+}
+
+#[test]
+fn opacity_scales_a_boxs_own_background_alpha() {
+    let mut d = Dom::new();
+    let root = d.root();
+    let div = d.create_element("div");
+    d.append_child(root, div);
+
+    let sheet = parse_stylesheet("div { width: 10px; height: 10px; background-color: red; opacity: 0.5; }");
+    let mut tree = build_box_tree(&d, div, &sheet).unwrap();
+    layout_block(&mut tree, 800.0, 0.0, 0.0);
+
+    let list = build_display_list(&tree);
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].color, Color { r: 255, g: 0, b: 0, a: 128 });
+}
+
+#[test]
+fn opacity_compounds_multiplicatively_through_nested_ancestors() {
+    let mut d = Dom::new();
+    let root = d.root();
+    let outer = d.create_element("div");
+    let inner = d.create_element("span");
+    d.append_child(root, outer);
+    d.append_child(outer, inner);
+
+    // Real nested-opacity semantics: a 50% child inside a 50% parent
+    // renders at an effective 25% (0.5 * 0.5), even though the child's
+    // own *computed* `opacity` is independently 0.5 (opacity isn't a
+    // CSS-inherited property - see `crates/layout-engine/tests/style_test.rs`'s
+    // own coverage of that at the ComputedStyle level; this is testing
+    // the separate, real render-time multiplicative compounding this
+    // crate uses instead of true group compositing).
+    let sheet = parse_stylesheet(
+        "div { opacity: 0.5; } \
+         span { width: 10px; height: 10px; background-color: red; opacity: 0.5; }",
+    );
+    let mut tree = build_box_tree(&d, outer, &sheet).unwrap();
+    layout_block(&mut tree, 800.0, 0.0, 0.0);
+
+    let list = build_display_list(&tree);
+    assert_eq!(list.len(), 1);
+    // 255 * 0.5 * 0.5 = 63.75, rounds to 64.
+    assert_eq!(list[0].color, Color { r: 255, g: 0, b: 0, a: 64 });
+}
+
+#[test]
+fn opacity_scales_the_box_shadow_and_border_alpha_too() {
+    let mut d = Dom::new();
+    let root = d.root();
+    let div = d.create_element("div");
+    d.append_child(root, div);
+
+    let sheet = parse_stylesheet(
+        "div { width: 10px; height: 10px; border: 2px solid blue; box-shadow: 5px 5px red; opacity: 0.5; }",
+    );
+    let mut tree = build_box_tree(&d, div, &sheet).unwrap();
+    layout_block(&mut tree, 800.0, 0.0, 0.0);
+
+    let list = build_display_list(&tree);
+    // Shadow rect, then 4 border strips (no background set).
+    assert_eq!(list.len(), 5);
+    assert_eq!(list[0].color, Color { r: 255, g: 0, b: 0, a: 128 });
+    for rect in &list[1..] {
+        assert_eq!(rect.color, Color { r: 0, g: 0, b: 255, a: 128 });
+    }
+}
+
+#[test]
+fn opacity_one_leaves_colors_unchanged() {
+    let mut d = Dom::new();
+    let root = d.root();
+    let div = d.create_element("div");
+    d.append_child(root, div);
+
+    let sheet = parse_stylesheet("div { width: 10px; height: 10px; background-color: red; }");
+    let mut tree = build_box_tree(&d, div, &sheet).unwrap();
+    layout_block(&mut tree, 800.0, 0.0, 0.0);
+
+    let list = build_display_list(&tree);
+    assert_eq!(list[0].color, Color { r: 255, g: 0, b: 0, a: 255 });
+}

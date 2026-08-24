@@ -103,10 +103,36 @@ fn clip_restricts_which_pixels_a_glyph_can_paint() {
         .map(|g| ClippedGlyph {
             glyph: g.glyph,
             clip: Some(ClipRect { x: 150.0, y: 50.0, width: 50.0, height: 50.0 }),
+            opacity: 1.0,
         })
         .collect();
 
     let mut clipped_pixels = vec![0u8; (width * height * 4) as usize];
     composite_glyphs(&mut clipped_pixels, width, height, &clipped);
     assert!(clipped_pixels.iter().all(|&b| b == 0), "clip region doesn't overlap the glyph - nothing should paint");
+}
+
+#[test]
+fn zero_opacity_paints_no_glyph_pixels() {
+    let mut d = Dom::new();
+    let root = d.root();
+    let p = d.create_element("p");
+    let text = d.create_text("A");
+    d.append_child(root, p);
+    d.append_child(p, text);
+
+    let sheet = parse_stylesheet("p { color: #ff0000; font-size: 64px; }");
+    let mut tree = build_box_tree(&d, p, &sheet).unwrap();
+    layout_block(&mut tree, 800.0, 0.0, 0.0);
+
+    let glyphs = build_glyph_list(&tree);
+    assert!(!glyphs.is_empty());
+
+    let transparent: Vec<ClippedGlyph> = glyphs.iter().map(|g| ClippedGlyph { glyph: g.glyph, clip: None, opacity: 0.0 }).collect();
+
+    let width = 200u32;
+    let height = 100u32;
+    let mut pixels = vec![0u8; (width * height * 4) as usize];
+    composite_glyphs(&mut pixels, width, height, &transparent);
+    assert!(pixels.iter().all(|&b| b == 0), "opacity 0 should paint nothing");
 }

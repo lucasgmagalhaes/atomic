@@ -1,5 +1,5 @@
 use css::{matching_declarations, parse_stylesheet, ElementSnapshot};
-use layout_engine::{resolve_style, Color, Display, Length, Overflow};
+use layout_engine::{resolve_style, BoxShadow, Color, Display, Length, Overflow};
 
 const BLACK: Color = Color { r: 0, g: 0, b: 0, a: 255 };
 
@@ -106,4 +106,99 @@ fn overflow_visible_resolves_to_visible() {
     let sheet = parse_stylesheet("div { overflow: visible; }");
     let style = resolve_style(&matching_declarations(&sheet, &[el("div")], 1024.0), 16.0, BLACK);
     assert_eq!(style.overflow, Overflow::Visible);
+}
+
+#[test]
+fn box_shadow_defaults_to_none() {
+    let sheet = parse_stylesheet("div { width: 10px; }");
+    let style = resolve_style(&matching_declarations(&sheet, &[el("div")], 1024.0), 16.0, BLACK);
+    assert_eq!(style.box_shadow, None);
+}
+
+#[test]
+fn box_shadow_two_value_form_is_offset_only_with_a_color() {
+    let sheet = parse_stylesheet("div { box-shadow: 5px 10px red; }");
+    let style = resolve_style(&matching_declarations(&sheet, &[el("div")], 1024.0), 16.0, BLACK);
+    assert_eq!(
+        style.box_shadow,
+        Some(BoxShadow {
+            offset_x: 5.0,
+            offset_y: 10.0,
+            spread: 0.0,
+            color: Color { r: 255, g: 0, b: 0, a: 255 },
+        })
+    );
+}
+
+#[test]
+fn box_shadow_four_value_form_skips_blur_and_keeps_spread() {
+    // offset-x offset-y blur-radius spread-radius color - the 10px blur
+    // is parsed (so it isn't mistaken for spread) but not stored.
+    let sheet = parse_stylesheet("div { box-shadow: 2px 3px 10px 4px #00ff00; }");
+    let style = resolve_style(&matching_declarations(&sheet, &[el("div")], 1024.0), 16.0, BLACK);
+    assert_eq!(
+        style.box_shadow,
+        Some(BoxShadow {
+            offset_x: 2.0,
+            offset_y: 3.0,
+            spread: 4.0,
+            color: Color { r: 0, g: 255, b: 0, a: 255 },
+        })
+    );
+}
+
+#[test]
+fn box_shadow_none_clears_a_previously_cascaded_shadow() {
+    let sheet = parse_stylesheet("div { box-shadow: 5px 5px red; } #a { box-shadow: none; }");
+    let style = resolve_style(
+        &matching_declarations(&sheet, &[ElementSnapshot { tag: "div".into(), id: Some("a".into()), classes: vec![], ..Default::default() }], 1024.0),
+        16.0,
+        BLACK,
+    );
+    assert_eq!(style.box_shadow, None);
+}
+
+#[test]
+fn box_shadow_without_a_color_is_not_set() {
+    let sheet = parse_stylesheet("div { box-shadow: 5px 5px; }");
+    let style = resolve_style(&matching_declarations(&sheet, &[el("div")], 1024.0), 16.0, BLACK);
+    assert_eq!(style.box_shadow, None);
+}
+
+#[test]
+fn opacity_defaults_to_fully_opaque() {
+    let sheet = parse_stylesheet("div { width: 10px; }");
+    let style = resolve_style(&matching_declarations(&sheet, &[el("div")], 1024.0), 16.0, BLACK);
+    assert_eq!(style.opacity, 1.0);
+}
+
+#[test]
+fn opacity_resolves_a_plain_number() {
+    let sheet = parse_stylesheet("div { opacity: 0.5; }");
+    let style = resolve_style(&matching_declarations(&sheet, &[el("div")], 1024.0), 16.0, BLACK);
+    assert_eq!(style.opacity, 0.5);
+}
+
+#[test]
+fn opacity_resolves_a_percentage() {
+    let sheet = parse_stylesheet("div { opacity: 25%; }");
+    let style = resolve_style(&matching_declarations(&sheet, &[el("div")], 1024.0), 16.0, BLACK);
+    assert_eq!(style.opacity, 0.25);
+}
+
+#[test]
+fn opacity_above_one_is_clamped_to_one() {
+    // Negative unitless numbers aren't exercised here - this hand-rolled
+    // CSS lexer doesn't tokenize a leading `-` before a digit as part of
+    // a `Number` token at all (a pre-existing, unrelated gap - "-1" lexes
+    // as an `Ident`, not a signed number, anywhere in this crate, not
+    // just for `opacity`), so there's no real negative value to clamp in
+    // the first place for this property today.
+    let sheet = parse_stylesheet("div { opacity: 2; }");
+    let style = resolve_style(&matching_declarations(&sheet, &[el("div")], 1024.0), 16.0, BLACK);
+    assert_eq!(style.opacity, 1.0);
+
+    let sheet = parse_stylesheet("div { opacity: 150%; }");
+    let style = resolve_style(&matching_declarations(&sheet, &[el("div")], 1024.0), 16.0, BLACK);
+    assert_eq!(style.opacity, 1.0);
 }

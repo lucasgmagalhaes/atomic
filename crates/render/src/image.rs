@@ -24,10 +24,12 @@ use crate::display_list::{ClipRect, ImageQuad};
 /// clipping, see `display_list`'s own doc): only the destination bounds
 /// checked here shrink, `scale_x`/`scale_y` still divide by the quad's
 /// full, unclipped `width`/`height`, so a partially clipped image isn't
-/// distorted - it's a real crop, not a squeeze.
+/// distorted - it's a real crop, not a squeeze. Also multiplies each
+/// sampled pixel's alpha by `quad.opacity` (real `opacity`, see
+/// `display_list`'s own doc on its per-primitive scope).
 pub fn composite_images(pixels: &mut [u8], width: u32, height: u32, quads: &[ImageQuad]) {
     for quad in quads {
-        if quad.width <= 0.0 || quad.height <= 0.0 || quad.image.width == 0 || quad.image.height == 0 {
+        if quad.width <= 0.0 || quad.height <= 0.0 || quad.image.width == 0 || quad.image.height == 0 || quad.opacity <= 0.0 {
             continue;
         }
         let src = &quad.image;
@@ -54,7 +56,8 @@ pub fn composite_images(pixels: &mut [u8], width: u32, height: u32, quads: &[Ima
                 let src_x = ((rel_x * scale_x) as u32).min(src.width - 1);
 
                 let src_idx = ((src_y * src.width + src_x) * 4) as usize;
-                let src_px = [src.rgba[src_idx], src.rgba[src_idx + 1], src.rgba[src_idx + 2], src.rgba[src_idx + 3]];
+                let alpha = (src.rgba[src_idx + 3] as f64 * quad.opacity).round().clamp(0.0, 255.0) as u8;
+                let src_px = [src.rgba[src_idx], src.rgba[src_idx + 1], src.rgba[src_idx + 2], alpha];
                 if src_px[3] == 0 {
                     continue;
                 }

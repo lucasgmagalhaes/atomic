@@ -748,6 +748,7 @@ impl<'rt> Page<'rt> {
             .map(|g| ClippedGlyph {
                 glyph: PositionedGlyph { y: g.glyph.y - scroll_top as i32, ..g.glyph },
                 clip: shift_clip(g.clip, offset),
+                opacity: g.opacity,
             })
             .collect();
 

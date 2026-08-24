@@ -312,6 +312,23 @@ fn event_listener_limit_throws_without_registering_an_extra_callback() {
 }
 
 #[test]
+fn event_propagation_limit_throws_for_a_deep_dom_tree() {
+    let mut d = dom::Dom::new();
+    let mut parent = d.root();
+    for _ in 0..129 {
+        let child = d.create_element("div");
+        d.append_child(parent, child);
+        parent = child;
+    }
+    d.set_attribute(parent, "id", "target");
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { try { document.getElementById('target').dispatchEvent('click'); return 'not-limited'; } catch (_) { return 'limited'; } })()", "<test>").unwrap();
+    assert_eq!(result, "limited");
+}
+
+#[test]
 fn listener_exceptions_are_rethrown_after_later_listeners_run() {
     let mut d = dom::Dom::new();
     let root = d.root();

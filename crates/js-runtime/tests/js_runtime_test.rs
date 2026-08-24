@@ -189,6 +189,23 @@ fn constructed_events_are_dispatched_by_identity() {
 }
 
 #[test]
+fn constructed_event_options_control_bubbling_and_cancellation() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let parent = d.create_element("section");
+    let button = d.create_element("button");
+    d.set_attribute(parent, "id", "parent");
+    d.set_attribute(button, "id", "button");
+    d.append_child(root, parent);
+    d.append_child(parent, button);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const parent = document.getElementById('parent'); const button = document.getElementById('button'); let bubbled = false; parent.addEventListener('save', event => { bubbled = event.bubbles; event.preventDefault(); }); const event = new Event('save', { bubbles: true, cancelable: true, ignored: true }); return `${button.dispatchEvent(event)},${bubbled},${event.defaultPrevented}`; })()", "<test>").unwrap();
+    assert_eq!(result, "false,true,true");
+}
+
+#[test]
 fn query_selector_uses_the_existing_css_selector_subset_in_document_order() {
     let mut d = dom::Dom::new();
     let root = d.root();

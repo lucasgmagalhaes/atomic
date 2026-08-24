@@ -199,7 +199,25 @@ unsafe extern "C" fn event_constructor(
     let Some(kind) = read_string(ctx, *argv) else {
         return type_error(ctx, "event type must be a string");
     };
-    make_event(ctx, None, &kind, false, false)
+    let mut bubbles = false;
+    let mut cancelable = false;
+    if argc >= 2 {
+        let options = *argv.add(1);
+        for (name, target) in [("bubbles", &mut bubbles), ("cancelable", &mut cancelable)] {
+            let name = CString::new(name).unwrap();
+            let value = sys::JS_GetPropertyStr(ctx, options, name.as_ptr());
+            if sys::js_is_exception(&value) {
+                return value;
+            }
+            let bool_value = sys::JS_ToBool(ctx, value);
+            sys::JS_FreeValue(ctx, value);
+            if bool_value < 0 {
+                return sys::js_exception();
+            }
+            *target = bool_value != 0;
+        }
+    }
+    make_event(ctx, None, &kind, bubbles, cancelable)
 }
 pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     let rt = sys::JS_GetRuntime(ctx);

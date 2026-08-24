@@ -193,6 +193,7 @@ extern "C" {
 
     pub fn JS_IsFunction(ctx: *mut JSContext, val: JSValue) -> bool;
     pub fn JS_SetConstructorBit(ctx: *mut JSContext, func_obj: JSValue, val: bool) -> bool;
+    pub fn JS_ToBool(ctx: *mut JSContext, val: JSValue) -> c_int;
     pub fn JS_GetException(ctx: *mut JSContext) -> JSValue;
     pub fn JS_HasException(ctx: *mut JSContext) -> bool;
 

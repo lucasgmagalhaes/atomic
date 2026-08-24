@@ -91,6 +91,20 @@ fn dom_mutation_rejects_invalid_tags_and_cycles() {
 }
 
 #[test]
+fn attributes_on_created_nodes_are_bounded_and_visible_to_selectors() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let parent = d.create_element("main");
+    d.set_attribute(parent, "id", "parent");
+    d.append_child(root, parent);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const child = document.createElement('button'); child.setAttribute('id', 'dynamic'); child.setAttribute('class', 'action primary'); document.getElementById('parent').appendChild(child); let invalid = false; try { child.setAttribute('<bad>', 'x'); } catch (_) { invalid = true; } return `${child.getAttribute('id')},${document.querySelector('.primary') === child},${child.getAttribute('missing')},${invalid}`; })()", "<test>").unwrap();
+    assert_eq!(result, "dynamic,true,null,true");
+}
+
+#[test]
 fn query_selector_uses_the_existing_css_selector_subset_in_document_order() {
     let mut d = dom::Dom::new();
     let root = d.root();

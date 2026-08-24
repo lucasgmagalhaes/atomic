@@ -30,6 +30,8 @@ const MAX_SELECTOR_LENGTH: usize = 1024;
 const MAX_SELECTOR_VISITS: usize = 4096;
 const MAX_SELECTOR_RESULTS: usize = 2048;
 const MAX_TAG_NAME_LENGTH: usize = 64;
+const MAX_ATTRIBUTE_NAME_LENGTH: usize = 64;
+const MAX_ATTRIBUTE_VALUE_LENGTH: usize = 4096;
 
 thread_local! {
     static NODE_OBJECTS: RefCell<HashMap<usize, HashMap<dom::NodeId, sys::JSValue>>> = RefCell::new(HashMap::new());
@@ -518,6 +520,14 @@ fn valid_tag_name(tag: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
 }
 
+fn valid_attribute_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= MAX_ATTRIBUTE_NAME_LENGTH
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b':'))
+}
+
 fn is_ancestor(dom: &dom::Dom, ancestor: dom::NodeId, mut node: dom::NodeId) -> bool {
     loop {
         if node == ancestor {
@@ -568,6 +578,63 @@ unsafe extern "C" fn node_append_child(
     sys::JS_DupValue(ctx, child_value)
 }
 
+unsafe extern "C" fn node_get_attribute(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 1 {
+        return throw_type_error(ctx, "attribute name is required");
+    }
+    let Some(name) = read_js_string(ctx, *argv) else {
+        return throw_type_error(ctx, "attribute name must be a string");
+    };
+    if !valid_attribute_name(&name) {
+        return throw_type_error(ctx, "invalid attribute name");
+    }
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_null();
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return sys::js_null();
+    }
+    (*dom)
+        .attribute(id, &name)
+        .map(|value| new_js_string(ctx, value))
+        .unwrap_or_else(sys::js_null)
+}
+
+unsafe extern "C" fn node_set_attribute(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 2 {
+        return throw_type_error(ctx, "attribute name and value are required");
+    }
+    let Some(name) = read_js_string(ctx, *argv) else {
+        return throw_type_error(ctx, "attribute name must be a string");
+    };
+    let Some(value) = read_js_string(ctx, *argv.add(1)) else {
+        return throw_type_error(ctx, "attribute value must be a string");
+    };
+    if !valid_attribute_name(&name) || value.len() > MAX_ATTRIBUTE_VALUE_LENGTH {
+        return throw_type_error(ctx, "invalid attribute");
+    }
+    let Some(id) = node_id(ctx, this_val) else {
+        return throw_type_error(ctx, "attribute target must be a node");
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() || (*dom).get(id).is_none() {
+        return throw_type_error(ctx, "node is no longer attached to this document");
+    }
+    (*dom).set_attribute(id, &name, &value);
+    sys::js_undefined()
+}
+
 unsafe extern "C" fn node_remove(
     ctx: *mut sys::JSContext,
     this_val: sys::JSValue,
@@ -591,6 +658,8 @@ unsafe extern "C" fn node_remove(
 unsafe fn define_mutation_methods(ctx: *mut sys::JSContext, proto: sys::JSValue) {
     for (name, function, arity) in [
         ("appendChild", node_append_child as sys::JSCFunction, 1),
+        ("getAttribute", node_get_attribute as sys::JSCFunction, 1),
+        ("setAttribute", node_set_attribute as sys::JSCFunction, 2),
         ("remove", node_remove as sys::JSCFunction, 0),
     ] {
         let name = CString::new(name).unwrap();

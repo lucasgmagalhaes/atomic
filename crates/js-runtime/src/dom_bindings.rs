@@ -33,6 +33,11 @@ const MAX_TAG_NAME_LENGTH: usize = 64;
 const MAX_ATTRIBUTE_NAME_LENGTH: usize = 64;
 const MAX_ATTRIBUTE_VALUE_LENGTH: usize = 4096;
 const MAX_TEXT_NODE_LENGTH: usize = 16 * 1024;
+/// Bounds `innerHTML`/`outerHTML` input — real HTML parsing has no natural
+/// selector-style traversal cap to reuse, so the input string length is the
+/// bound (same "cap the untrusted string, not the derived work" approach
+/// `MAX_ATTRIBUTE_VALUE_LENGTH`/`MAX_TEXT_NODE_LENGTH` already take).
+const MAX_HTML_LENGTH: usize = 64 * 1024;
 
 thread_local! {
     static NODE_OBJECTS: RefCell<HashMap<usize, HashMap<dom::NodeId, sys::JSValue>>> = RefCell::new(HashMap::new());
@@ -1155,6 +1160,164 @@ unsafe fn define_value(ctx: *mut sys::JSContext, proto: sys::JSValue) {
     sys::JS_FreeAtom(ctx, atom);
 }
 
+/// Replaces every child of `id` with the parsed content of `html`, evicting
+/// cached JS state (`NODE_OBJECTS`/`CLASS_LIST_OBJECTS`/etc, and any
+/// listeners living on those cached objects) for every removed node first —
+/// same convention `node_remove`/`node_remove_child` already use, since a
+/// removed subtree must not leave stale entries an attacker-controlled
+/// `getElementById` could later resurrect a listener on.
+unsafe fn replace_children_with_html(
+    ctx: *mut sys::JSContext,
+    dom: *mut dom::Dom,
+    id: dom::NodeId,
+    html: &str,
+) {
+    let old_children = (*dom).get(id).map(|node| node.children.clone()).unwrap_or_default();
+    for child in old_children {
+        evict_subtree(ctx, &*dom, child);
+        (*dom).remove(child);
+    }
+    let (fragment, roots) = html::parse_fragment(html);
+    for root in roots {
+        let cloned = (*dom).adopt(&fragment, root);
+        (*dom).append_child(id, cloned);
+    }
+}
+
+unsafe extern "C" fn node_inner_html_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return sys::js_undefined();
+    }
+    new_js_string(ctx, &(*dom).serialize_children(id))
+}
+
+unsafe extern "C" fn node_inner_html_set(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    val: sys::JSValue,
+) -> sys::JSValue {
+    let Some(html) = read_js_string(ctx, val) else {
+        return throw_type_error(ctx, "innerHTML must be a string");
+    };
+    if html.len() > MAX_HTML_LENGTH {
+        return throw_type_error(ctx, "innerHTML value exceeds the maximum length");
+    }
+    let Some(id) = node_id(ctx, this_val) else {
+        return throw_type_error(ctx, "innerHTML target must be a node");
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() || (*dom).get(id).is_none() {
+        return throw_type_error(ctx, "node is no longer attached to this document");
+    }
+    replace_children_with_html(ctx, dom, id, &html);
+    sys::js_undefined()
+}
+
+unsafe extern "C" fn node_outer_html_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return sys::js_undefined();
+    }
+    new_js_string(ctx, &(*dom).serialize_node(id))
+}
+
+/// Replaces `id` itself, in place under its current parent, with the parsed
+/// content of `html` — real `outerHTML` semantics (the node stops existing
+/// afterward, matching `node_remove`'s own contract that a real DOM removal
+/// makes `this_val` a detached, cache-evicted wrapper from then on).
+unsafe extern "C" fn node_outer_html_set(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    val: sys::JSValue,
+) -> sys::JSValue {
+    let Some(html) = read_js_string(ctx, val) else {
+        return throw_type_error(ctx, "outerHTML must be a string");
+    };
+    if html.len() > MAX_HTML_LENGTH {
+        return throw_type_error(ctx, "outerHTML value exceeds the maximum length");
+    }
+    let Some(id) = node_id(ctx, this_val) else {
+        return throw_type_error(ctx, "outerHTML target must be a node");
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() || (*dom).get(id).is_none() {
+        return throw_type_error(ctx, "node is no longer attached to this document");
+    }
+    if id == (*dom).root() {
+        return throw_type_error(ctx, "document root cannot be replaced");
+    }
+    if (*dom).get(id).and_then(|node| node.parent).is_none() {
+        return throw_type_error(ctx, "node has no parent to replace it under");
+    }
+    let (fragment, roots) = html::parse_fragment(&html);
+    for root in roots {
+        let cloned = (*dom).adopt(&fragment, root);
+        (*dom).insert_before(id, cloned);
+    }
+    evict_subtree(ctx, &*dom, id);
+    (*dom).remove(id);
+    sys::js_undefined()
+}
+
+unsafe fn define_inner_outer_html(ctx: *mut sys::JSContext, proto: sys::JSValue) {
+    for (name, getter, setter) in [
+        (
+            "innerHTML",
+            node_inner_html_get as Getter,
+            node_inner_html_set as Setter,
+        ),
+        (
+            "outerHTML",
+            node_outer_html_get as Getter,
+            node_outer_html_set as Setter,
+        ),
+    ] {
+        let name = CString::new(name).unwrap();
+        let getter = sys::JS_NewCFunction2(
+            ctx,
+            std::mem::transmute::<Getter, sys::JSCFunction>(getter),
+            name.as_ptr(),
+            0,
+            sys::JS_CFUNC_GETTER,
+            0,
+        );
+        let setter = sys::JS_NewCFunction2(
+            ctx,
+            std::mem::transmute::<Setter, sys::JSCFunction>(setter),
+            name.as_ptr(),
+            1,
+            sys::JS_CFUNC_SETTER,
+            0,
+        );
+        let atom = sys::JS_NewAtom(ctx, name.as_ptr());
+        sys::JS_DefinePropertyGetSet(
+            ctx,
+            proto,
+            atom,
+            getter,
+            setter,
+            sys::JS_PROP_HAS_GET
+                | sys::JS_PROP_HAS_SET
+                | sys::JS_PROP_CONFIGURABLE
+                | sys::JS_PROP_ENUMERABLE,
+        );
+        sys::JS_FreeAtom(ctx, atom);
+    }
+}
+
 unsafe extern "C" fn node_focus(
     ctx: *mut sys::JSContext,
     this_val: sys::JSValue,
@@ -1691,6 +1854,7 @@ unsafe fn ensure_node_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
     define_attributes_collection(ctx, proto);
     define_navigation(ctx, proto);
     define_value(ctx, proto);
+    define_inner_outer_html(ctx, proto);
     define_focus_methods(ctx, proto);
     define_mutation_methods(ctx, proto);
     define_selector_methods(ctx, proto);

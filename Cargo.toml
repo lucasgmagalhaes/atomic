@@ -6,6 +6,6 @@ members = [
     "crates/dom", "crates/js-runtime", "crates/js-runtime/quickjs-sys",
     "crates/render", "crates/webgl", "crates/storage", "crates/workers",
     "crates/platform-apis", "crates/profile", "crates/ipc", "crates/security",
-    "crates/automation",
+    "crates/automation", "crates/import",
     "xtask",
 ]

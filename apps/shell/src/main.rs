@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use shell::automation_bridge;
 use shell::browser_view::BrowserView;
+use shell::chrome_import;
 use shell::downloads::Downloads;
 use shell::history::History;
 use shell::i18n::{self, Locale};
@@ -89,6 +90,14 @@ struct NimbleApp {
     /// distinct vault file per mode (see `vault_ui::open_with_keychain`'s
     /// doc) - toggling this is switching vaults, not migrating one.
     vault_use_keychain: bool,
+    /// `Ok(message)`/`Err(message)` from the last "Import from Chrome"
+    /// button click - either history or bookmarks, whichever ran last.
+    import_result: Option<Result<String, String>>,
+    /// Real bookmarks pulled from the last successful "Import Bookmarks"
+    /// click - shown read-only in Settings (no bookmarks feature/UI
+    /// exists elsewhere in this shell to hand them to yet, see
+    /// `chrome_import`'s own doc on scope).
+    imported_bookmarks: Vec<chrome_import::Bookmark>,
 }
 
 const SPARKLINE_HEIGHT: f32 = 24.0;
@@ -175,6 +184,8 @@ impl Default for NimbleApp {
             vault_value_text: String::new(),
             performance_error: None,
             vault_use_keychain: false,
+            import_result: None,
+            imported_bookmarks: Vec::new(),
         }
     }
 }
@@ -362,6 +373,47 @@ impl NimbleApp {
                 self.vault_error = None;
             }
             Err(e) => self.vault_error = Some(e.to_string()),
+        }
+    }
+
+    /// The Settings window's "Import History" button - opt-in, explicit,
+    /// scoped to whatever pane is currently selected (never automatic,
+    /// never every pane at once - see `chrome_import`'s own doc on why).
+    /// Real Chrome `History` SQLite rows become real entries in the
+    /// selected pane's own (now-persisted) `History`.
+    fn import_chrome_history_to_selected_pane(&mut self) {
+        let Some(dir) = chrome_import::default_profile_dir() else {
+            self.import_result = Some(Err("Chrome profile discovery isn't implemented on this platform yet".to_string()));
+            return;
+        };
+        match chrome_import::import_history_urls(&dir) {
+            Ok(urls) => {
+                let count = urls.len();
+                let pane = &mut self.panes[self.selected];
+                for url in urls {
+                    pane.history.record(url);
+                }
+                self.import_result = Some(Ok(format!("Imported {count} history entries into {}", pane.id)));
+            }
+            Err(e) => self.import_result = Some(Err(e)),
+        }
+    }
+
+    /// The Settings window's "Import Bookmarks" button - same opt-in scope
+    /// as history import. No bookmarks feature exists elsewhere in this
+    /// shell yet to hand the result to, so it's just kept and shown
+    /// read-only (see `imported_bookmarks`'s own doc).
+    fn import_chrome_bookmarks(&mut self) {
+        let Some(dir) = chrome_import::default_profile_dir() else {
+            self.import_result = Some(Err("Chrome profile discovery isn't implemented on this platform yet".to_string()));
+            return;
+        };
+        match chrome_import::import_bookmarks(&dir) {
+            Ok(bookmarks) => {
+                self.import_result = Some(Ok(format!("Imported {} bookmarks", bookmarks.len())));
+                self.imported_bookmarks = bookmarks;
+            }
+            Err(e) => self.import_result = Some(Err(e)),
         }
     }
 
@@ -680,6 +732,43 @@ impl eframe::App for NimbleApp {
                 }
                 if let Some(key) = to_remove {
                     self.remove_credential(&key);
+                }
+
+                ui.separator();
+                ui.heading("Import from Chrome");
+                ui.label(format!("Opt-in, per profile - imports into the currently selected pane ({}), never automatic.", self.panes[self.selected].id));
+                match chrome_import::default_profile_dir() {
+                    Some(dir) => {
+                        ui.horizontal(|ui| {
+                            if ui.button("Import History").clicked() {
+                                self.import_chrome_history_to_selected_pane();
+                            }
+                            if ui.button("Import Bookmarks").clicked() {
+                                self.import_chrome_bookmarks();
+                            }
+                        });
+                        ui.weak(format!("Reading from {}", dir.display()));
+                    }
+                    None => {
+                        ui.weak("Chrome profile discovery isn't implemented on this platform yet.");
+                    }
+                }
+                if let Some(result) = &self.import_result {
+                    match result {
+                        Ok(message) => {
+                            ui.colored_label(egui::Color32::LIGHT_GREEN, message);
+                        }
+                        Err(message) => {
+                            ui.colored_label(egui::Color32::RED, message);
+                        }
+                    }
+                }
+                if !self.imported_bookmarks.is_empty() {
+                    egui::ScrollArea::vertical().id_source("imported_bookmarks_list").max_height(120.0).show(ui, |ui| {
+                        for bookmark in &self.imported_bookmarks {
+                            ui.label(format!("{} — {} ({})", bookmark.name, bookmark.url, bookmark.folder));
+                        }
+                    });
                 }
             });
             self.settings_open = open;

@@ -13,3 +13,4 @@ platform-apis = { path = "../../crates/platform-apis" }
 net = { path = "../../crates/net" }
 url = "2.5.8"
 security = { path = "../../crates/security" }
+import = { path = "../../crates/import" }

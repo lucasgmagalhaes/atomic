@@ -77,3 +77,31 @@ pub(crate) fn is_mixed_content_blocked(page_origin: Option<&str>, request_url: &
     }
     url::Url::parse(request_url).map(|u| u.scheme() == "http").unwrap_or(false)
 }
+
+/// The `Referer` header value a real browser's default `strict-origin-
+/// when-cross-origin` referrer policy would send for `request_url`, given
+/// the page's own real navigated URL — or `None` when nothing should be
+/// sent (no real page URL to derive one from, `request_url` doesn't parse,
+/// or a downgrade from `https://` to `http://`, which a real browser
+/// always strips the referrer for regardless of origin). Same-origin
+/// requests get the full page URL (minus fragment, which a referrer never
+/// includes even same-origin); cross-origin requests get only the page's
+/// origin — the two-tier behavior `strict-origin-when-cross-origin` is
+/// named for. No per-page/per-request policy override (`<meta
+/// name="referrer">`, a `Referrer-Policy` response header, or a `fetch()`
+/// `referrerPolicy` option) — this engine has none of those wired in
+/// anywhere, so the browser default is the only policy that exists here.
+pub(crate) unsafe fn referrer_header(ctx: *mut sys::JSContext, request_url: &str) -> Option<String> {
+    let page_url = crate::location::current_url(ctx)?;
+    let request_url = url::Url::parse(request_url).ok()?;
+    if page_url.scheme() == "https" && request_url.scheme() == "http" {
+        return None;
+    }
+    if request_url.origin() == page_url.origin() {
+        let mut referrer = page_url;
+        referrer.set_fragment(None);
+        Some(referrer.to_string())
+    } else {
+        Some(format!("{}/", page_url.origin().ascii_serialization()))
+    }
+}

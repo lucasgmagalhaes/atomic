@@ -149,10 +149,12 @@ unsafe extern "C" fn fetch(ctx: *mut sys::JSContext, _this_val: sys::JSValue, ar
         return promise;
     }
 
+    let referrer = crate::cors::referrer_header(ctx, &url);
     let (tx, rx) = mpsc::channel();
     let request_url = url.clone();
     thread::spawn(move || {
-        let _ = tx.send(net::get(&url));
+        let headers: Vec<(&str, &str)> = referrer.as_deref().map(|r| vec![("Referer", r)]).unwrap_or_default();
+        let _ = tx.send(net::get_with_headers(&url, &headers));
     });
 
     with_state(ctx, |s| s.fetches.push(PendingFetch { resolve, reject, url: request_url, receiver: rx }));
@@ -210,10 +212,12 @@ unsafe extern "C" fn xhr_send(ctx: *mut sys::JSContext, this_val: sys::JSValue, 
         return sys::js_undefined();
     }
 
+    let referrer = crate::cors::referrer_header(ctx, &url);
     let (tx, rx) = mpsc::channel();
     let request_url = url.clone();
     thread::spawn(move || {
-        let _ = tx.send(net::get(&url));
+        let headers: Vec<(&str, &str)> = referrer.as_deref().map(|r| vec![("Referer", r)]).unwrap_or_default();
+        let _ = tx.send(net::get_with_headers(&url, &headers));
     });
 
     let xhr_obj = sys::JS_DupValue(ctx, this_val);

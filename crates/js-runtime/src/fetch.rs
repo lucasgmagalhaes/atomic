@@ -79,7 +79,9 @@ unsafe extern "C" fn fetch_sync(
         return result;
     }
 
-    match net::get(&url) {
+    let referrer = crate::cors::referrer_header(ctx, &url);
+    let headers: Vec<(&str, &str)> = referrer.as_deref().map(|r| vec![("Referer", r)]).unwrap_or_default();
+    match net::get_with_headers(&url, &headers) {
         Ok(response) if crate::cors::is_response_allowed(page_origin.as_deref(), &url, &response.headers) => {
             let body = String::from_utf8_lossy(&response.body).into_owned();
             set_bool(ctx, result, "ok", (200..300).contains(&response.status));

@@ -11,6 +11,7 @@ use quickjs_sys as sys;
 mod blob;
 mod class_registry;
 mod clipboard;
+mod computed_style;
 mod crypto;
 mod cors;
 mod css_style;
@@ -140,11 +141,13 @@ impl<'rt> Context<'rt> {
             session_storage: None,
             url: None,
             layout_rects: std::collections::HashMap::new(),
+            computed_styles: std::collections::HashMap::new(),
         });
         let raw = state.as_mut() as *mut host_state::HostState as *mut std::os::raw::c_void;
         unsafe {
             sys::JS_SetContextOpaque(ctx.ptr, raw);
             dom_bindings::register(ctx.ptr);
+            computed_style::register(ctx.ptr);
         }
         ctx._host_state = Some(state);
         ctx
@@ -290,6 +293,18 @@ impl<'rt> Context<'rt> {
     pub fn set_layout_rects(&mut self, rects: std::collections::HashMap<dom::NodeId, Rect>) {
         if let Some(state) = self._host_state.as_mut() {
             state.layout_rects = rects;
+        }
+    }
+
+    /// Replaces every real cascaded computed style (`getComputedStyle` —
+    /// see `computed_style`) wholesale — a host (`profile-worker`'s
+    /// `Page::render`, after it runs `layout-engine`'s cascade resolver
+    /// against the current DOM) calls this once per render pass, same
+    /// shape as [`Context::set_layout_rects`]. No-op on a plain
+    /// [`Context::new`]/`with_dom` that never calls it.
+    pub fn set_computed_styles(&mut self, styles: std::collections::HashMap<dom::NodeId, std::collections::HashMap<String, String>>) {
+        if let Some(state) = self._host_state.as_mut() {
+            state.computed_styles = styles;
         }
     }
 

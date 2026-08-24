@@ -50,6 +50,14 @@ pub(crate) struct HostState {
     /// `set_layout_rects` at all) reads as an all-zero rect, same
     /// degrade-gracefully pattern as `url`/`cookies`.
     pub layout_rects: HashMap<dom::NodeId, crate::layout_measurement::Rect>,
+    /// Real cascaded property values, pushed in wholesale by `Context::
+    /// set_computed_styles` (see `crate::computed_style`) after a host runs
+    /// `layout-engine` against the current DOM — same "host computes it,
+    /// context just stores the result" shape as `layout_rects`. A node
+    /// absent here (never laid out, or nothing has called
+    /// `set_computed_styles`) reads as an empty style, same
+    /// degrade-gracefully pattern as `layout_rects`/`url`.
+    pub computed_styles: HashMap<dom::NodeId, HashMap<String, String>>,
 }
 
 /// Reads the `HostState` behind `ctx`'s opaque slot, or null if unset

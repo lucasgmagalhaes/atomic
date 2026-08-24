@@ -58,6 +58,12 @@ pub(crate) struct HostState {
     /// `set_computed_styles`) reads as an empty style, same
     /// degrade-gracefully pattern as `layout_rects`/`url`.
     pub computed_styles: HashMap<dom::NodeId, HashMap<String, String>>,
+    /// Raw `Content-Security-Policy` policy text, checked by
+    /// `crate::csp::is_connect_allowed` before `fetch`/`fetchSync`/
+    /// `XMLHttpRequest` send a request. `None` (a plain `Context::with_dom`,
+    /// or a host that never calls `Context::set_csp`) enforces nothing —
+    /// same degrade-gracefully pattern as `url`/`layout_rects`.
+    pub csp: Option<String>,
 }
 
 /// Reads the `HostState` behind `ctx`'s opaque slot, or null if unset

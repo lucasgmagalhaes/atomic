@@ -14,6 +14,7 @@ mod clipboard;
 mod computed_style;
 mod crypto;
 mod cors;
+mod csp;
 mod css_style;
 mod document;
 mod document_cookie;
@@ -142,6 +143,7 @@ impl<'rt> Context<'rt> {
             url: None,
             layout_rects: std::collections::HashMap::new(),
             computed_styles: std::collections::HashMap::new(),
+            csp: None,
         });
         let raw = state.as_mut() as *mut host_state::HostState as *mut std::os::raw::c_void;
         unsafe {
@@ -305,6 +307,17 @@ impl<'rt> Context<'rt> {
     pub fn set_computed_styles(&mut self, styles: std::collections::HashMap<dom::NodeId, std::collections::HashMap<String, String>>) {
         if let Some(state) = self._host_state.as_mut() {
             state.computed_styles = styles;
+        }
+    }
+
+    /// Sets the real `Content-Security-Policy` text `fetch`/`fetchSync`/
+    /// `XMLHttpRequest` check before sending a request (see `csp`). No-op
+    /// on a plain [`Context::new`]/`with_dom` that never calls it — nothing
+    /// enforces a CSP until a host provides one, same pattern
+    /// [`Context::set_url`] already has.
+    pub fn set_csp(&mut self, policy: &str) {
+        if let Some(state) = self._host_state.as_mut() {
+            state.csp = Some(policy.to_string());
         }
     }
 

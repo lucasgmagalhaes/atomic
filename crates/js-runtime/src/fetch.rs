@@ -72,7 +72,7 @@ unsafe extern "C" fn fetch_sync(
     };
 
     let page_origin = crate::cors::page_origin(ctx);
-    if crate::cors::is_mixed_content_blocked(page_origin.as_deref(), &url) {
+    if crate::cors::is_mixed_content_blocked(page_origin.as_deref(), &url) || crate::csp::is_request_blocked(ctx, &url) {
         set_bool(ctx, result, "ok", false);
         set_num(ctx, result, "status", 0.0);
         set_str(ctx, result, "body", "");

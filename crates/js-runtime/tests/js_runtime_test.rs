@@ -60,6 +60,37 @@ fn get_element_by_id_returns_a_node_with_text_content() {
 }
 
 #[test]
+fn scripts_can_create_append_query_and_remove_dom_nodes() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let parent = d.create_element("main");
+    d.set_attribute(parent, "id", "parent");
+    d.append_child(root, parent);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const parent = document.getElementById('parent'); const child = document.createElement('article'); child.textContent = 'created'; const appended = parent.appendChild(child); const found = parent.querySelector('article'); child.remove(); return `${appended === child},${found === child},${document.querySelector('article')}`; })()", "<test>").unwrap();
+    assert_eq!(result, "true,true,null");
+}
+
+#[test]
+fn dom_mutation_rejects_invalid_tags_and_cycles() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let parent = d.create_element("div");
+    let child = d.create_element("span");
+    d.set_attribute(parent, "id", "parent");
+    d.set_attribute(child, "id", "child");
+    d.append_child(root, parent);
+    d.append_child(parent, child);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const parent = document.getElementById('parent'); const child = document.getElementById('child'); let invalid = false; let cycle = false; try { document.createElement('<script>'); } catch (_) { invalid = true; } try { child.appendChild(parent); } catch (_) { cycle = true; } return `${invalid},${cycle},${parent.querySelector('span') === child}`; })()", "<test>").unwrap();
+    assert_eq!(result, "true,true,true");
+}
+
+#[test]
 fn query_selector_uses_the_existing_css_selector_subset_in_document_order() {
     let mut d = dom::Dom::new();
     let root = d.root();

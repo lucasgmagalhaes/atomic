@@ -29,6 +29,7 @@ use quickjs_sys as sys;
 const MAX_SELECTOR_LENGTH: usize = 1024;
 const MAX_SELECTOR_VISITS: usize = 4096;
 const MAX_SELECTOR_RESULTS: usize = 2048;
+const MAX_TAG_NAME_LENGTH: usize = 64;
 
 thread_local! {
     static NODE_OBJECTS: RefCell<HashMap<usize, HashMap<dom::NodeId, sys::JSValue>>> = RefCell::new(HashMap::new());
@@ -80,6 +81,17 @@ pub(crate) unsafe fn parent_node_id(
     (!dom.is_null())
         .then(|| (*dom).get(id).and_then(|node| node.parent))
         .flatten()
+}
+
+unsafe fn evict_node_object(ctx: *mut sys::JSContext, id: dom::NodeId) {
+    let cached = NODE_OBJECTS.with(|reg| {
+        reg.borrow_mut()
+            .get_mut(&(ctx as usize))
+            .and_then(|nodes| nodes.remove(&id))
+    });
+    if let Some(object) = cached {
+        sys::JS_FreeValue(ctx, object);
+    }
 }
 
 /// Frees every cached `Node` object for `ctx` — must run before
@@ -498,6 +510,102 @@ unsafe fn define_focus_methods(ctx: *mut sys::JSContext, proto: sys::JSValue) {
     sys::JS_SetPropertyStr(ctx, proto, blur_name.as_ptr(), blur_fn);
 }
 
+fn valid_tag_name(tag: &str) -> bool {
+    !tag.is_empty()
+        && tag.len() <= MAX_TAG_NAME_LENGTH
+        && tag
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+}
+
+fn is_ancestor(dom: &dom::Dom, ancestor: dom::NodeId, mut node: dom::NodeId) -> bool {
+    loop {
+        if node == ancestor {
+            return true;
+        }
+        let Some(parent) = dom.get(node).and_then(|node| node.parent) else {
+            return false;
+        };
+        node = parent;
+    }
+}
+
+unsafe fn evict_subtree(ctx: *mut sys::JSContext, dom: &dom::Dom, id: dom::NodeId) {
+    let children = dom
+        .get(id)
+        .map(|node| node.children.clone())
+        .unwrap_or_default();
+    for child in children {
+        evict_subtree(ctx, dom, child);
+    }
+    evict_node_object(ctx, id);
+}
+
+unsafe extern "C" fn node_append_child(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 1 {
+        return throw_type_error(ctx, "child node is required");
+    }
+    let Some(parent) = node_id(ctx, this_val) else {
+        return throw_type_error(ctx, "append target must be a node");
+    };
+    let child_value = *argv;
+    let Some(child) = node_id(ctx, child_value) else {
+        return throw_type_error(ctx, "child must be a node");
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() || (*dom).get(parent).is_none() || (*dom).get(child).is_none() {
+        return throw_type_error(ctx, "node is no longer attached to this document");
+    }
+    if is_ancestor(&*dom, child, parent) {
+        return throw_type_error(ctx, "cannot append an ancestor into its descendant");
+    }
+    (*dom).append_child(parent, child);
+    sys::JS_DupValue(ctx, child_value)
+}
+
+unsafe extern "C" fn node_remove(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    let dom = dom_opaque(ctx);
+    if !dom.is_null() && (*dom).get(id).is_some() {
+        if id == (*dom).root() {
+            return throw_type_error(ctx, "document root cannot be removed");
+        }
+        evict_subtree(ctx, &*dom, id);
+        (*dom).remove(id);
+    }
+    sys::js_undefined()
+}
+
+unsafe fn define_mutation_methods(ctx: *mut sys::JSContext, proto: sys::JSValue) {
+    for (name, function, arity) in [
+        ("appendChild", node_append_child as sys::JSCFunction, 1),
+        ("remove", node_remove as sys::JSCFunction, 0),
+    ] {
+        let name = CString::new(name).unwrap();
+        let value = sys::JS_NewCFunction2(
+            ctx,
+            function,
+            name.as_ptr(),
+            arity,
+            sys::JS_CFUNC_GENERIC,
+            0,
+        );
+        sys::JS_SetPropertyStr(ctx, proto, name.as_ptr(), value);
+    }
+}
+
 unsafe extern "C" fn node_query_selector(
     ctx: *mut sys::JSContext,
     this_val: sys::JSValue,
@@ -578,6 +686,7 @@ unsafe fn ensure_node_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
     define_text_content(ctx, proto);
     define_value(ctx, proto);
     define_focus_methods(ctx, proto);
+    define_mutation_methods(ctx, proto);
     define_selector_methods(ctx, proto);
     crate::events::define_event_target(ctx, proto);
     sys::JS_SetClassProto(ctx, class_id, proto);
@@ -622,6 +731,33 @@ unsafe extern "C" fn document_get_element_by_id(
         ),
         None => sys::js_null(),
     }
+}
+
+unsafe extern "C" fn document_create_element(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 1 {
+        return throw_type_error(ctx, "tag name is required");
+    }
+    let Some(tag) = read_js_string(ctx, *argv) else {
+        return throw_type_error(ctx, "tag name must be a string");
+    };
+    if !valid_tag_name(&tag) {
+        return throw_type_error(ctx, "invalid tag name");
+    }
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return throw_type_error(ctx, "document is unavailable");
+    }
+    let id = (*dom).create_element(&tag);
+    node_object(
+        ctx,
+        crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NODE_CLASS_KIND),
+        id,
+    )
 }
 
 unsafe extern "C" fn document_query_selector(
@@ -738,6 +874,16 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
         0,
     );
     sys::JS_SetPropertyStr(ctx, document, name.as_ptr(), get_by_id);
+    let name = CString::new("createElement").unwrap();
+    let create_element = sys::JS_NewCFunction2(
+        ctx,
+        document_create_element,
+        name.as_ptr(),
+        1,
+        sys::JS_CFUNC_GENERIC,
+        0,
+    );
+    sys::JS_SetPropertyStr(ctx, document, name.as_ptr(), create_element);
     for (name, function) in [
         ("querySelector", document_query_selector as sys::JSCFunction),
         (

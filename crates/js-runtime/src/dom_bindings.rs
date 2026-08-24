@@ -36,6 +36,7 @@ const MAX_TEXT_NODE_LENGTH: usize = 16 * 1024;
 
 thread_local! {
     static NODE_OBJECTS: RefCell<HashMap<usize, HashMap<dom::NodeId, sys::JSValue>>> = RefCell::new(HashMap::new());
+    static CLASS_LIST_OBJECTS: RefCell<HashMap<usize, HashMap<dom::NodeId, sys::JSValue>>> = RefCell::new(HashMap::new());
 }
 
 /// Returns a real, identity-stable `Node` JS object for `id` — the same
@@ -95,6 +96,8 @@ unsafe fn evict_node_object(ctx: *mut sys::JSContext, id: dom::NodeId) {
     if let Some(object) = cached {
         sys::JS_FreeValue(ctx, object);
     }
+    let cached = CLASS_LIST_OBJECTS.with(|reg| reg.borrow_mut().get_mut(&(ctx as usize)).and_then(|nodes| nodes.remove(&id)));
+    if let Some(object) = cached { sys::JS_FreeValue(ctx, object); }
 }
 
 /// Frees every cached `Node` object for `ctx` — must run before
@@ -106,6 +109,9 @@ pub(crate) unsafe fn cleanup(ctx: *mut sys::JSContext) {
         for (_, obj) in nodes {
             sys::JS_FreeValue(ctx, obj);
         }
+    }
+    if let Some(objects) = CLASS_LIST_OBJECTS.with(|reg| reg.borrow_mut().remove(&(ctx as usize))) {
+        for (_, obj) in objects { sys::JS_FreeValue(ctx, obj); }
     }
 }
 
@@ -485,6 +491,71 @@ unsafe fn define_attribute_properties(ctx: *mut sys::JSContext, proto: sys::JSVa
         );
         sys::JS_FreeAtom(ctx, atom);
     }
+}
+
+unsafe fn class_list_owner(ctx: *mut sys::JSContext, value: sys::JSValue) -> Option<dom::NodeId> {
+    let name = CString::new("__nimbleClassListOwner").unwrap();
+    let owner = sys::JS_GetPropertyStr(ctx, value, name.as_ptr());
+    let id = node_id(ctx, owner);
+    sys::JS_FreeValue(ctx, owner);
+    id
+}
+
+fn class_tokens(value: &str) -> Vec<String> {
+    value.split_ascii_whitespace().map(str::to_owned).collect()
+}
+
+fn valid_class_token(token: &str) -> bool {
+    !token.is_empty() && token.len() <= MAX_ATTRIBUTE_NAME_LENGTH && !token.bytes().any(|byte| byte.is_ascii_whitespace())
+}
+
+unsafe fn class_list_mutate(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue, add: bool) -> sys::JSValue {
+    let Some(id) = class_list_owner(ctx, this_val) else { return throw_type_error(ctx, "invalid classList receiver"); };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() || (*dom).get(id).is_none() { return throw_type_error(ctx, "node is no longer attached to this document"); }
+    let mut tokens = class_tokens((*dom).attribute(id, "class").unwrap_or_default());
+    for index in 0..argc {
+        let Some(token) = read_js_string(ctx, *argv.add(index as usize)) else { return throw_type_error(ctx, "class token must be a string"); };
+        if !valid_class_token(&token) { return throw_type_error(ctx, "invalid class token"); }
+        if add { if !tokens.contains(&token) { tokens.push(token); } } else { tokens.retain(|current| current != &token); }
+    }
+    let value = tokens.join(" ");
+    if value.len() > MAX_ATTRIBUTE_VALUE_LENGTH { return throw_type_error(ctx, "class attribute exceeds the maximum length"); }
+    (*dom).set_attribute(id, "class", &value);
+    sys::js_undefined()
+}
+
+unsafe extern "C" fn class_list_add(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue { class_list_mutate(ctx, this_val, argc, argv, true) }
+unsafe extern "C" fn class_list_remove(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue { class_list_mutate(ctx, this_val, argc, argv, false) }
+unsafe extern "C" fn class_list_contains(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
+    if argc < 1 { return throw_type_error(ctx, "class token is required"); }
+    let Some(token) = read_js_string(ctx, *argv) else { return throw_type_error(ctx, "class token must be a string"); };
+    if !valid_class_token(&token) { return throw_type_error(ctx, "invalid class token"); }
+    let Some(id) = class_list_owner(ctx, this_val) else { return sys::js_bool(false); };
+    let dom = dom_opaque(ctx);
+    sys::js_bool(!dom.is_null() && class_tokens((*dom).attribute(id, "class").unwrap_or_default()).contains(&token))
+}
+
+unsafe extern "C" fn node_class_list_get(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else { return sys::js_undefined(); };
+    if let Some(value) = CLASS_LIST_OBJECTS.with(|reg| reg.borrow().get(&(ctx as usize)).and_then(|objects| objects.get(&id).copied())) { return sys::JS_DupValue(ctx, value); }
+    let object = sys::JS_NewObject(ctx);
+    let owner = CString::new("__nimbleClassListOwner").unwrap();
+    sys::JS_SetPropertyStr(ctx, object, owner.as_ptr(), sys::JS_DupValue(ctx, this_val));
+    for (name, function) in [("add", class_list_add as sys::JSCFunction), ("remove", class_list_remove as sys::JSCFunction), ("contains", class_list_contains as sys::JSCFunction)] {
+        let name = CString::new(name).unwrap();
+        sys::JS_SetPropertyStr(ctx, object, name.as_ptr(), sys::JS_NewCFunction2(ctx, function, name.as_ptr(), 1, sys::JS_CFUNC_GENERIC, 0));
+    }
+    CLASS_LIST_OBJECTS.with(|reg| reg.borrow_mut().entry(ctx as usize).or_default().insert(id, sys::JS_DupValue(ctx, object)));
+    object
+}
+
+unsafe fn define_class_list(ctx: *mut sys::JSContext, proto: sys::JSValue) {
+    let name = CString::new("classList").unwrap();
+    let getter = sys::JS_NewCFunction2(ctx, std::mem::transmute::<Getter, sys::JSCFunction>(node_class_list_get), name.as_ptr(), 0, sys::JS_CFUNC_GETTER, 0);
+    let atom = sys::JS_NewAtom(ctx, name.as_ptr());
+    sys::JS_DefinePropertyGetSet(ctx, proto, atom, getter, sys::js_undefined(), sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE);
+    sys::JS_FreeAtom(ctx, atom);
 }
 
 unsafe fn navigation_node(
@@ -1236,6 +1307,7 @@ unsafe fn ensure_node_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
     let proto = sys::JS_NewObject(ctx);
     define_text_content(ctx, proto);
     define_attribute_properties(ctx, proto);
+    define_class_list(ctx, proto);
     define_navigation(ctx, proto);
     define_value(ctx, proto);
     define_focus_methods(ctx, proto);

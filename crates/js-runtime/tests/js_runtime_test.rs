@@ -221,6 +221,19 @@ fn document_body_is_stable_and_accepts_dynamic_children() {
 }
 
 #[test]
+fn class_list_is_stable_and_updates_the_class_attribute() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let element = d.create_element("div");
+    d.set_attribute(element, "class", "first first");
+    d.append_child(root, element);
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const el = document.querySelector('div'); const list = el.classList; list.add('second'); list.remove('first'); return `${list === el.classList},${list.contains('second')},${el.className}`; })()", "<test>").unwrap();
+    assert_eq!(result, "true,true,second");
+}
+
+#[test]
 fn query_selector_uses_the_existing_css_selector_subset_in_document_order() {
     let mut d = dom::Dom::new();
     let root = d.root();

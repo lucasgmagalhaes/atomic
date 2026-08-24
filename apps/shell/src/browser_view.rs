@@ -205,6 +205,28 @@ impl BrowserView {
         }
     }
 
+    /// Real coordinate click - `x`/`y` are pixel coordinates in this
+    /// view's own frame (see `main.rs`'s grid-cell click handler for how
+    /// a real egui pointer position gets converted into this space).
+    /// Wraps `profile::Profile::click_at`; a `None` `self.profile` (a
+    /// view that failed to spawn) is a silent no-op, same convention
+    /// `reload`/`navigate` already use.
+    pub fn click_at(&mut self, x: f64, y: f64) -> std::io::Result<Result<(), String>> {
+        let Some(profile) = &self.profile else {
+            return Ok(Ok(()));
+        };
+        profile.borrow_mut().click_at(x, y)
+    }
+
+    /// Real keyboard input - wraps `profile::Profile::type_key`, see that
+    /// method's own doc for what `"Backspace"` vs. any other string does.
+    pub fn type_key(&mut self, key: &str) -> std::io::Result<Result<(), String>> {
+        let Some(profile) = &self.profile else {
+            return Ok(Ok(()));
+        };
+        profile.borrow_mut().type_key(key)
+    }
+
     /// Sends `url` to the worker as a real navigation. Records `url` as
     /// [`current_url`](Self::current_url) either way, and
     /// [`navigation_error`](Self::navigation_error) if the fetch itself

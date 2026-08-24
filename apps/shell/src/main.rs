@@ -1164,6 +1164,53 @@ impl eframe::App for NimbleApp {
                 let response = cell_ui.allocate_response(cell_rect.size(), egui::Sense::click());
                 if response.clicked() {
                     self.selected = index;
+                    response.request_focus();
+                    // Real coordinate-to-DOM routing (mockup/rendering-engine-gaps.md's
+                    // "input real" gap, closed for mouse): the frame is
+                    // always rendered at PANE_WIDTH x PANE_HEIGHT (every
+                    // spawn call in this file uses those constants) and
+                    // displayed scaled + centered within `cell_rect` -
+                    // mirrors the same scale/center math the texture-paint
+                    // code below uses via `poll_texture`, computed here
+                    // ahead of it since the click needs it first. A click
+                    // landing in the letterboxed margin around the image
+                    // (when the pane's aspect ratio doesn't match the
+                    // cell's) is correctly ignored, not clamped onto an
+                    // edge.
+                    let image_size = egui::vec2(PANE_WIDTH as f32, PANE_HEIGHT as f32);
+                    let scale = (cell_rect.width() / image_size.x).min(cell_rect.height() / image_size.y).min(1.0);
+                    let displayed_size = image_size * scale;
+                    let image_rect = egui::Rect::from_center_size(cell_rect.center(), displayed_size);
+                    if let Some(pos) = response.interact_pointer_pos() {
+                        if image_rect.contains(pos) {
+                            let local = pos - image_rect.min;
+                            let px = (local.x / displayed_size.x) as f64 * PANE_WIDTH as f64;
+                            let py = (local.y / displayed_size.y) as f64 * PANE_HEIGHT as f64;
+                            let _ = self.panes[index].browser.click_at(px, py);
+                        }
+                    }
+                }
+                if response.has_focus() {
+                    // Real keyboard-to-DOM routing: whichever pane's
+                    // click most recently called `request_focus()` above
+                    // gets typed characters/backspace forwarded to
+                    // `profile::Profile::type_key` - a no-op on the
+                    // worker side (see its own `focused_id` doc) unless
+                    // that pane's last `click_at` actually landed on a
+                    // real `<input>`/`<textarea>`.
+                    for event in cell_ui.input(|i| i.events.clone()) {
+                        match event {
+                            egui::Event::Text(text) => {
+                                for ch in text.chars() {
+                                    let _ = self.panes[index].browser.type_key(&ch.to_string());
+                                }
+                            }
+                            egui::Event::Key { key: egui::Key::Backspace, pressed: true, .. } => {
+                                let _ = self.panes[index].browser.type_key("Backspace");
+                            }
+                            _ => {}
+                        }
+                    }
                 }
 
                 let mut close_clicked = false;

@@ -287,6 +287,54 @@ impl Profile {
         }
     }
 
+    /// Real coordinate click: `x`/`y` are pixel coordinates in the
+    /// profile's own frame (same space `latest_frame`'s pixels are in) -
+    /// the worker hit-tests its current layout and dispatches a real
+    /// `"click"` on the nearest id-addressable element (see
+    /// `profile-worker`'s `nearest_id_ancestor`/`dispatch_click_at` for
+    /// the real "only elements with an id, directly or via an ancestor,
+    /// are reachable" limitation this implies). If the hit element is
+    /// itself a real `<input>`/`<textarea>` with its own id, the worker
+    /// also focuses it for a subsequent [`type_key`](Self::type_key) -
+    /// that bookkeeping lives worker-side, not surfaced back through this
+    /// return value; `Ok(Ok(()))` just means the click reached a real
+    /// element. `Ok(Err(message))` means nothing was there to click (no
+    /// element at that point, or nothing id-addressable above it).
+    pub fn click_at(&mut self, x: f64, y: f64) -> std::io::Result<Result<(), String>> {
+        writeln!(self.stdin, "CLICK_AT {x} {y}")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        let line = line.trim();
+        match line.strip_prefix("ERROR ") {
+            Some(message) => Ok(Err(message.to_string())),
+            None => Ok(Ok(())),
+        }
+    }
+
+    /// Types `key` into whichever real element the most recent
+    /// [`click_at`](Self::click_at) focused - `"Backspace"` is a real
+    /// delete-last-character, anything else is appended as typed text
+    /// (into `textContent`, not a real `.value` - see `profile-worker`'s
+    /// own doc on why). `Ok(Err(message))` if nothing is currently
+    /// focused (never clicked an `<input>`/`<textarea>`, or the page
+    /// reloaded since - see `profile-worker`'s `focused_id` reset on
+    /// `RELOAD`/`NAVIGATE`) or the focused id no longer exists.
+    pub fn type_key(&mut self, key: &str) -> std::io::Result<Result<(), String>> {
+        if key.contains('\n') {
+            return Ok(Err("key must not contain a newline".to_string()));
+        }
+        writeln!(self.stdin, "KEY {key}")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        let line = line.trim();
+        match line.strip_prefix("ERROR ") {
+            Some(message) => Ok(Err(message.to_string())),
+            None => Ok(Ok(())),
+        }
+    }
+
     /// Caps the worker's own vsync render loop at `fps` frames per second
     /// (the mockup's "Settings > Performance > frame cap" knob) - takes
     /// effect on the worker's very next tick, not a respawn (unlike the

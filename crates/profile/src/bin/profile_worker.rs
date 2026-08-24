@@ -161,6 +161,31 @@ fn collect_css_sources(dom: &Dom, node: NodeId, out: &mut Vec<CssSource>) {
     }
 }
 
+/// Real `<script>` tag execution - previously only the hardcoded demo
+/// page's own `DEMO_SCRIPT` ever ran (`run_demo_script`, see `Page::load`);
+/// a genuinely fetched/navigated page's own inline `<script>` content was
+/// parsed into the DOM (as a real text-content child, same as any other
+/// element) but never evaluated. Collects every `<script>` element's real
+/// text content in document order (matches real script execution order -
+/// a script placed after the elements it references, the common real
+/// pattern, sees them already in the DOM by the time it runs).
+///
+/// Scope cut, same shape as `<link>` stylesheets' own history before this:
+/// only inline `<script>...</script>` content - a `<script src="...">`
+/// external script is a real further network-fetch feature, not attempted
+/// in this pass, and its tag is walked past without effect (not an error).
+fn collect_script_sources(dom: &Dom, node: NodeId, out: &mut Vec<String>) {
+    let Some(n) = dom.get(node) else { return };
+    if let NodeData::Element { tag, attributes } = &n.data {
+        if tag == "script" && !attributes.contains_key("src") {
+            out.push(dom.text_content(node));
+        }
+    }
+    for &child in &n.children {
+        collect_script_sources(dom, child, out);
+    }
+}
+
 /// Fetches `url` with a `Cookie` header built from the jar at
 /// `storage_root/<host>/cookies.txt` (the same file
 /// `js_runtime::Context::with_storage` opens for `document.cookie` — see
@@ -490,6 +515,8 @@ impl<'rt> Page<'rt> {
     ) -> Self {
         let (dom, html_el) = html::parse_to_html_element(html);
         let sheet = build_stylesheet(&dom, html_el, base_url, viewport_width, storage_root, proxy, dns_server);
+        let mut scripts = Vec::new();
+        collect_script_sources(&dom, html_el, &mut scripts);
 
         let ctx = match storage_host {
             Some(host) => match Context::with_storage(runtime, dom, host, storage_root.join(host)) {
@@ -504,6 +531,17 @@ impl<'rt> Page<'rt> {
         };
         if run_demo_script {
             let _ = ctx.eval(DEMO_SCRIPT, "<profile-worker demo>");
+        }
+        // Real page scripts, in real document order - a later script
+        // failing (a real JS exception) doesn't stop earlier ones from
+        // having already run, matching how a real browser keeps executing
+        // a page after one `<script>` throws (each gets its own top-level
+        // try - this engine still has no `window.onerror`/console to
+        // report it to, so a failure is silent here, same "no error
+        // surface for a page's own script" scope every other page-script
+        // path in this worker already has).
+        for (index, script) in scripts.iter().enumerate() {
+            let _ = ctx.eval(script, &format!("<script {index}>"));
         }
         Page { ctx, html_el, sheet }
     }
@@ -527,6 +565,103 @@ impl<'rt> Page<'rt> {
         composite_glyphs(&mut pixels, width, height, &glyphs);
         pixels
     }
+
+    /// Real coordinate-to-DOM-node hit test — rebuilds and lays out the
+    /// same box tree `render` does (against `width`, the pane's own real
+    /// frame width, so the caller's `(x, y)` must already be in that same
+    /// pixel space) and walks it via `layout_engine::hit_test`. `None`
+    /// covers both "point is outside every box" and "the parse/layout
+    /// step itself failed" — a caller can't distinguish those from this
+    /// return value alone, matching this method's only real use
+    /// (`CLICK_AT`, where both cases report the same "nothing there"
+    /// outcome anyway).
+    fn hit_test_at(&self, width: u32, x: f64, y: f64) -> Option<NodeId> {
+        let dom = self.ctx.dom()?;
+        let mut tree = build_box_tree_with_viewport(dom, self.html_el, &self.sheet, width as f64)?;
+        layout_block(&mut tree, width as f64, 0.0, 0.0);
+        layout_engine::hit_test(&tree, x, y)
+    }
+}
+
+/// Walks from `node` up through real `dom::Dom` parent links (not a JS
+/// call — this runs before any JS-level dispatch happens) looking for the
+/// nearest ancestor (including `node` itself) that has a real `id`
+/// attribute. `CLICK_AT`'s real limitation, same as automation's existing
+/// `#id`-only `CLICK`/`FILL` (see `require_id_selector`'s own doc): a
+/// coordinate click can only ever reach an element the page itself gave
+/// an id to, directly or via one of its ancestors — real event bubbling
+/// still finds *a* real listener target this way in the common case
+/// (buttons/links typically carry an id, or a parent does), but a click
+/// on a page with no ids anywhere genuinely can't be dispatched, and this
+/// returns `None` rather than silently no-opping past that.
+fn nearest_id_ancestor(dom: &Dom, node: NodeId) -> Option<String> {
+    let mut current = Some(node);
+    while let Some(id) = current {
+        if let Some(value) = dom.attribute(id, "id") {
+            return Some(value.to_string());
+        }
+        current = dom.get(id).and_then(|n| n.parent);
+    }
+    None
+}
+
+/// Real coordinate click: hit-tests `(x, y)`, dispatches a real `"click"`
+/// via the nearest id-addressable ancestor (see `nearest_id_ancestor`'s
+/// own doc for the real limitation that implies), and reports whether the
+/// hit node itself is a real `<input>`/`<textarea>` with its own `id` —
+/// if so, `KEY` can now type into it (see that command's own doc). Not a
+/// focus *model* (no blur, no tab order, no `activeElement`) - a real but
+/// deliberately minimal "which id does the next KEY affect" tracker, the
+/// same "narrowest real thing that unblocks typing" scope cut this
+/// worker's other input commands (`CLICK`/`FILL`) already make.
+fn dispatch_click_at(page: &Page, width: u32, x: f64, y: f64) -> Result<Option<String>, String> {
+    let node = page.hit_test_at(width, x, y).ok_or("no element at that point")?;
+    let click_id = {
+        let dom_ref = page.ctx.dom().ok_or("no DOM available")?;
+        nearest_id_ancestor(dom_ref, node).ok_or("no id-addressable element at or above that point")?
+    };
+    dispatch_click(&page.ctx, &format!("#{click_id}"))?;
+
+    // Re-borrow fresh rather than reusing the pre-dispatch `dom_ref` - the
+    // click listener that just ran (real JS, via `dispatch_click` above)
+    // could have mutated the DOM, and this engine's arena (`dom::Dom`'s
+    // internal `Vec<Slot>`) isn't guaranteed not to reallocate on a node
+    // creation in between.
+    let dom_ref = page.ctx.dom().ok_or("no DOM available")?;
+    let is_input_like = matches!(&dom_ref.get(node).map(|n| &n.data), Some(NodeData::Element { tag, .. }) if tag == "input" || tag == "textarea");
+    let focus_id = if is_input_like { dom_ref.attribute(node, "id").map(str::to_string) } else { None };
+    Ok(focus_id)
+}
+
+/// Types `key` into whichever real `<input>`/`<textarea>` id `CLICK_AT`
+/// most recently focused (see `dispatch_click_at`'s doc) - `"Backspace"`
+/// removes the field's real last character, anything else is appended
+/// verbatim as typed text. Same `textContent`-not-`.value` deviation
+/// `FILL` already documents (this engine has no real
+/// `HTMLInputElement.value`) - a real `"keydown"` event still dispatches
+/// first via the existing `dispatchEvent` binding, so a page's own
+/// `keydown` listener genuinely runs, same as a real browser firing the
+/// event before applying the default action.
+fn type_key(ctx: &Context, focused_id: &str, key: &str) -> Result<(), String> {
+    let current = {
+        let dom_ref = ctx.dom().ok_or("no DOM available")?;
+        let node = dom_ref.find_by_id(focused_id).ok_or_else(|| format!("no element with id \"{focused_id}\""))?;
+        dom_ref.text_content(node)
+    };
+    let updated = if key == "Backspace" {
+        let mut chars: Vec<char> = current.chars().collect();
+        chars.pop();
+        chars.into_iter().collect()
+    } else {
+        format!("{current}{key}")
+    };
+    let script = format!(
+        "(function(){{ var el = document.getElementById({id}); if (el === null) throw {missing}; el.dispatchEvent(\"keydown\"); el.textContent = {value}; }})();",
+        id = js_string_literal(focused_id),
+        missing = js_string_literal(&format!("no element with id \"{focused_id}\"")),
+        value = js_string_literal(&updated),
+    );
+    ctx.eval(&script, "<pane key>").map(|_| ()).map_err(|_| format!("no element with id \"{focused_id}\" (or its keydown handler threw)"))
 }
 
 /// Loads `source`, returning the built page and `Some(error)` if the
@@ -643,6 +778,11 @@ fn main() {
     // liveness checks and settings changes), only the vsync work itself
     // stops.
     let mut paused = false;
+    // Real "which id does the next KEY affect" state - see
+    // `dispatch_click_at`'s doc. Reset on `RELOAD`/`NAVIGATE` since a
+    // fresh `Page` means a fresh DOM the old id might not even exist in
+    // anymore.
+    let mut focused_id: Option<String> = None;
 
     'render_loop: loop {
         while let Ok(line) = cmd_rx.try_recv() {
@@ -662,6 +802,7 @@ fn main() {
             } else if line == "RELOAD" {
                 let (loaded, error) = load_source(&runtime, &current_source, width as f64, &storage_root, proxy.as_ref(), dns_server);
                 page = loaded;
+                focused_id = None;
                 writer.publish(&page.render(&renderer, width, height));
                 match error {
                     Some(message) => {
@@ -676,6 +817,7 @@ fn main() {
                 current_source = PageSource::Url(url.trim().to_string());
                 let (loaded, error) = load_source(&runtime, &current_source, width as f64, &storage_root, proxy.as_ref(), dns_server);
                 page = loaded;
+                focused_id = None;
                 writer.publish(&page.render(&renderer, width, height));
                 match error {
                     Some(message) => {
@@ -695,6 +837,47 @@ fn main() {
                     }
                     Err(message) => {
                         let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
+                    }
+                }
+                let _ = stdout.flush();
+            } else if let Some(rest) = line.strip_prefix("CLICK_AT ") {
+                let mut parts = rest.split_whitespace();
+                let coords = parts.next().zip(parts.next()).and_then(|(x, y)| Some((x.parse::<f64>().ok()?, y.parse::<f64>().ok()?)));
+                match coords {
+                    Some((x, y)) => {
+                        let result = dispatch_click_at(&page, width, x, y);
+                        writer.publish(&page.render(&renderer, width, height));
+                        match result {
+                            Ok(focus) => {
+                                focused_id = focus;
+                                let _ = writeln!(stdout, "CLICKED");
+                            }
+                            Err(message) => {
+                                let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
+                            }
+                        }
+                    }
+                    None => {
+                        let _ = writeln!(stdout, "ERROR CLICK_AT requires two numeric coordinates");
+                    }
+                }
+                let _ = stdout.flush();
+            } else if let Some(key) = line.strip_prefix("KEY ") {
+                match &focused_id {
+                    Some(id) => {
+                        let result = type_key(&page.ctx, id, key);
+                        writer.publish(&page.render(&renderer, width, height));
+                        match result {
+                            Ok(()) => {
+                                let _ = writeln!(stdout, "TYPED");
+                            }
+                            Err(message) => {
+                                let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
+                            }
+                        }
+                    }
+                    None => {
+                        let _ = writeln!(stdout, "ERROR no element focused - CLICK_AT an <input>/<textarea> first");
                     }
                 }
                 let _ = stdout.flush();

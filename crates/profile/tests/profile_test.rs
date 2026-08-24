@@ -666,6 +666,93 @@ fn navigate_without_a_dns_server_never_contacts_one() {
 }
 
 #[test]
+fn click_at_a_real_coordinate_dispatches_a_real_click_and_changes_the_page() {
+    // #target sits at the document's real top-left flow position (no
+    // position/float exists in this engine - see mockup/rendering-engine-gaps.md -
+    // so it's exactly where a first block-level child with no margin
+    // always lands) and gets a real click listener that mutates its own
+    // textContent, giving a real, observable pixel change on success.
+    // <style>/<script> come *after* #target - this engine has no UA
+    // stylesheet hiding <head>/<style> (see mockup/rendering-engine-gaps.md),
+    // so raw CSS/JS source text placed before an element in the markup
+    // renders as real visible text and pushes later content down; placing
+    // it after keeps #target at its real, predictable (0,0) flow position
+    // (matches the convention this file's own existing style-block test
+    // already uses).
+    let page_addr = serve_html_once(
+        r##"<div id="target">click me</div>
+        <style>#target { width: 100px; height: 40px; }</style>
+        <script>document.getElementById("target").addEventListener("click", function(){ document.getElementById("target").textContent = "clicked!"; });</script>"##,
+    );
+
+    let name = unique_shmem_name("click-at");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+    profile.navigate(&format!("http://{page_addr}/")).expect("protocol should not fail").expect("navigate should succeed");
+
+    let frame_before = profile.latest_frame().unwrap();
+    let result = profile.click_at(10.0, 10.0).expect("protocol should not fail");
+    assert!(result.is_ok(), "a click on the real target element should succeed: {result:?}");
+
+    let frame_after = profile.latest_frame().unwrap();
+    assert_ne!(frame_before, frame_after, "the click listener's real textContent mutation should visibly change rendered pixels");
+
+    profile.quit();
+}
+
+#[test]
+fn click_at_a_point_with_no_element_reports_an_error() {
+    // A real, deliberately tiny page - block layout means nothing here
+    // extends anywhere near the bottom-right of a 300x150 frame, so that
+    // corner is genuinely outside every real box, not just "probably".
+    let page_addr = serve_html_once(r##"<div id="tiny">x</div>"##);
+
+    let name = unique_shmem_name("click-at-empty");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+    profile.navigate(&format!("http://{page_addr}/")).expect("protocol should not fail").expect("navigate should succeed");
+
+    let result = profile.click_at(299.0, 149.0).expect("protocol should not fail");
+    assert!(result.is_err(), "a click with no real element underneath should report an error, not silently succeed");
+
+    profile.quit();
+}
+
+#[test]
+fn click_at_then_type_key_types_into_a_real_focused_input() {
+    let page_addr = serve_html_once(r##"<input id="field"><style>#field { width: 150px; height: 30px; }</style>"##);
+
+    let name = unique_shmem_name("type-key");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+    profile.navigate(&format!("http://{page_addr}/")).expect("protocol should not fail").expect("navigate should succeed");
+
+    let click_result = profile.click_at(10.0, 10.0).expect("protocol should not fail");
+    assert!(click_result.is_ok(), "clicking the real <input> should succeed: {click_result:?}");
+
+    let frame_before = profile.latest_frame().unwrap();
+    let type_result = profile.type_key("h").expect("protocol should not fail");
+    assert!(type_result.is_ok(), "typing into the real focused input should succeed: {type_result:?}");
+
+    let frame_after = profile.latest_frame().unwrap();
+    assert_ne!(frame_before, frame_after, "typing a real character should visibly change rendered pixels");
+
+    profile.quit();
+}
+
+#[test]
+fn type_key_with_nothing_focused_reports_an_error() {
+    let name = unique_shmem_name("type-key-unfocused");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let result = profile.type_key("x").expect("protocol should not fail");
+    assert!(result.is_err(), "typing with nothing ever clicked/focused should report an error, not silently no-op");
+
+    profile.quit();
+}
+
+#[test]
 fn spawn_with_gpu_adapter_zero_opens_a_real_adapter_and_renders_correctly() {
     // Adapter 0 always exists if this dev machine can run any of this
     // workspace's other GPU tests at all - proves the index actually

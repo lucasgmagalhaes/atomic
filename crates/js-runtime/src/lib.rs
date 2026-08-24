@@ -16,6 +16,7 @@ mod document;
 mod document_cookie;
 mod dom_bindings;
 mod events;
+mod event_subclasses;
 mod fetch;
 mod fetch_async;
 mod host_state;

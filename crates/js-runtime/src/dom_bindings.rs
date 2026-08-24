@@ -2150,6 +2150,7 @@ unsafe fn define_document_element(ctx: *mut sys::JSContext, document: sys::JSVal
 pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     ensure_node_class(ctx);
     crate::events::register(ctx);
+    crate::event_subclasses::register(ctx);
 
     let document = crate::document::get_or_create(ctx);
 

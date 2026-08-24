@@ -104,6 +104,7 @@ use css::{parse_stylesheet, Stylesheet};
 use dom::{Dom, NodeData, NodeId};
 use image_decode::DecodedImage;
 use js_runtime::{Context, Runtime};
+use js_runtime::Rect as LayoutMeasurementRect;
 use layout_engine::{apply_image_sizes, build_box_tree_with_viewport, layout_block, LayoutBox, PositionedGlyph};
 use render::{
     build_display_list, build_glyph_list, build_image_list, composite_glyphs, composite_images, ClipRect, ClippedGlyph, GpuRenderer,
@@ -204,6 +205,36 @@ fn collect_css_sources(dom: &Dom, node: NodeId, out: &mut Vec<CssSource>) {
 /// only inline `<script>...</script>` content - a `<script src="...">`
 /// external script is a real further network-fetch feature, not attempted
 /// in this pass, and its tag is walked past without effect (not an error).
+/// Flattens a laid-out `LayoutBox` tree into a `NodeId -> Rect` map for
+/// `Context::set_layout_rects` — the real backing data for
+/// `getBoundingClientRect`/`offsetWidth`/etc (see `js_runtime::
+/// layout_measurement`). `LayoutBox::dimensions` is already absolute
+/// (viewport-relative, unscrolled) document space, the same space
+/// `render`'s own `build_display_list` paints from — no coordinate
+/// conversion needed, just a straight copy per box. A synthetic inline-run
+/// box (`LayoutBox::inline_spans`, see `layout_engine::tree`'s module doc)
+/// still has a real `node` id (its first source child's) and dimensions,
+/// so it's included like any other box, not skipped.
+fn collect_layout_rects(tree: &LayoutBox) -> HashMap<NodeId, LayoutMeasurementRect> {
+    fn walk(box_: &LayoutBox, out: &mut HashMap<NodeId, LayoutMeasurementRect>) {
+        out.insert(
+            box_.node,
+            LayoutMeasurementRect {
+                x: box_.dimensions.x,
+                y: box_.dimensions.y,
+                width: box_.dimensions.width,
+                height: box_.dimensions.height,
+            },
+        );
+        for child in &box_.children {
+            walk(child, out);
+        }
+    }
+    let mut out = HashMap::new();
+    walk(tree, &mut out);
+    out
+}
+
 fn collect_script_sources(dom: &Dom, node: NodeId, out: &mut Vec<String>) {
     let Some(n) = dom.get(node) else { return };
     if let NodeData::Element { tag, attributes, .. } = &n.data {
@@ -743,8 +774,9 @@ impl<'rt> Page<'rt> {
     /// absolute document space as everything else, so it needs the same
     /// `-offset`/`-scroll_top` shift applied as the quad/glyph it clips,
     /// or a scrolled page would clip against a stale, unscrolled region.
-    fn render(&self, renderer: &GpuRenderer, width: u32, height: u32, scroll_top: f64) -> Vec<u8> {
+    fn render(&mut self, renderer: &GpuRenderer, width: u32, height: u32, scroll_top: f64) -> Vec<u8> {
         let tree = self.layout(width).expect("parsed HTML always produces a box");
+        self.ctx.set_layout_rects(collect_layout_rects(&tree));
         let offset = scroll_top as f32;
         let shift_clip = |clip: Option<ClipRect>, dy: f32| clip.map(|c| ClipRect { y: c.y - dy, ..c });
 

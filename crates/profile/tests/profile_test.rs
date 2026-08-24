@@ -1062,6 +1062,47 @@ fn click_at_a_point_with_no_element_reports_an_error() {
 }
 
 #[test]
+fn get_bounding_client_rect_reflects_the_real_rendered_layout() {
+    // #box starts blue (.narrow) sized 100x50 by real CSS. Its own click
+    // handler measures itself via a real getBoundingClientRect() and only
+    // swaps to red (.wide) if the measured width/height match what the
+    // real layout engine actually computed - proving the rect Page::render
+    // pushed via Context::set_layout_rects (after the *first* real render,
+    // from navigate) is genuinely visible to a script running later, not
+    // just to js-runtime's own isolated unit tests.
+    let html = r#"<div id="box" class="narrow"></div>
+        <style>.narrow { background-color: #0000ff; width: 100px; height: 50px; } .wide { background-color: #ff0000; width: 100px; height: 50px; }</style>
+        <script>document.getElementById('box').addEventListener('click', () => {
+            const r = document.getElementById('box').getBoundingClientRect();
+            if (r.width === 100 && r.height === 50) {
+                document.getElementById('box').className = 'wide';
+            }
+        });</script>"#;
+    let page_addr = serve_html_once(html);
+    let page_url = format!("http://{page_addr}/");
+
+    let name = unique_shmem_name("bounding-rect");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    profile.navigate(&page_url).unwrap().unwrap();
+    let before = profile.latest_frame().unwrap();
+    assert_eq!(&before[0..4], &[0, 0, 255, 255], "should start blue (.narrow)");
+
+    let click_result = profile.click_at(10.0, 10.0).expect("protocol should not fail");
+    assert!(click_result.is_ok(), "clicking the real box should succeed: {click_result:?}");
+
+    let after = profile.latest_frame().unwrap();
+    assert_eq!(
+        &after[0..4],
+        &[255, 0, 0, 255],
+        "the click handler's real getBoundingClientRect() measurement should have matched, swapping to .wide (red)"
+    );
+
+    profile.quit();
+}
+
+#[test]
 fn click_at_then_type_key_types_into_a_real_focused_input() {
     let page_addr = serve_html_once(r##"<input id="field"><style>#field { width: 150px; height: 30px; }</style>"##);
 

@@ -17,7 +17,7 @@
 //! box it used to be. `border-radius`/per-side border colors/styles
 //! aren't modeled (see `style::ComputedStyle::border_color`'s own doc).
 use crate::flex::layout_flex_children;
-use crate::style::{BorderStyle, Display, Length, Position};
+use crate::style::{BorderStyle, Clear, Display, Float, Length, Position};
 use crate::text::{layout_inline, layout_text, InlineSpan};
 use crate::tree::LayoutBox;
 
@@ -104,6 +104,33 @@ fn offset_from_edges(style: &crate::style::ComputedStyle) -> (f64, f64) {
         other => resolve_offset(other),
     };
     (dx, dy)
+}
+
+/// Resolves just a box's own outer (margin box) width from `style` and
+/// `containing_width`, without laying out its subtree - mirrors exactly
+/// the width math `layout_block` does internally (lines below), kept as a
+/// separate pure function since a right-floated box's `x` depends on its
+/// own resolved width, which normally isn't known until *after*
+/// `layout_block` runs (see `layout_children`'s `Float::Right` handling).
+/// Calling this first and then `layout_block` with the now-known `x`
+/// means `layout_block` recomputes the identical width the normal way -
+/// no float-specific branching needed inside it.
+fn resolve_outer_width(style: &crate::style::ComputedStyle, containing_width: f64) -> f64 {
+    let margin_left = resolve_edge(style.margin.left, containing_width);
+    let margin_right = resolve_edge(style.margin.right, containing_width);
+    let (border_left, border_right) = if style.border_style == BorderStyle::None {
+        (0.0, 0.0)
+    } else {
+        (resolve_edge(style.border_width.left, containing_width), resolve_edge(style.border_width.right, containing_width))
+    };
+    let padding_left = resolve_edge(style.padding.left, containing_width);
+    let padding_right = resolve_edge(style.padding.right, containing_width);
+    let content_width = match style.width {
+        Length::Px(px) => px,
+        Length::Percent(pct) => containing_width * pct / 100.0,
+        Length::Auto => (containing_width - margin_left - margin_right - border_left - border_right - padding_left - padding_right).max(0.0),
+    };
+    margin_left + margin_right + border_left + border_right + padding_left + padding_right + content_width
 }
 
 pub(crate) fn resolve_edge(length: Length, containing_width: f64) -> f64 {
@@ -227,6 +254,30 @@ pub fn layout_block(box_: &mut LayoutBox, containing_width: f64, x: f64, y: f64)
 /// normal item) - the flex algorithm has no equivalent "skip me" path,
 /// and flex+abspos together is enough of a corner case that adding one
 /// wasn't worth it for this pass.
+///
+/// Real `float`/`clear` in the same branch, same "real but narrower than
+/// spec" treatment `position` already got (see [`crate::style::Float`]'s
+/// own doc for exactly what's cut): `left_edge_y`/`right_edge_y` track
+/// the lowest point reached by floats on each side so far, seeded at
+/// `content_y`. A floated child is removed from the normal stacking
+/// cursor (like `absolute`) and placed flush to its side's edge at
+/// `max(cursor_y, side_edge_y)` — never above the general flow position
+/// it appears at in document order, and never overlapping an earlier
+/// same-side float — then that side's edge advances by the float's own
+/// total height (`layout_block`'s return value). A non-floated child with
+/// `clear` pushes `cursor_y` down to the named side's edge (or both)
+/// before it's laid out, same real "below every earlier float on that
+/// side" behavior the spec gives `clear`. What's real but not spec-exact:
+/// no line-box narrowing (nothing here makes inline content wrap around a
+/// float — a float just visually sits wherever it's placed, independent
+/// of any inline sibling), and this container's own returned height
+/// always grows to include its floats' full extent (`cursor_y`/
+/// `left_edge_y`/`right_edge_y`, whichever is greatest) — real CSS only
+/// does that for a container establishing its own block formatting
+/// context (e.g. `overflow` other than `visible`), not every block
+/// unconditionally; tracking BFC establishment wasn't worth adding for
+/// this pass, and "always contains its floats" is arguably more useful
+/// anyway absent a `clearfix`-equivalent a page could reach for.
 pub(crate) fn layout_children(box_: &mut LayoutBox, content_width: f64, content_x: f64, content_y: f64) -> f64 {
     if box_.style.display == Display::Flex {
         let explicit_height = match box_.style.height {
@@ -247,14 +298,38 @@ pub(crate) fn layout_children(box_: &mut LayoutBox, content_width: f64, content_
         }
     } else {
         let mut cursor_y = content_y;
+        let mut left_edge_y = content_y;
+        let mut right_edge_y = content_y;
         for child in &mut box_.children {
             if child.style.position == Position::Absolute {
                 let (dx, dy) = offset_from_edges(&child.style);
                 layout_block(child, content_width, dx, dy);
                 continue;
             }
+            if child.style.float != Float::None {
+                let float_y = cursor_y.max(if child.style.float == Float::Left { left_edge_y } else { right_edge_y });
+                let float_x = if child.style.float == Float::Left {
+                    content_x
+                } else {
+                    let outer_width = resolve_outer_width(&child.style, content_width);
+                    content_x + (content_width - outer_width).max(0.0)
+                };
+                let total_height = layout_block(child, content_width, float_x, float_y);
+                if child.style.float == Float::Left {
+                    left_edge_y = float_y + total_height;
+                } else {
+                    right_edge_y = float_y + total_height;
+                }
+                continue;
+            }
+            if child.style.clear == Clear::Left || child.style.clear == Clear::Both {
+                cursor_y = cursor_y.max(left_edge_y);
+            }
+            if child.style.clear == Clear::Right || child.style.clear == Clear::Both {
+                cursor_y = cursor_y.max(right_edge_y);
+            }
             cursor_y += layout_block(child, content_width, content_x, cursor_y);
         }
-        cursor_y - content_y
+        (cursor_y - content_y).max(left_edge_y - content_y).max(right_edge_y - content_y)
     }
 }

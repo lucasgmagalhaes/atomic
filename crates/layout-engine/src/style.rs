@@ -116,6 +116,31 @@ pub enum Overflow {
     Hidden,
 }
 
+/// Real, but narrower than the spec — see `layout::layout_children`'s own
+/// doc for exactly what's modeled: a floated box is removed from normal
+/// block stacking and placed flush to its containing block's left/right
+/// edge, not overlapping an earlier same-side float, but nothing wraps
+/// inline content around it (no line-box narrowing) and a `width: auto`
+/// float stretches to fill available width same as a normal block rather
+/// than shrink-to-fit sizing to its content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Float {
+    None,
+    Left,
+    Right,
+}
+
+/// See [`Float`]'s own doc — `clear` pushes a box below the bottom of
+/// whichever side(s) it names, tracked per containing block the same way
+/// `layout::layout_children` tracks float placement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Clear {
+    None,
+    Left,
+    Right,
+    Both,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlexDirection {
     Row,
@@ -192,6 +217,10 @@ pub struct ComputedStyle {
     /// Real content clipping - see [`Overflow`]'s own doc for the
     /// `hidden`/`auto`/`scroll` scope cut.
     pub overflow: Overflow,
+    /// See [`Float`]'s own doc for the real, narrower-than-spec scope.
+    pub float: Float,
+    /// See [`Clear`]'s own doc.
+    pub clear: Clear,
     /// One color for all four sides - real per-side colors
     /// (`border-top-color`, ...) aren't modeled. Initial value is black,
     /// not the spec's `currentColor` (which would need reading back
@@ -237,6 +266,8 @@ impl ComputedStyle {
             border_width: EdgeSizes::zero(),
             border_style: BorderStyle::None,
             overflow: Overflow::Visible,
+            float: Float::None,
+            clear: Clear::None,
             border_color: Color { r: 0, g: 0, b: 0, a: 255 },
             flex_direction: FlexDirection::Row,
             justify_content: JustifyContent::Start,
@@ -544,6 +575,27 @@ fn apply_declaration(style: &mut ComputedStyle, decl: &Declaration) {
                 style.overflow = match v.as_str() {
                     "visible" => Overflow::Visible,
                     "hidden" | "auto" | "scroll" => Overflow::Hidden,
+                    _ => return,
+                };
+            }
+        }
+        "float" => {
+            if let Some(Token::Ident(v)) = decl.value.first() {
+                style.float = match v.as_str() {
+                    "none" => Float::None,
+                    "left" => Float::Left,
+                    "right" => Float::Right,
+                    _ => return,
+                };
+            }
+        }
+        "clear" => {
+            if let Some(Token::Ident(v)) = decl.value.first() {
+                style.clear = match v.as_str() {
+                    "none" => Clear::None,
+                    "left" => Clear::Left,
+                    "right" => Clear::Right,
+                    "both" => Clear::Both,
                     _ => return,
                 };
             }

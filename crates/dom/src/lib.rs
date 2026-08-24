@@ -524,4 +524,134 @@ impl Dom {
         };
         Some(order[next_index])
     }
+
+    /// HTML-escapes text content: `&`/`<`/`>` at minimum, enough for a round
+    /// trip through `crates/html`'s parser to reproduce the same text.
+    fn escape_text(text: &str) -> String {
+        text.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+    }
+
+    /// HTML-escapes an attribute value for double-quoted emission — only
+    /// `"`/`&` matter since we always quote with `"`.
+    fn escape_attr(value: &str) -> String {
+        value.replace('&', "&amp;").replace('"', "&quot;")
+    }
+
+    /// Serializes one node's own representation (tag+attributes+children for
+    /// an `Element`, escaped text/comment markup otherwise) into `out`.
+    /// Shared by [`Dom::serialize_children`]/[`Dom::serialize_node`] so
+    /// neither duplicates the other's per-kind logic.
+    fn serialize_into(&self, id: NodeId, out: &mut String) {
+        let Some(node) = self.get(id) else { return };
+        match &node.data {
+            NodeData::Text(text) => out.push_str(&Self::escape_text(text)),
+            NodeData::Comment(text) => {
+                out.push_str("<!--");
+                out.push_str(text);
+                out.push_str("-->");
+            }
+            NodeData::Element { tag, attributes, .. } => {
+                out.push('<');
+                out.push_str(tag);
+                // HashMap has no ordering; sort by name for determinism —
+                // same convention as `dom_bindings::sync_attributes`. Real
+                // HTML preserves authored order, which this storage can't.
+                let mut names: Vec<&String> = attributes.keys().collect();
+                names.sort_unstable();
+                for name in names {
+                    out.push(' ');
+                    out.push_str(name);
+                    out.push_str("=\"");
+                    out.push_str(&Self::escape_attr(&attributes[name]));
+                    out.push('"');
+                }
+                out.push('>');
+                for &child in &node.children {
+                    self.serialize_into(child, out);
+                }
+                out.push_str("</");
+                out.push_str(tag);
+                out.push('>');
+            }
+            NodeData::Document => {
+                for &child in &node.children {
+                    self.serialize_into(child, out);
+                }
+            }
+        }
+    }
+
+    /// Serializes every child of `id` as HTML, in document order — the read
+    /// side of `element.innerHTML`. No void-element list exists anywhere in
+    /// this crate, so an element always gets both open and close tags (e.g.
+    /// `<br></br>`), a documented scope cut rather than real HTML semantics.
+    pub fn serialize_children(&self, id: NodeId) -> String {
+        let mut out = String::new();
+        if let Some(node) = self.get(id) {
+            for &child in &node.children {
+                self.serialize_into(child, &mut out);
+            }
+        }
+        out
+    }
+
+    /// Serializes `id` itself, tag/attributes included — the read side of
+    /// `element.outerHTML`. For a `Text`/`Comment` node this is the same
+    /// markup `serialize_children` would produce for it as a child.
+    pub fn serialize_node(&self, id: NodeId) -> String {
+        let mut out = String::new();
+        self.serialize_into(id, &mut out);
+        out
+    }
+
+    /// Deep-clones `node` and its subtree from a *different* `Dom` (`other`)
+    /// into `self`, returning the new root's id in `self`. `NodeId`s are
+    /// only valid within the arena that created them, so this is the one
+    /// supported way to move content across that boundary (e.g. a fragment
+    /// parsed into its own temporary `Dom`). Does not attach the result to
+    /// any parent — that's the caller's job via `append_child`.
+    ///
+    /// `node` being a `Document` is not a supported case for this method's
+    /// intended callers (fragment-parse roots are always Element/Text/
+    /// Comment) — if it happens, only the first child (if any) is adopted
+    /// and returned, since a single `NodeId` can't represent multiple
+    /// adopted roots.
+    ///
+    /// The `value` field is not copied directly: `set_attribute("value", ..)`
+    /// naturally re-derives it when the source's `value` attribute is
+    /// present, which is simpler than threading the raw field through and
+    /// correct for every caller today (fragment parsing never calls
+    /// `set_value` independently of the attribute).
+    pub fn adopt(&mut self, other: &Dom, node: NodeId) -> NodeId {
+        let Some(src) = other.get(node) else {
+            return self.create_text("");
+        };
+        match &src.data {
+            NodeData::Element { tag, attributes, .. } => {
+                let new_id = self.create_element(tag);
+                for (name, value) in attributes {
+                    self.set_attribute(new_id, name, value);
+                }
+                for &child in &src.children {
+                    let cloned_child = self.adopt(other, child);
+                    self.append_child(new_id, cloned_child);
+                }
+                new_id
+            }
+            NodeData::Text(text) => self.create_text(text),
+            NodeData::Comment(text) => self.create_comment(text),
+            NodeData::Document => {
+                // Not a supported input per this method's contract; best
+                // effort: adopt the first child alone since we can only
+                // return one id.
+                if let Some(&first_child) = src.children.first() {
+                    self.adopt(other, first_child)
+                } else {
+                    self.create_text("")
+                }
+            }
+        }
+    }
 }

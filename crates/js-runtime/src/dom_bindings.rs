@@ -446,8 +446,8 @@ unsafe extern "C" fn node_class_name_set(
 ) -> sys::JSValue {
     attribute_property_set(ctx, this_val, val, "class")
 }
-unsafe extern "C" fn node_name_get(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue { attribute_property_get(ctx, this_val, "name") }
-unsafe extern "C" fn node_name_set(ctx: *mut sys::JSContext, this_val: sys::JSValue, val: sys::JSValue) -> sys::JSValue { attribute_property_set(ctx, this_val, val, "name") }
+unsafe extern "C" fn node_form_name_get(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue { attribute_property_get(ctx, this_val, "name") }
+unsafe extern "C" fn node_form_name_set(ctx: *mut sys::JSContext, this_val: sys::JSValue, val: sys::JSValue) -> sys::JSValue { attribute_property_set(ctx, this_val, val, "name") }
 unsafe extern "C" fn node_type_attribute_get(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue { attribute_property_get(ctx, this_val, "type") }
 unsafe extern "C" fn node_type_attribute_set(ctx: *mut sys::JSContext, this_val: sys::JSValue, val: sys::JSValue) -> sys::JSValue { attribute_property_set(ctx, this_val, val, "type") }
 
@@ -463,7 +463,7 @@ unsafe fn define_attribute_properties(ctx: *mut sys::JSContext, proto: sys::JSVa
             node_class_name_get as Getter,
             node_class_name_set as Setter,
         ),
-        ("name", node_name_get as Getter, node_name_set as Setter),
+        ("name", node_form_name_get as Getter, node_form_name_set as Setter),
         ("type", node_type_attribute_get as Getter, node_type_attribute_set as Setter),
     ] {
         let name = CString::new(name).unwrap();

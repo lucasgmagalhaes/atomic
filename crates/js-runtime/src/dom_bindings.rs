@@ -41,7 +41,7 @@ thread_local! {
 /// own "caller owns what it gets back" convention — the cache itself
 /// holds one reference for as long as the `Context` lives, freed by
 /// [`cleanup`].
-unsafe fn get_or_create_node_object(
+pub(crate) unsafe fn node_object(
     ctx: *mut sys::JSContext,
     class_id: sys::JSClassID,
     id: dom::NodeId,
@@ -67,6 +67,19 @@ unsafe fn get_or_create_node_object(
             .insert(id, sys::JS_DupValue(ctx, obj));
     });
     obj
+}
+
+/// Returns the DOM parent of a node, if the context still has live DOM
+/// state. This deliberately exposes IDs rather than DOM references so event
+/// dispatch cannot retain or mutate the DOM while walking its propagation path.
+pub(crate) unsafe fn parent_node_id(
+    ctx: *mut sys::JSContext,
+    id: dom::NodeId,
+) -> Option<dom::NodeId> {
+    let dom = dom_opaque(ctx);
+    (!dom.is_null())
+        .then(|| (*dom).get(id).and_then(|node| node.parent))
+        .flatten()
 }
 
 /// Frees every cached `Node` object for `ctx` — must run before
@@ -262,7 +275,7 @@ unsafe fn query_selector_all(
             ctx,
             array,
             index as u32,
-            get_or_create_node_object(ctx, class_id, node_id),
+            node_object(ctx, class_id, node_id),
         );
     }
     array
@@ -602,7 +615,7 @@ unsafe extern "C" fn document_get_element_by_id(
         return sys::js_null();
     }
     match (*dom_ptr).find_by_id(&id) {
-        Some(node_id) => get_or_create_node_object(
+        Some(node_id) => node_object(
             ctx,
             crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NODE_CLASS_KIND),
             node_id,
@@ -669,7 +682,7 @@ unsafe extern "C" fn document_active_element_get(
         return sys::js_null();
     }
     match (*dom_ptr).active_element() {
-        Some(node_id) => get_or_create_node_object(
+        Some(node_id) => node_object(
             ctx,
             crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NODE_CLASS_KIND),
             node_id,
@@ -711,6 +724,7 @@ unsafe fn define_active_element(ctx: *mut sys::JSContext, document: sys::JSValue
 /// if unset.
 pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     ensure_node_class(ctx);
+    crate::events::register(ctx);
 
     let document = crate::document::get_or_create(ctx);
 

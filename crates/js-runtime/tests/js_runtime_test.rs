@@ -227,7 +227,7 @@ fn event_listeners_run_in_registration_order_and_can_be_removed_individually() {
 }
 
 #[test]
-fn dispatch_event_with_no_listener_returns_false() {
+fn dispatch_event_with_no_listener_is_not_canceled() {
     let mut d = dom::Dom::new();
     let root = d.root();
     let p = d.create_element("p");
@@ -243,7 +243,44 @@ fn dispatch_event_with_no_listener_returns_false() {
             "<test>",
         )
         .unwrap();
-    assert_eq!(result, "false");
+    assert_eq!(result, "true");
+}
+
+#[test]
+fn events_expose_target_and_current_target_bubble_and_can_be_canceled() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let parent = d.create_element("section");
+    let child = d.create_element("button");
+    d.append_child(root, parent);
+    d.append_child(parent, child);
+    d.set_attribute(parent, "id", "parent");
+    d.set_attribute(child, "id", "child");
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const parent = document.getElementById('parent'); const child = document.getElementById('child'); let log = ''; child.addEventListener('click', event => { log += `${event.type}:${event.target === child}:${event.currentTarget === child}:${event.bubbles}:${event.cancelable}`; }); parent.addEventListener('click', event => { log += `|parent:${event.target === child}:${event.currentTarget === parent}`; event.preventDefault(); }); return `${child.dispatchEvent('click')},${log}`; })()", "<test>").unwrap();
+    assert_eq!(result, "false,click:true:true:true:true|parent:true:true");
+}
+
+#[test]
+fn stop_propagation_prevents_later_ancestors() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let outer = d.create_element("main");
+    let inner = d.create_element("section");
+    let child = d.create_element("button");
+    d.append_child(root, outer);
+    d.append_child(outer, inner);
+    d.append_child(inner, child);
+    d.set_attribute(outer, "id", "outer");
+    d.set_attribute(inner, "id", "inner");
+    d.set_attribute(child, "id", "child");
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const outer = document.getElementById('outer'); const inner = document.getElementById('inner'); const child = document.getElementById('child'); let log = ''; outer.addEventListener('click', () => { log += 'outer'; }); inner.addEventListener('click', event => { log += 'inner'; event.stopPropagation(); }); child.dispatchEvent('click'); return log; })()", "<test>").unwrap();
+    assert_eq!(result, "inner");
 }
 
 #[test]

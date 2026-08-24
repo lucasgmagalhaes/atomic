@@ -39,7 +39,7 @@ Campos reais: `display`, `width`, `height`, `margin`, `padding`, `position`, `to
 - FALTANDO: `absolute` dentro de um container `flex` ainda participa do algoritmo de flex normalmente (não é removido do fluxo flex) — só o branch de block-stacking trata isso
 - FALTANDO: floats (`float`/`clear`)
 - FALTANDO: margin collapsing — margens adjacentes sempre somam, nunca colapsam; `margin: auto` vira `0`, não centraliza
-- FALTANDO: `border-*` (width/color/style/radius) — border não é modelado, então nem pode ter borda visual
+- FALTANDO: `border-radius`, cores/estilos por lado — `border-width`/`border-style`/`border-color` (solid, uma cor) fechados, ver seção 3 (Render)
 - FALTANDO: `opacity`
 - FALTANDO: `z-index` / stacking context
 - FALTANDO: `overflow` (ver seção Scroll)
@@ -63,14 +63,15 @@ Campos reais: `display`, `width`, `height`, `margin`, `padding`, `position`, `to
 ### Formatação inline/bloco (`tree.rs`)
 - REAL: contexto de formatação inline de verdade — texto + elementos `display: inline` consecutivos viram um `LayoutBox::inline_spans` shapeado junto via `cosmic-text` (`tree.rs:110-262`)
 - FALTANDO: geração de anonymous block box — um elemento block-level dentro de conteúdo inline não é "de-inlinado" como um browser real faz (`tree.rs:22-24`)
-- FALTANDO: UA stylesheet padrão por tag — `display: inline` só se aplica se a stylesheet disser explicitamente (`b, span { display: inline }`); sem isso, tudo renderiza como bloco
+- FALTANDO: UA stylesheet padrão por tag — `display: inline` só se aplica se a stylesheet dizer explicitamente (`b, span { display: inline }`); sem isso, tudo renderiza como bloco
 
 ## 3. Render (`crates/render`)
 
 ### Pintura (`display_list.rs`, `gpu.rs`)
 - REAL: retângulos sólidos com cor de fundo, um draw call, alpha blending — `display_list.rs:29-42`, `gpu.rs:254-300`
+- **`border-width`/`border-style`/`border-color` fechado (2026-08-25), real:** `layout::layout_block` faz o `border-width` crescer de verdade o box model (`Dimensions` agora é a border box: content+padding+border, não só padding box) quando `border-style` não é `none`; `render::build_display_list` pinta a borda como até 4 retângulos sólidos formando uma moldura ao redor da borda externa da caixa — reaproveita o mesmo pipeline de quad sólido que já pinta `background-color`, sem shader/geometria nova. Só `solid` (sem `dashed`/`dotted`/`double`/...), uma cor só pra todo mundo (sem `border-top-color` etc.), sem `border-radius` (cantos quadrados só, esse pipeline não tem geometria arredondada/anti-aliasing). Testado em `crates/layout-engine/tests/border_test.rs` (crescimento real do box model, largura auto encolhendo pra caber a borda, origem do conteúdo do filho deslocada, `border-style: none` não ocupa espaço mesmo com `border-width` setado, shorthand `border` aceita os 3 componentes em qualquer ordem) e `crates/render/tests/display_list_test.rs` (4 tiras nas posições certas, lado com largura 0 não gera retângulo, ordem de pintura fundo-depois-borda).
 - FALTANDO: `border-radius`
-- FALTANDO: `border-width`/`border-color` (não modelado em layout, então nem chega no render)
+- FALTANDO: cores/estilos por lado (`border-top-color`, `border-left-style`, ...)
 - FALTANDO: `box-shadow`
 - FALTANDO: `opacity`/transform (`translate`/`scale`/`rotate`)
 - FALTANDO: `clip-path`
@@ -145,7 +146,7 @@ Consequência prática: um humano não consegue clicar num link ou digitar num c
 
 - FALTANDO ainda: tipo de nó dedicado pra `<input>`/`<textarea>`/`<select>` — `dom::NodeData::Element` continua genérico (`{ tag, attributes, value }`), sem distinção por tag; `.value` é exposto genericamente em `Node.prototype`, não numa hierarquia `HTMLInputElement`/`HTMLTextAreaElement` própria (documentado no código)
 - FALTANDO: `<select>`/`<option>` — nenhum tratamento especial, `.value` genérico não modela `selectedIndex`/opções
-- FALTANDO: tab order (`Tab`/`Shift+Tab` movendo foco), `tabindex` — só existe foco disparado por clique real (`CLICK_AT`) ou chamada JS explícita (`.focus()`/`.blur()`)
+- FALTANDO: tab order (`Tab`/`Shift+Tab` movendo foco), `tabindex` — só existe foco disparado por clique real (`CLICK_AT`) ou chamada JS explicita (`.focus()`/`.blur()`)
 - FALTANDO: eventos `focus`/`blur`/`input`/`change` reais disparados como `Event` — `focus()`/`blur()` mudam o estado real mas não despacham nada via `dispatchEvent`; só `"keydown"` é disparado (por `KEY`, já existia antes)
 
 ## Resumo de prioridade (se fosse continuar o motor)

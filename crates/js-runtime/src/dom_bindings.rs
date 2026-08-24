@@ -1431,6 +1431,30 @@ unsafe extern "C" fn document_body_get(
     }
 }
 
+unsafe extern "C" fn document_document_element_get(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+) -> sys::JSValue {
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return sys::js_null();
+    }
+    match matching_nodes(&*dom, (*dom).root(), "html", true) {
+        Ok(nodes) => nodes
+            .into_iter()
+            .next()
+            .map(|id| {
+                node_object(
+                    ctx,
+                    crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NODE_CLASS_KIND),
+                    id,
+                )
+            })
+            .unwrap_or_else(sys::js_null),
+        Err(_) => sys::js_null(),
+    }
+}
+
 /// Defines the real, read-only `document.activeElement` getter — backed by
 /// `dom::Dom`'s own focus state, so it reflects whatever the most recent
 /// `.focus()`/`.blur()` call (JS-driven or `profile-worker`'s coordinate
@@ -1462,6 +1486,28 @@ unsafe fn define_body(ctx: *mut sys::JSContext, document: sys::JSValue) {
     let getter = sys::JS_NewCFunction2(
         ctx,
         std::mem::transmute::<Getter, sys::JSCFunction>(document_body_get),
+        name.as_ptr(),
+        0,
+        sys::JS_CFUNC_GETTER,
+        0,
+    );
+    let atom = sys::JS_NewAtom(ctx, name.as_ptr());
+    sys::JS_DefinePropertyGetSet(
+        ctx,
+        document,
+        atom,
+        getter,
+        sys::js_undefined(),
+        sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE,
+    );
+    sys::JS_FreeAtom(ctx, atom);
+}
+
+unsafe fn define_document_element(ctx: *mut sys::JSContext, document: sys::JSValue) {
+    let name = CString::new("documentElement").unwrap();
+    let getter = sys::JS_NewCFunction2(
+        ctx,
+        std::mem::transmute::<Getter, sys::JSCFunction>(document_document_element_get),
         name.as_ptr(),
         0,
         sys::JS_CFUNC_GETTER,
@@ -1534,6 +1580,7 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     }
     define_active_element(ctx, document);
     define_body(ctx, document);
+    define_document_element(ctx, document);
 
     sys::JS_FreeValue(ctx, document);
 }

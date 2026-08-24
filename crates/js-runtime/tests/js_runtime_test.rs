@@ -216,8 +216,8 @@ fn document_body_is_stable_and_accepts_dynamic_children() {
 
     let rt = Runtime::new();
     let ctx = Context::with_dom(&rt, d);
-    let result = ctx.eval("(() => { const child = document.createElement('main'); child.id = 'app'; document.body.appendChild(child); return `${document.body === document.querySelector('body')},${document.body.querySelector('#app') === child}`; })()", "<test>").unwrap();
-    assert_eq!(result, "true,true");
+    let result = ctx.eval("(() => { const child = document.createElement('main'); child.id = 'app'; document.body.appendChild(child); return `${document.documentElement === document.querySelector('html')},${document.body === document.querySelector('body')},${document.body.querySelector('#app') === child}`; })()", "<test>").unwrap();
+    assert_eq!(result, "true,true,true");
 }
 
 #[test]

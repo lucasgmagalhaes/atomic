@@ -23,15 +23,18 @@ mod fetch_async;
 mod history;
 mod host_state;
 mod indexed_db_bindings;
+mod layout_measurement;
 mod local_storage_bindings;
 mod location;
 mod notifications;
 mod page_visibility;
 mod performance;
 mod timers;
-mod window;
 mod value_bridge;
 mod web_audio;
+mod window;
+
+pub use layout_measurement::Rect;
 
 #[derive(Debug)]
 pub struct EvalError(pub String);
@@ -135,6 +138,7 @@ impl<'rt> Context<'rt> {
             local_storage: None,
             session_storage: None,
             url: None,
+            layout_rects: std::collections::HashMap::new(),
         });
         let raw = state.as_mut() as *mut host_state::HostState as *mut std::os::raw::c_void;
         unsafe {
@@ -274,6 +278,17 @@ impl<'rt> Context<'rt> {
             let global = sys::JS_GetGlobalObject(self.ptr);
             events::dispatch_simple(self.ptr, global, "load", false, false);
             sys::JS_FreeValue(self.ptr, global);
+        }
+    }
+
+    /// Replaces every real layout rect (`getBoundingClientRect`/
+    /// `offsetWidth`/etc — see `layout_measurement`) wholesale — a host
+    /// (`profile-worker`'s `Page::render`, after it runs `layout-engine`
+    /// against the current DOM) calls this once per render pass. No-op on
+    /// a plain [`Context::new`], same as [`Context::set_url`].
+    pub fn set_layout_rects(&mut self, rects: std::collections::HashMap<dom::NodeId, Rect>) {
+        if let Some(state) = self._host_state.as_mut() {
+            state.layout_rects = rects;
         }
     }
 

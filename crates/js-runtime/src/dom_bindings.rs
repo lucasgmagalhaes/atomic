@@ -1855,6 +1855,7 @@ unsafe fn ensure_node_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
     define_dataset(ctx, proto);
     define_attributes_collection(ctx, proto);
     crate::css_style::define_style(ctx, proto);
+    crate::layout_measurement::define_layout_measurement(ctx, proto);
     define_navigation(ctx, proto);
     define_value(ctx, proto);
     define_inner_outer_html(ctx, proto);

@@ -5,6 +5,7 @@
 //! persisted storage is configured via `Context::with_storage`, a cookie
 //! jar and the directory `indexedDB.open` resolves per-database paths
 //! against.
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use quickjs_sys as sys;
@@ -42,6 +43,13 @@ pub(crate) struct HostState {
     /// `replaceState`/`back`/`forward`/`go` (same-document navigation, per
     /// spec, doesn't need a real fetch).
     pub url: Option<String>,
+    /// Real layout results, pushed in wholesale by `Context::
+    /// set_layout_rects` (see `crate::layout_measurement`) after a host
+    /// runs `layout-engine` against the current DOM. A node absent here
+    /// (never laid out, `display: none`, or nothing has called
+    /// `set_layout_rects` at all) reads as an all-zero rect, same
+    /// degrade-gracefully pattern as `url`/`cookies`.
+    pub layout_rects: HashMap<dom::NodeId, crate::layout_measurement::Rect>,
 }
 
 /// Reads the `HostState` behind `ctx`'s opaque slot, or null if unset

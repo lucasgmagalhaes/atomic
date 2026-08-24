@@ -13,9 +13,14 @@ use crate::display_list::{ClipRect, ClippedGlyph};
 /// a real canvas would clip off-screen drawing - and, now, also clipped
 /// against each glyph's own `ClippedGlyph::clip` (real `overflow: hidden`
 /// content clipping, see `display_list`'s own doc), exactly, since this
-/// already checks per-pixel bounds.
+/// already checks per-pixel bounds. Also multiplies each pixel's alpha by
+/// `ClippedGlyph::opacity` (real `opacity`, see `display_list`'s own doc
+/// on its per-primitive scope).
 pub fn composite_glyphs(pixels: &mut [u8], width: u32, height: u32, glyphs: &[ClippedGlyph]) {
-    for ClippedGlyph { glyph, clip } in glyphs {
+    for ClippedGlyph { glyph, clip, opacity } in glyphs {
+        if *opacity <= 0.0 {
+            continue;
+        }
         let Some(bitmap) = layout_engine::rasterize_glyph(glyph) else {
             continue;
         };
@@ -43,13 +48,13 @@ pub fn composite_glyphs(pixels: &mut [u8], width: u32, height: u32, glyphs: &[Cl
                 if coverage == 0 {
                     continue;
                 }
-                let alpha = (coverage as u32 * glyph.color.a as u32) / 255;
+                let alpha = (coverage as f64 * glyph.color.a as f64 * opacity / 255.0).round().clamp(0.0, 255.0) as u8;
                 if alpha == 0 {
                     continue;
                 }
 
                 let idx = ((py as u32 * width + px as u32) * 4) as usize;
-                let src = [glyph.color.r, glyph.color.g, glyph.color.b, alpha as u8];
+                let src = [glyph.color.r, glyph.color.g, glyph.color.b, alpha];
                 blend_over(&mut pixels[idx..idx + 4], src);
             }
         }

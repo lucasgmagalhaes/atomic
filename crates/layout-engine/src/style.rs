@@ -273,6 +273,21 @@ pub struct ComputedStyle {
     pub font_size: f64,
     /// Text color - initial value is black, matching the real spec.
     pub color: Color,
+    /// Real, but per-primitive rather than per-group: real CSS renders a
+    /// box's whole subtree to an offscreen layer once, then blends that
+    /// *one* flattened result at `opacity` - this crate has no offscreen
+    /// compositing pass, so `render::display_list` instead multiplies
+    /// `opacity` into every individual paint primitive's own alpha as it
+    /// walks the tree (an ancestor's `opacity` compounds into its
+    /// descendants' effective opacity, same real "nested opacity
+    /// multiplies" semantics the spec has). The one real, visible
+    /// divergence: two overlapping siblings inside the same opacity group
+    /// blend against *each other* at the reduced alpha (a visible seam
+    /// where they overlap) instead of being invisible to each other until
+    /// the whole flattened group is blended onto what's behind it. `1.0`
+    /// (opaque) is the initial value; values are clamped to `[0.0, 1.0]`
+    /// at parse time, matching the spec's own out-of-range clamping.
+    pub opacity: f64,
 }
 
 impl ComputedStyle {
@@ -305,6 +320,7 @@ impl ComputedStyle {
             background_color: Color::TRANSPARENT,
             font_size: 16.0,
             color: Color { r: 0, g: 0, b: 0, a: 255 },
+            opacity: 1.0,
         }
     }
 }
@@ -659,6 +675,16 @@ fn apply_declaration(style: &mut ComputedStyle, decl: &Declaration) {
             }
         }
         "box-shadow" => apply_box_shadow(style, &decl.value),
+        "opacity" => {
+            let value = match decl.value.first() {
+                Some(Token::Number(n)) => Some(*n),
+                Some(Token::Percentage(p)) => Some(p / 100.0),
+                _ => None,
+            };
+            if let Some(v) = value {
+                style.opacity = v.clamp(0.0, 1.0);
+            }
+        }
         _ => {}
     }
 }

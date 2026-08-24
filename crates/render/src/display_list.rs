@@ -2,10 +2,11 @@
 //! "display list" in browser-engine terminology, decoupled from any GPU
 //! API so it's testable without a device/adapter. Scoped to solid-color
 //! rectangles (a box's border box, filled with its `background_color`,
-//! plus up to 4 more solid rects framing it as a real border - see
-//! `collect`'s own doc) plus glyph instances (positioned, not yet
+//! plus up to 4 more solid rects framing it as a real border, plus one
+//! more solid rect behind it all for a real (but blur-less) `box-shadow`
+//! - see `collect`'s own doc) plus glyph instances (positioned, not yet
 //! rasterized) — no border-radius, no images composited here (see
-//! `build_image_list`), no shadows.
+//! `build_image_list`).
 //!
 //! Real clipping now, for `overflow: hidden`/`auto`/`scroll` (see
 //! `layout_engine::Overflow`'s own doc for the auto/scroll scope cut):
@@ -112,6 +113,11 @@ pub fn build_display_list(box_: &LayoutBox) -> Vec<Rect> {
 }
 
 fn collect(box_: &LayoutBox, out: &mut Vec<Rect>, clip: Option<ClipRect>) {
+    if let Some(shadow) = box_.style.box_shadow {
+        if shadow.color.a > 0 {
+            push_box_shadow_rect(box_, shadow, out, clip);
+        }
+    }
     if box_.style.background_color.a > 0 {
         let rect = Rect {
             x: box_.dimensions.x as f32,
@@ -134,6 +140,28 @@ fn collect(box_: &LayoutBox, out: &mut Vec<Rect>, clip: Option<ClipRect>) {
     };
     for child in &box_.children {
         collect(child, out, child_clip);
+    }
+}
+
+/// Real, but flat and blur-less: paints one solid rect behind `box_`'s
+/// border box, offset by `shadow.offset_x`/`offset_y` and grown on every
+/// side by `shadow.spread` - see `layout_engine::BoxShadow`'s own doc for
+/// why `blur-radius` isn't modeled. Pushed before the background/border
+/// rects in `collect`, so real paint order (background/border on top of
+/// the shadow) falls out naturally from this pipeline's existing
+/// "later rects paint over earlier ones" convention - no explicit
+/// z-ordering needed.
+fn push_box_shadow_rect(box_: &LayoutBox, shadow: layout_engine::BoxShadow, out: &mut Vec<Rect>, clip: Option<ClipRect>) {
+    let d = box_.dimensions;
+    let rect = Rect {
+        x: (d.x + shadow.offset_x - shadow.spread) as f32,
+        y: (d.y + shadow.offset_y - shadow.spread) as f32,
+        width: (d.width + shadow.spread * 2.0).max(0.0) as f32,
+        height: (d.height + shadow.spread * 2.0).max(0.0) as f32,
+        color: shadow.color,
+    };
+    if let Some(clipped) = clip_rect(rect, clip) {
+        out.push(clipped);
     }
 }
 

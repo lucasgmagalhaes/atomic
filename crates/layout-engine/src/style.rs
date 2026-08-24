@@ -141,6 +141,29 @@ pub enum Clear {
     Both,
 }
 
+/// A real, but flat, `box-shadow` — no `blur-radius` (this crate's
+/// "solid rects only" paint pipeline has no blur/gaussian geometry, same
+/// scope cut `border-radius` already has for rounded corners), and only
+/// one shadow even though real CSS accepts a comma-separated list (same
+/// "one value, not a list" scope `border-color` already has for per-side
+/// colors). `spread` grows/shrinks the shadow rect on every side, same
+/// real effect a spread radius has minus the corner rounding a nonzero
+/// `border-radius` would also apply to it. `inset` shadows aren't
+/// recognized (the `inset` keyword just fails `Color::named` silently
+/// and is ignored, same as any other unrecognized ident in this
+/// declaration) - every shadow this crate paints is a real drop shadow.
+/// `color` is required in the source (real CSS lets it default to
+/// `currentColor` when omitted; this crate doesn't track declaration
+/// order finely enough within one rule to resolve that reliably, so an
+/// omitted color just means no shadow is set at all, same as `none`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BoxShadow {
+    pub offset_x: f64,
+    pub offset_y: f64,
+    pub spread: f64,
+    pub color: Color,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlexDirection {
     Row,
@@ -221,6 +244,9 @@ pub struct ComputedStyle {
     pub float: Float,
     /// See [`Clear`]'s own doc.
     pub clear: Clear,
+    /// `None` is the initial value (`box-shadow: none`) — see
+    /// [`BoxShadow`]'s own doc for the real scope cut.
+    pub box_shadow: Option<BoxShadow>,
     /// One color for all four sides - real per-side colors
     /// (`border-top-color`, ...) aren't modeled. Initial value is black,
     /// not the spec's `currentColor` (which would need reading back
@@ -268,6 +294,7 @@ impl ComputedStyle {
             overflow: Overflow::Visible,
             float: Float::None,
             clear: Clear::None,
+            box_shadow: None,
             border_color: Color { r: 0, g: 0, b: 0, a: 255 },
             flex_direction: FlexDirection::Row,
             justify_content: JustifyContent::Start,
@@ -362,6 +389,37 @@ fn apply_border_shorthand(style: &mut ComputedStyle, tokens: &[Token]) {
     }
     if let Some(c) = color {
         style.border_color = c;
+    }
+}
+
+/// Real `box-shadow: <offset-x> <offset-y> [<blur-radius>] [<spread-radius>] <color>`
+/// - `blur-radius`, if present, is parsed (so it doesn't get mistaken for
+/// `spread-radius`) but not stored anywhere (see [`BoxShadow`]'s own doc
+/// on why blur isn't modeled). `none` clears any previously cascaded
+/// shadow, same as any other property's keyword reset.
+fn apply_box_shadow(style: &mut ComputedStyle, tokens: &[Token]) {
+    if let Some(Token::Ident(v)) = tokens.first() {
+        if v == "none" {
+            style.box_shadow = None;
+            return;
+        }
+    }
+    let mut lengths: Vec<f64> = Vec::new();
+    let mut color = None;
+    for token in tokens {
+        match token {
+            Token::Dimension(n, unit) if unit == "px" => lengths.push(*n),
+            Token::Number(n) if *n == 0.0 => lengths.push(0.0),
+            Token::Ident(name) => color = color.or(Color::named(name)),
+            Token::Hash(hex) => color = color.or(Color::from_hex(hex)),
+            _ => {}
+        }
+    }
+    // `lengths[2]` (blur-radius), when present, is deliberately skipped -
+    // only offsets and spread feed the flat rect this crate paints.
+    if let (Some(&offset_x), Some(&offset_y), Some(color)) = (lengths.first(), lengths.get(1), color) {
+        let spread = lengths.get(3).copied().unwrap_or(0.0);
+        style.box_shadow = Some(BoxShadow { offset_x, offset_y, spread, color });
     }
 }
 
@@ -600,6 +658,7 @@ fn apply_declaration(style: &mut ComputedStyle, decl: &Declaration) {
                 };
             }
         }
+        "box-shadow" => apply_box_shadow(style, &decl.value),
         _ => {}
     }
 }

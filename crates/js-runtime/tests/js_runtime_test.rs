@@ -206,6 +206,21 @@ fn constructed_event_options_control_bubbling_and_cancellation() {
 }
 
 #[test]
+fn document_body_is_stable_and_accepts_dynamic_children() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let html = d.create_element("html");
+    let body = d.create_element("body");
+    d.append_child(root, html);
+    d.append_child(html, body);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const child = document.createElement('main'); child.id = 'app'; document.body.appendChild(child); return `${document.body === document.querySelector('body')},${document.body.querySelector('#app') === child}`; })()", "<test>").unwrap();
+    assert_eq!(result, "true,true");
+}
+
+#[test]
 fn query_selector_uses_the_existing_css_selector_subset_in_document_order() {
     let mut d = dom::Dom::new();
     let root = d.root();

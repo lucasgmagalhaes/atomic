@@ -376,6 +376,117 @@ unsafe fn define_text_content(ctx: *mut sys::JSContext, proto: sys::JSValue) {
     sys::JS_FreeAtom(ctx, atom);
 }
 
+unsafe fn attribute_property_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    name: &str,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return sys::js_undefined();
+    }
+    new_js_string(ctx, (*dom).attribute(id, name).unwrap_or_default())
+}
+
+unsafe fn attribute_property_set(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    val: sys::JSValue,
+    name: &str,
+) -> sys::JSValue {
+    let Some(value) = read_js_string(ctx, val) else {
+        return throw_type_error(ctx, "attribute value must be a string");
+    };
+    if value.len() > MAX_ATTRIBUTE_VALUE_LENGTH {
+        return throw_type_error(ctx, "attribute value exceeds the maximum length");
+    }
+    let Some(id) = node_id(ctx, this_val) else {
+        return throw_type_error(ctx, "attribute target must be a node");
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() || (*dom).get(id).is_none() {
+        return throw_type_error(ctx, "node is no longer attached to this document");
+    }
+    (*dom).set_attribute(id, name, &value);
+    sys::js_undefined()
+}
+
+unsafe extern "C" fn node_id_property_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    attribute_property_get(ctx, this_val, "id")
+}
+unsafe extern "C" fn node_id_property_set(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    val: sys::JSValue,
+) -> sys::JSValue {
+    attribute_property_set(ctx, this_val, val, "id")
+}
+unsafe extern "C" fn node_class_name_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    attribute_property_get(ctx, this_val, "class")
+}
+unsafe extern "C" fn node_class_name_set(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    val: sys::JSValue,
+) -> sys::JSValue {
+    attribute_property_set(ctx, this_val, val, "class")
+}
+
+unsafe fn define_attribute_properties(ctx: *mut sys::JSContext, proto: sys::JSValue) {
+    for (name, getter, setter) in [
+        (
+            "id",
+            node_id_property_get as Getter,
+            node_id_property_set as Setter,
+        ),
+        (
+            "className",
+            node_class_name_get as Getter,
+            node_class_name_set as Setter,
+        ),
+    ] {
+        let name = CString::new(name).unwrap();
+        let getter = sys::JS_NewCFunction2(
+            ctx,
+            std::mem::transmute::<Getter, sys::JSCFunction>(getter),
+            name.as_ptr(),
+            0,
+            sys::JS_CFUNC_GETTER,
+            0,
+        );
+        let setter = sys::JS_NewCFunction2(
+            ctx,
+            std::mem::transmute::<Setter, sys::JSCFunction>(setter),
+            name.as_ptr(),
+            1,
+            sys::JS_CFUNC_SETTER,
+            0,
+        );
+        let atom = sys::JS_NewAtom(ctx, name.as_ptr());
+        sys::JS_DefinePropertyGetSet(
+            ctx,
+            proto,
+            atom,
+            getter,
+            setter,
+            sys::JS_PROP_HAS_GET
+                | sys::JS_PROP_HAS_SET
+                | sys::JS_PROP_CONFIGURABLE
+                | sys::JS_PROP_ENUMERABLE,
+        );
+        sys::JS_FreeAtom(ctx, atom);
+    }
+}
+
 unsafe fn navigation_node(
     ctx: *mut sys::JSContext,
     this_val: sys::JSValue,
@@ -1029,6 +1140,7 @@ unsafe fn ensure_node_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
 
     let proto = sys::JS_NewObject(ctx);
     define_text_content(ctx, proto);
+    define_attribute_properties(ctx, proto);
     define_navigation(ctx, proto);
     define_value(ctx, proto);
     define_focus_methods(ctx, proto);

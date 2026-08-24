@@ -142,6 +142,20 @@ fn node_navigation_exposes_stable_tree_relationships() {
 }
 
 #[test]
+fn id_and_class_name_properties_update_selector_state() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let parent = d.create_element("main");
+    d.set_attribute(parent, "id", "parent");
+    d.append_child(root, parent);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx.eval("(() => { const child = document.createElement('button'); child.id = 'dynamic'; child.className = 'action primary'; document.getElementById('parent').appendChild(child); return `${child.id},${child.className},${document.querySelector('#dynamic') === child},${document.querySelector('.primary') === child}`; })()", "<test>").unwrap();
+    assert_eq!(result, "dynamic,action primary,true,true");
+}
+
+#[test]
 fn query_selector_uses_the_existing_css_selector_subset_in_document_order() {
     let mut d = dom::Dom::new();
     let root = d.root();

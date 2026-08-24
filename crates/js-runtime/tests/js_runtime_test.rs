@@ -271,3 +271,77 @@ fn performance_now_advances() {
     let second: f64 = ctx.eval("performance.now()", "<test>").unwrap().parse().unwrap();
     assert!(second > first);
 }
+
+#[test]
+fn node_value_is_real_and_independent_of_text_content() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let input = d.create_element("input");
+    d.append_child(root, input);
+    d.set_attribute(input, "id", "field");
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+
+    let initial = ctx.eval("document.getElementById('field').value", "<test>").unwrap();
+    assert_eq!(initial, "");
+
+    let result = ctx
+        .eval(
+            "(() => { \
+                const el = document.getElementById('field'); \
+                el.value = 'typed'; \
+                return el.value + ',' + el.textContent; \
+            })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "typed,");
+}
+
+#[test]
+fn textarea_value_falls_back_to_text_content_until_set() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let textarea = d.create_element("textarea");
+    d.append_child(root, textarea);
+    d.set_attribute(textarea, "id", "notes");
+    d.set_text_content(textarea, "seeded");
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+
+    let value = ctx.eval("document.getElementById('notes').value", "<test>").unwrap();
+    assert_eq!(value, "seeded");
+}
+
+#[test]
+fn focus_blur_and_active_element_are_real() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let input = d.create_element("input");
+    d.append_child(root, input);
+    d.set_attribute(input, "id", "field");
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+
+    let before = ctx.eval("document.activeElement", "<test>").unwrap();
+    assert_eq!(before, "null");
+
+    let after_focus = ctx
+        .eval(
+            "(() => { document.getElementById('field').focus(); return document.activeElement === document.getElementById('field'); })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(after_focus, "true");
+
+    let after_blur = ctx
+        .eval(
+            "(() => { document.getElementById('field').blur(); return document.activeElement; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(after_blur, "null");
+}

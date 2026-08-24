@@ -124,7 +124,7 @@ fn resolve_element_style(
 /// default snapshot.
 fn build_element_snapshot(dom: &Dom, node: NodeId) -> ElementSnapshot {
     let Some(n) = dom.get(node) else { return ElementSnapshot::default() };
-    let NodeData::Element { tag, attributes } = &n.data else {
+    let NodeData::Element { tag, attributes, .. } = &n.data else {
         return ElementSnapshot::default();
     };
     let (preceding_siblings, has_following_sibling) = sibling_snapshots(dom, node);
@@ -198,7 +198,7 @@ fn collect_inline_spans(
                 });
             }
         }
-        NodeData::Element { tag, attributes } => {
+        NodeData::Element { tag, attributes, .. } => {
             let style = resolve_element_style(dom, node, tag, attributes, sheet, viewport_width, chain, parent_font_size, parent_color);
             if style.display != Display::None {
                 for &child in &n.children {
@@ -229,7 +229,7 @@ fn is_inline_level(
 ) -> bool {
     match dom.get(node).map(|n| &n.data) {
         Some(NodeData::Text(text)) => !text.trim().is_empty(),
-        Some(NodeData::Element { tag, attributes }) => {
+        Some(NodeData::Element { tag, attributes, .. }) => {
             let style = resolve_element_style(dom, node, tag, attributes, sheet, viewport_width, chain, parent_font_size, parent_color);
             chain.pop();
             style.display == Display::Inline

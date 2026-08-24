@@ -164,3 +164,112 @@ fn append_text_merges_onto_an_existing_text_node() {
     dom.append_text(t, "world");
     assert!(matches!(dom.get(t).unwrap().data, dom::NodeData::Text(ref s) if s == "hello world"));
 }
+
+#[test]
+fn value_defaults_to_empty_for_input_and_falls_back_to_text_for_textarea() {
+    let mut dom = Dom::new();
+    let input = dom.create_element("input");
+    assert_eq!(dom.value(input), "");
+
+    let textarea = dom.create_element("textarea");
+    let text = dom.create_text("seeded");
+    dom.append_child(textarea, text);
+    assert_eq!(dom.value(textarea), "seeded");
+}
+
+#[test]
+fn set_value_is_independent_of_text_content() {
+    let mut dom = Dom::new();
+    let input = dom.create_element("input");
+    dom.set_value(input, "typed");
+
+    assert_eq!(dom.value(input), "typed");
+    assert_eq!(dom.text_content(input), "");
+}
+
+#[test]
+fn set_attribute_value_seeds_the_value_property() {
+    let mut dom = Dom::new();
+    let input = dom.create_element("input");
+    dom.set_attribute(input, "value", "seeded");
+
+    assert_eq!(dom.value(input), "seeded");
+}
+
+#[test]
+fn set_value_does_not_override_the_textarea_fallback_until_called() {
+    let mut dom = Dom::new();
+    let textarea = dom.create_element("textarea");
+    let text = dom.create_text("initial");
+    dom.append_child(textarea, text);
+    assert_eq!(dom.value(textarea), "initial");
+
+    dom.set_value(textarea, "edited");
+    assert_eq!(dom.value(textarea), "edited");
+    // The fallback only ever applied before `.value` was ever set - the
+    // text node itself is untouched by `set_value`.
+    assert_eq!(dom.text_content(textarea), "initial");
+}
+
+#[test]
+fn focus_and_blur_track_active_element() {
+    let mut dom = Dom::new();
+    let root = dom.root();
+    let input = dom.create_element("input");
+    dom.append_child(root, input);
+
+    assert_eq!(dom.active_element(), None);
+
+    dom.focus(input);
+    assert_eq!(dom.active_element(), Some(input));
+
+    dom.blur(input);
+    assert_eq!(dom.active_element(), None);
+}
+
+#[test]
+fn blur_is_a_no_op_for_a_node_that_is_not_the_focused_one() {
+    let mut dom = Dom::new();
+    let a = dom.create_element("input");
+    let b = dom.create_element("input");
+
+    dom.focus(a);
+    dom.blur(b);
+
+    assert_eq!(dom.active_element(), Some(a));
+}
+
+#[test]
+fn clear_focus_unfocuses_regardless_of_which_node_is_focused() {
+    let mut dom = Dom::new();
+    let input = dom.create_element("input");
+    dom.focus(input);
+
+    dom.clear_focus();
+
+    assert_eq!(dom.active_element(), None);
+}
+
+#[test]
+fn focus_on_a_nonexistent_node_is_a_no_op() {
+    let mut dom = Dom::new();
+    let input = dom.create_element("input");
+    dom.remove(input);
+
+    dom.focus(input);
+
+    assert_eq!(dom.active_element(), None);
+}
+
+#[test]
+fn removing_the_focused_node_clears_active_element() {
+    let mut dom = Dom::new();
+    let root = dom.root();
+    let input = dom.create_element("input");
+    dom.append_child(root, input);
+    dom.focus(input);
+
+    dom.remove(input);
+
+    assert_eq!(dom.active_element(), None);
+}

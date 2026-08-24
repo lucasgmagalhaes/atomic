@@ -58,15 +58,13 @@
 //!   id; replies `CLICKED` or `ERROR <message>` (no such id, or only
 //!   `#id` selectors are supported at all — this engine has no general
 //!   CSS selector query beyond `dom::Dom::find_by_id`)
-//! - `FILL <#id> <value>` -> sets that element's `textContent` to `value`
-//!   and replies `FILLED`/`ERROR <message>` the same way. A real
-//!   `<input>`'s `value` is a distinct property from its children/text -
-//!   this engine models neither `HTMLInputElement` nor a `value` property
-//!   at all yet, so `textContent` is the closest existing primitive
-//!   (`js-runtime`'s only settable DOM string), not a faithful `.value`
-//!   assignment. `value` may not contain a newline (this protocol is
-//!   newline-delimited) - `profile::Profile::fill` rejects that before it
-//!   would corrupt the stream.
+//! - `FILL <#id> <value>` -> sets that element's real `.value`
+//!   (`dom::Dom::value`/`set_value`, independent of children/text) if it's
+//!   an `<input>`/`<textarea>`, `textContent` otherwise (this engine's
+//!   only settable string for any other element); replies
+//!   `FILLED`/`ERROR <message>`. `value` may not contain a newline (this
+//!   protocol is newline-delimited) - `profile::Profile::fill` rejects
+//!   that before it would corrupt the stream.
 //! - `QUIT` -> exits cleanly
 //! - anything else -> ignored
 use std::io::{self, BufRead, Write};
@@ -144,7 +142,7 @@ enum CssSource {
 /// ones).
 fn collect_css_sources(dom: &Dom, node: NodeId, out: &mut Vec<CssSource>) {
     let Some(n) = dom.get(node) else { return };
-    if let NodeData::Element { tag, attributes } = &n.data {
+    if let NodeData::Element { tag, attributes, .. } = &n.data {
         if tag == "style" {
             out.push(CssSource::Inline(dom.text_content(node)));
         } else if tag == "link" {
@@ -176,7 +174,7 @@ fn collect_css_sources(dom: &Dom, node: NodeId, out: &mut Vec<CssSource>) {
 /// in this pass, and its tag is walked past without effect (not an error).
 fn collect_script_sources(dom: &Dom, node: NodeId, out: &mut Vec<String>) {
     let Some(n) = dom.get(node) else { return };
-    if let NodeData::Element { tag, attributes } = &n.data {
+    if let NodeData::Element { tag, attributes, .. } = &n.data {
         if tag == "script" && !attributes.contains_key("src") {
             out.push(dom.text_content(node));
         }
@@ -464,14 +462,27 @@ fn dispatch_click(ctx: &Context, selector: &str) -> Result<(), String> {
     ctx.eval(&script, "<pane click>").map(|_| ()).map_err(|_| format!("no element with id \"{id}\" (or its click handler threw)"))
 }
 
-/// Sets the `#id` element's `textContent` to `value` via the existing
-/// `Node.prototype.textContent` setter — see this file's own doc comment
-/// on the `FILL` command for why that's a deviation from a real
-/// `HTMLInputElement.value` assignment, not an equivalent of one.
+/// `true` if `node` is a real `<input>`/`<textarea>` — the only tags this
+/// engine gives an independent `.value` (see `dom::Dom::value`'s own doc
+/// on why that's exposed generically on `Node` rather than a typed
+/// `HTMLInputElement`/`HTMLTextAreaElement` subclass).
+fn is_input_like(dom: &Dom, node: NodeId) -> bool {
+    matches!(&dom.get(node).map(|n| &n.data), Some(NodeData::Element { tag, .. }) if tag == "input" || tag == "textarea")
+}
+
+/// Sets the `#id` element's `.value` (a real, independent `dom::Dom`
+/// property now — see `is_input_like`/`dom::Dom::value`) if it's an
+/// `<input>`/`<textarea>`, `textContent` otherwise (this engine's only
+/// settable string for a generic element).
 fn fill_element(ctx: &Context, selector: &str, value: &str) -> Result<(), String> {
     let id = require_id_selector(selector)?;
+    let prop = {
+        let dom_ref = ctx.dom().ok_or("no DOM available")?;
+        let node = dom_ref.find_by_id(id).ok_or_else(|| format!("no element with id \"{id}\""))?;
+        if is_input_like(dom_ref, node) { "value" } else { "textContent" }
+    };
     let script = format!(
-        "(function(){{ var el = document.getElementById({id}); if (el === null) throw {missing}; el.textContent = {value}; }})();",
+        "(function(){{ var el = document.getElementById({id}); if (el === null) throw {missing}; el.{prop} = {value}; }})();",
         id = js_string_literal(id),
         missing = js_string_literal(&format!("no element with id \"{id}\"")),
         value = js_string_literal(value),
@@ -607,14 +618,15 @@ fn nearest_id_ancestor(dom: &Dom, node: NodeId) -> Option<String> {
 
 /// Real coordinate click: hit-tests `(x, y)`, dispatches a real `"click"`
 /// via the nearest id-addressable ancestor (see `nearest_id_ancestor`'s
-/// own doc for the real limitation that implies), and reports whether the
-/// hit node itself is a real `<input>`/`<textarea>` with its own `id` —
-/// if so, `KEY` can now type into it (see that command's own doc). Not a
-/// focus *model* (no blur, no tab order, no `activeElement`) - a real but
-/// deliberately minimal "which id does the next KEY affect" tracker, the
-/// same "narrowest real thing that unblocks typing" scope cut this
-/// worker's other input commands (`CLICK`/`FILL`) already make.
-fn dispatch_click_at(page: &Page, width: u32, x: f64, y: f64) -> Result<Option<String>, String> {
+/// own doc for the real limitation that implies), and — real focus model
+/// now, via `dom::Dom::focus`/`clear_focus` — focuses the hit node itself
+/// if it's a real `<input>`/`<textarea>` with its own `id` (so `KEY` can
+/// type into it, and `document.activeElement` sees it too), or clears
+/// focus otherwise (matches a real browser blurring whatever was focused
+/// when a click lands somewhere non-focusable). Still no tab order
+/// (`Tab`/`Shift+Tab` moving focus) - only click-driven and JS-driven
+/// (`.focus()`/`.blur()`) focus changes exist.
+fn dispatch_click_at(page: &mut Page, width: u32, x: f64, y: f64) -> Result<Option<String>, String> {
     let node = page.hit_test_at(width, x, y).ok_or("no element at that point")?;
     let click_id = {
         let dom_ref = page.ctx.dom().ok_or("no DOM available")?;
@@ -627,26 +639,35 @@ fn dispatch_click_at(page: &Page, width: u32, x: f64, y: f64) -> Result<Option<S
     // could have mutated the DOM, and this engine's arena (`dom::Dom`'s
     // internal `Vec<Slot>`) isn't guaranteed not to reallocate on a node
     // creation in between.
-    let dom_ref = page.ctx.dom().ok_or("no DOM available")?;
-    let is_input_like = matches!(&dom_ref.get(node).map(|n| &n.data), Some(NodeData::Element { tag, .. }) if tag == "input" || tag == "textarea");
-    let focus_id = if is_input_like { dom_ref.attribute(node, "id").map(str::to_string) } else { None };
+    let (focusable, focus_id) = {
+        let dom_ref = page.ctx.dom().ok_or("no DOM available")?;
+        let focusable = is_input_like(dom_ref, node);
+        (focusable, if focusable { dom_ref.attribute(node, "id").map(str::to_string) } else { None })
+    };
+    if let Some(dom_mut) = page.ctx.dom_mut() {
+        if focusable {
+            dom_mut.focus(node);
+        } else {
+            dom_mut.clear_focus();
+        }
+    }
     Ok(focus_id)
 }
 
 /// Types `key` into whichever real `<input>`/`<textarea>` id `CLICK_AT`
 /// most recently focused (see `dispatch_click_at`'s doc) - `"Backspace"`
 /// removes the field's real last character, anything else is appended
-/// verbatim as typed text. Same `textContent`-not-`.value` deviation
-/// `FILL` already documents (this engine has no real
-/// `HTMLInputElement.value`) - a real `"keydown"` event still dispatches
-/// first via the existing `dispatchEvent` binding, so a page's own
-/// `keydown` listener genuinely runs, same as a real browser firing the
-/// event before applying the default action.
+/// verbatim as typed text. Writes the element's real `.value`
+/// (`dom::Dom::value`/`set_value`) now, not `textContent` — a real
+/// `"keydown"` event still dispatches first via the existing
+/// `dispatchEvent` binding, so a page's own `keydown` listener genuinely
+/// runs, same as a real browser firing the event before applying the
+/// default action.
 fn type_key(ctx: &Context, focused_id: &str, key: &str) -> Result<(), String> {
     let current = {
         let dom_ref = ctx.dom().ok_or("no DOM available")?;
         let node = dom_ref.find_by_id(focused_id).ok_or_else(|| format!("no element with id \"{focused_id}\""))?;
-        dom_ref.text_content(node)
+        dom_ref.value(node)
     };
     let updated = if key == "Backspace" {
         let mut chars: Vec<char> = current.chars().collect();
@@ -656,7 +677,7 @@ fn type_key(ctx: &Context, focused_id: &str, key: &str) -> Result<(), String> {
         format!("{current}{key}")
     };
     let script = format!(
-        "(function(){{ var el = document.getElementById({id}); if (el === null) throw {missing}; el.dispatchEvent(\"keydown\"); el.textContent = {value}; }})();",
+        "(function(){{ var el = document.getElementById({id}); if (el === null) throw {missing}; el.dispatchEvent(\"keydown\"); el.value = {value}; }})();",
         id = js_string_literal(focused_id),
         missing = js_string_literal(&format!("no element with id \"{focused_id}\"")),
         value = js_string_literal(&updated),
@@ -778,10 +799,13 @@ fn main() {
     // liveness checks and settings changes), only the vsync work itself
     // stops.
     let mut paused = false;
-    // Real "which id does the next KEY affect" state - see
-    // `dispatch_click_at`'s doc. Reset on `RELOAD`/`NAVIGATE` since a
-    // fresh `Page` means a fresh DOM the old id might not even exist in
-    // anymore.
+    // Real "which id does the next KEY affect" state - a thin cache of
+    // `dom::Dom`'s own real `active_element()` (see `dispatch_click_at`'s
+    // doc), kept as a `String` id here since `KEY`'s handler goes through
+    // `id`-selector `eval()` scripts like every other command in this
+    // protocol. Reset on `RELOAD`/`NAVIGATE` since a fresh `Page` means a
+    // fresh DOM the old id might not even exist in anymore (a fresh
+    // `dom::Dom` starts with no focus of its own either).
     let mut focused_id: Option<String> = None;
 
     'render_loop: loop {
@@ -845,7 +869,7 @@ fn main() {
                 let coords = parts.next().zip(parts.next()).and_then(|(x, y)| Some((x.parse::<f64>().ok()?, y.parse::<f64>().ok()?)));
                 match coords {
                     Some((x, y)) => {
-                        let result = dispatch_click_at(&page, width, x, y);
+                        let result = dispatch_click_at(&mut page, width, x, y);
                         writer.publish(&page.render(&renderer, width, height));
                         match result {
                             Ok(focus) => {

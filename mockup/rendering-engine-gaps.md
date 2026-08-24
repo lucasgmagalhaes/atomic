@@ -134,9 +134,12 @@ Consequência prática: um humano não consegue clicar num link ou digitar num c
 
 ## 8. Formulários / elementos de input
 
-- FALTANDO: tipo de nó dedicado pra `<input>`/`<textarea>`/`<select>` — `dom::NodeData::Element` é genérico (`{ tag, attributes }`), sem distinção por tag
-- FALTANDO: `HTMLInputElement.value` (ou qualquer `.value` de elemento de formulário) — confirmado ausente em `dom` e `js-runtime`
-- Consequência: mesmo com hit-testing implementado no futuro, digitar em um "campo" não teria onde escrever — precisaria de um tipo de nó novo com estado de valor próprio
+**Parcialmente fechado (2026-08-24), real:** `.value` real e independente de `textContent` (`dom::Dom::value`/`set_value`, novo campo `value: Option<String>` em `NodeData::Element`) e foco real (`dom::Dom::focus`/`blur`/`clear_focus`/`active_element`) — expostos em `js-runtime` como `Node.prototype.value` (getter/setter), `Node.prototype.focus()`/`blur()`, e `document.activeElement` (`crates/js-runtime/src/dom_bindings.rs`). `<input value="...">` (o atributo HTML) semeia `.value` via `Dom::set_attribute`'s mirroring; `<textarea>` cai pro seu `textContent` real até `.value` ser tocado, depois vira independente — o mesmo comportamento real do DOM, simplificado (sem "dirty value flag" por trás: `set_attribute("value", ...)` sempre espelha, não só antes da primeira interação). `profile-worker`'s `FILL`/`KEY` agora escrevem `.value` de verdade num `<input>`/`<textarea>` (`textContent` continua sendo o alvo pra qualquer outro elemento), e `CLICK_AT` agora foca de verdade via `dom::Dom::focus`/`clear_focus` (não só um tracker local de string) — `document.activeElement` reflete um clique real do usuário, não só chamadas JS.
+
+- FALTANDO ainda: tipo de nó dedicado pra `<input>`/`<textarea>`/`<select>` — `dom::NodeData::Element` continua genérico (`{ tag, attributes, value }`), sem distinção por tag; `.value` é exposto genericamente em `Node.prototype`, não numa hierarquia `HTMLInputElement`/`HTMLTextAreaElement` própria (documentado no código)
+- FALTANDO: `<select>`/`<option>` — nenhum tratamento especial, `.value` genérico não modela `selectedIndex`/opções
+- FALTANDO: tab order (`Tab`/`Shift+Tab` movendo foco), `tabindex` — só existe foco disparado por clique real (`CLICK_AT`) ou chamada JS explícita (`.focus()`/`.blur()`)
+- FALTANDO: eventos `focus`/`blur`/`input`/`change` reais disparados como `Event` — `focus()`/`blur()` mudam o estado real mas não despacham nada via `dispatchEvent`; só `"keydown"` é disparado (por `KEY`, já existia antes)
 
 ## Resumo de prioridade (se fosse continuar o motor)
 

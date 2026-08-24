@@ -263,6 +263,32 @@ fn class_list_supports_toggle_replace_value_length_and_iteration() {
 }
 
 #[test]
+fn dataset_reflects_live_data_attributes_by_camel_case_key() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let element = d.create_element("div");
+    d.set_attribute(element, "data-user-id", "42");
+    d.set_attribute(element, "data-role", "admin");
+    d.append_child(root, element);
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { \
+                const el = document.querySelector('div'); \
+                const ds = el.dataset; \
+                const before = `${ds.userId},${ds.role},${ds === el.dataset}`; \
+                el.removeAttribute('data-role'); \
+                el.setAttribute('data-user-id', '43'); \
+                return `${before},${el.dataset.userId},${el.dataset.role}`; \
+            })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "42,admin,true,43,undefined");
+}
+
+#[test]
 fn attribute_presence_and_names_follow_live_dom_attributes() {
     let mut d = dom::Dom::new();
     let root = d.root();

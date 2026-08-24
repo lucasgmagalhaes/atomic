@@ -317,6 +317,36 @@ fn attributes_collection_is_stable_iterable_and_supports_get_named_item() {
 }
 
 #[test]
+fn form_and_anchor_specific_properties_reflect_boolean_and_href_attributes() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let input = d.create_element("input");
+    let anchor = d.create_element("a");
+    d.set_attribute(anchor, "href", "https://example.com/");
+    d.append_child(root, input);
+    d.append_child(root, anchor);
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { \
+                const input = document.querySelectorAll('input')[0]; \
+                const anchor = document.querySelectorAll('a')[0]; \
+                const before = `${input.checked},${input.disabled}`; \
+                input.checked = true; \
+                input.disabled = true; \
+                const after = `${input.checked},${input.hasAttribute('checked')},${input.disabled}`; \
+                input.checked = false; \
+                const cleared = `${input.checked},${input.hasAttribute('checked')}`; \
+                return `${before},${after},${cleared},${anchor.href}`; \
+            })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "false,false,true,true,true,false,false,https://example.com/");
+}
+
+#[test]
 fn attribute_presence_and_names_follow_live_dom_attributes() {
     let mut d = dom::Dom::new();
     let root = d.root();

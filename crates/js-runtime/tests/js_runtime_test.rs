@@ -83,6 +83,42 @@ fn get_element_by_id_returns_distinct_node_objects_for_the_same_element() {
 }
 
 #[test]
+fn a_listener_attached_in_one_eval_call_survives_to_dispatch_in_a_later_separate_eval_call() {
+    // Real bug this guards against: `getElementById` used to build a
+    // brand-new JS object every call, so a listener attached to the
+    // object from *one* `eval()` was invisible to a `dispatchEvent` from
+    // a *different*, later `eval()` call on the same node id (the common
+    // real-world shape: attach a listener at page load, dispatch later
+    // from a real user interaction or a separate command) - `__listeners`
+    // lived on the now-discarded first wrapper object, not the fresh one
+    // the second `getElementById` call built. `Node` object identity is
+    // now cached per real `dom::NodeId` (see `dom_bindings::get_or_create_node_object`),
+    // so this must pass with the attach and the dispatch in two entirely
+    // separate top-level `eval()` calls, not one expression.
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let p = d.create_element("p");
+    d.append_child(root, p);
+    d.set_attribute(p, "id", "greeting");
+    d.set_text_content(p, "before");
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+
+    ctx.eval(
+        "document.getElementById('greeting').addEventListener('click', () => { document.getElementById('greeting').textContent = 'clicked'; });",
+        "<attach>",
+    )
+    .expect("attaching the listener should eval cleanly");
+
+    let dispatched = ctx.eval("document.getElementById('greeting').dispatchEvent('click')", "<dispatch>").expect("dispatching should eval cleanly");
+    assert_eq!(dispatched, "true", "a real listener attached in an earlier eval call should still be found and called");
+
+    let text_after = ctx.eval("document.getElementById('greeting').textContent", "<check>").expect("reading textContent should eval cleanly");
+    assert_eq!(text_after, "clicked", "the listener's real mutation should be visible through yet another fresh getElementById call");
+}
+
+#[test]
 fn add_event_listener_and_dispatch_event_calls_the_listener() {
     let mut d = dom::Dom::new();
     let root = d.root();

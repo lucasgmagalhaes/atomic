@@ -241,6 +241,7 @@ impl Drop for Context<'_> {
             fetch_async::cleanup(self.ptr);
             blob::cleanup(self.ptr);
             notifications::cleanup(self.ptr);
+            dom_bindings::cleanup(self.ptr);
             sys::JS_FreeContext(self.ptr);
         }
     }

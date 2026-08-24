@@ -16,12 +16,13 @@ const PANE_WIDTH: u32 = 512;
 const PANE_HEIGHT: u32 = 320;
 
 /// One live grid cell: a stable id (registered into the active workspace
-/// so `automation_bridge::run_script` can address it via `pane("pane-N")`)
-/// plus the `BrowserView` actually rendering it. Ids are assigned
-/// positionally (`pane-1`, `pane-2`, ...) and reassigned whenever the pane
-/// count changes - stable identity across a session isn't needed yet since
-/// there's no per-pane persistence (proxy, last URL) surviving a count
-/// change either; see `NimbleApp::set_pane_count`'s doc.
+/// so `automation_bridge::run_script` can address it via `pane("id")`,
+/// and so `BrowserView::spawn_with_identity` gives it real persistent
+/// storage across shell restarts - see that method's own doc) plus the
+/// `BrowserView` actually rendering it. The grid's own "Panes: 1/2/4/6"
+/// buttons assign positional ids (`pane-1`, `pane-2`, ...) via
+/// `next_pane_id`; the "+ Add Profile" modal (`NimbleApp::create_profile`)
+/// lets a user pick a real name instead.
 struct Pane {
     id: String,
     browser: BrowserView,
@@ -113,6 +114,30 @@ struct NimbleApp {
     /// exists elsewhere in this shell to hand them to yet, see
     /// `chrome_import`'s own doc on scope).
     imported_bookmarks: Vec<chrome_import::Bookmark>,
+    /// The mockup's "Add profile modal" (name, start URL, email/password
+    /// autofill, proxy) - see [`AddProfileForm`] and
+    /// `NimbleApp::create_profile`. `None` when the modal isn't open; a
+    /// fresh `AddProfileForm::default()` is created each time it opens so
+    /// a previous attempt's typed values don't linger into the next one.
+    add_profile_form: Option<AddProfileForm>,
+    add_profile_error: Option<String>,
+}
+
+/// One in-progress "Add Profile" modal's form fields - see the mockup's
+/// own "Add profile modal" (name, start URL, email/password autofill,
+/// proxy, launch on start). "Launch on start" isn't included: it implies
+/// a persisted list of profiles to auto-spawn on shell startup, and
+/// nothing in this shell persists *which* profiles existed across a
+/// restart yet (each launch starts with exactly one default pane) - real
+/// scope not attempted here, not silently faked as a checkbox that does
+/// nothing.
+#[derive(Default)]
+struct AddProfileForm {
+    name: String,
+    start_url: String,
+    email: String,
+    password: String,
+    proxy: String,
 }
 
 const SPARKLINE_HEIGHT: f32 = 24.0;
@@ -156,17 +181,26 @@ fn draw_resource_overlay(ui: &egui::Ui, cell_rect: egui::Rect, monitor: &PaneMon
     ui.painter().add(egui::Shape::line(points, egui::Stroke::new(1.5_f32, egui::Color32::LIGHT_GREEN)));
 }
 
-/// Spawns one pane with `id` and registers it into the active workspace.
-/// `id` must be unique among every currently-live pane (see
-/// `NimbleApp::next_pane_id`) - since [`BrowserView::spawn_with_identity`]
-/// derives the shared-memory name directly from it, two live panes with the
-/// same id would fight over the same region and storage directory.
+/// Spawns one pane with `id` and registers it into the active workspace -
+/// see [`spawn_pane_with_proxy`] for the general form.
 fn spawn_pane(workspace: &mut WorkspaceManager, id: String) -> Pane {
+    spawn_pane_with_proxy(workspace, id, None)
+}
+
+/// Same as [`spawn_pane`], routing the new profile's fetches through
+/// `proxy` from the moment it spawns (the "Add Profile" modal's own proxy
+/// field - see `NimbleApp::create_profile`) instead of the two-step
+/// spawn-then-`apply_proxy`-respawn dance the toolbar's plain proxy box
+/// still uses. `id` must be unique among every currently-live pane (see
+/// `NimbleApp::next_pane_id`) - since [`BrowserView::spawn_with_identity`]
+/// derives the shared-memory name directly from it, two live panes with
+/// the same id would fight over the same region and storage directory.
+fn spawn_pane_with_proxy(workspace: &mut WorkspaceManager, id: String, proxy: Option<&str>) -> Pane {
     let active = workspace.active_index();
     workspace.add_profile(active, id.clone());
     let downloads_dir = std::env::temp_dir().join("nimble-downloads").join(&id);
     let history_path = std::env::temp_dir().join("nimble-shell-history").join(format!("{id}.txt"));
-    let browser = BrowserView::spawn_with_identity(&id, PANE_WIDTH, PANE_HEIGHT, None);
+    let browser = BrowserView::spawn_with_identity(&id, PANE_WIDTH, PANE_HEIGHT, proxy);
     Pane {
         browser,
         monitor: PaneMonitor::new(),
@@ -208,6 +242,8 @@ impl Default for NimbleApp {
             vault_use_keychain: false,
             import_result: None,
             imported_bookmarks: Vec::new(),
+            add_profile_form: None,
+            add_profile_error: None,
         }
     }
 }
@@ -242,6 +278,64 @@ impl NimbleApp {
             .unwrap_or(0)
             + 1;
         format!("pane-{next}")
+    }
+
+    /// The "+ Add Profile" toolbar button - opens the modal with a fresh
+    /// `AddProfileForm`, pre-filling `name` with [`next_pane_id`](Self::next_pane_id)
+    /// so a user who doesn't care about naming can just hit Create.
+    fn open_add_profile_modal(&mut self) {
+        self.add_profile_error = None;
+        self.add_profile_form = Some(AddProfileForm { name: self.next_pane_id(), ..Default::default() });
+    }
+
+    /// The mockup's "Add profile modal" Create button - a real, named
+    /// profile spawned with everything the form specified applied up
+    /// front (not a generic pane later reconfigured): the start URL is
+    /// navigated to immediately, email/password (if either is non-empty)
+    /// go into the real credential vault under `profile:<id>#email`/
+    /// `#password`, and the proxy (if set) is applied at spawn via
+    /// [`spawn_pane_with_proxy`] rather than the toolbar's spawn-then-
+    /// respawn `apply_proxy` dance. Rejects a blank or already-used name
+    /// (see [`spawn_pane_with_proxy`]'s own doc on why a duplicate id is a
+    /// real hazard, not just a UX nicety) rather than silently colliding
+    /// storage with an existing pane. Leaves the modal open on failure (so
+    /// the user's typed values aren't lost) and closes it on success.
+    fn create_profile(&mut self) {
+        let Some(form) = &self.add_profile_form else { return };
+        let name = form.name.trim().to_string();
+        if name.is_empty() {
+            self.add_profile_error = Some("Name is required.".to_string());
+            return;
+        }
+        if self.panes.iter().any(|p| p.id == name) {
+            self.add_profile_error = Some(format!("A pane named \"{name}\" already exists."));
+            return;
+        }
+
+        let proxy = if form.proxy.trim().is_empty() { None } else { Some(form.proxy.trim()) };
+        let start_url = form.start_url.trim().to_string();
+        let email = form.email.trim().to_string();
+        let password = form.password.clone();
+
+        let mut pane = spawn_pane_with_proxy(&mut self.workspace, name.clone(), proxy);
+        if !start_url.is_empty() {
+            pane.browser.navigate(&start_url);
+            pane.history.record(start_url);
+        }
+        self.panes.push(pane);
+        self.apply_fps_cap_to_all_panes();
+        self.apply_visibility_throttling();
+
+        if !email.is_empty() || !password.is_empty() {
+            self.ensure_vault_open();
+            if let Some(vault) = self.vault.as_mut() {
+                let _ = vault.set(&format!("profile:{name}#email"), &email);
+                let _ = vault.set(&format!("profile:{name}#password"), &password);
+            }
+        }
+
+        self.add_profile_form = None;
+        self.add_profile_error = None;
     }
 
     /// Grows or shrinks the *active workspace's visible* pane count to
@@ -731,6 +825,9 @@ impl eframe::App for NimbleApp {
                 if ui.button("⚙ Settings").clicked() {
                     self.settings_open = !self.settings_open;
                 }
+                if ui.button("+ Add Profile").clicked() {
+                    self.open_add_profile_modal();
+                }
                 ui.separator();
                 if ui.selectable_label(self.locale == Locale::En, "EN").clicked() {
                     self.locale = Locale::En;
@@ -807,6 +904,51 @@ impl eframe::App for NimbleApp {
                 None => {}
             }
         });
+
+        if self.add_profile_form.is_some() {
+            let mut open = true;
+            egui::Window::new("Add Profile").open(&mut open).show(ctx, |ui| {
+                let form = self.add_profile_form.as_mut().expect("checked is_some above");
+                egui::Grid::new("add_profile_form_grid").num_columns(2).show(ui, |ui| {
+                    ui.label("Name");
+                    ui.text_edit_singleline(&mut form.name);
+                    ui.end_row();
+
+                    ui.label("Start URL");
+                    ui.text_edit_singleline(&mut form.start_url);
+                    ui.end_row();
+
+                    ui.label("Email");
+                    ui.text_edit_singleline(&mut form.email);
+                    ui.end_row();
+
+                    ui.label("Password");
+                    ui.add(egui::TextEdit::singleline(&mut form.password).password(true));
+                    ui.end_row();
+
+                    ui.label("Proxy");
+                    ui.add(egui::TextEdit::singleline(&mut form.proxy).hint_text("host:port or user:pass@host:port"));
+                    ui.end_row();
+                });
+                ui.weak("\"Launch on start\" isn't implemented - no shell restart persists which profiles existed yet.");
+                if let Some(error) = &self.add_profile_error {
+                    ui.colored_label(egui::Color32::RED, error);
+                }
+                ui.horizontal(|ui| {
+                    if ui.button("Create").clicked() {
+                        self.create_profile();
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.add_profile_form = None;
+                        self.add_profile_error = None;
+                    }
+                });
+            });
+            if !open {
+                self.add_profile_form = None;
+                self.add_profile_error = None;
+            }
+        }
 
         if self.settings_open {
             self.ensure_vault_open();

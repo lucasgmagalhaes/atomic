@@ -100,8 +100,8 @@ fn attributes_on_created_nodes_are_bounded_and_visible_to_selectors() {
 
     let rt = Runtime::new();
     let ctx = Context::with_dom(&rt, d);
-    let result = ctx.eval("(() => { const child = document.createElement('button'); child.setAttribute('id', 'dynamic'); child.setAttribute('class', 'action primary'); document.getElementById('parent').appendChild(child); let invalid = false; try { child.setAttribute('<bad>', 'x'); } catch (_) { invalid = true; } return `${child.getAttribute('id')},${document.querySelector('.primary') === child},${child.getAttribute('missing')},${invalid}`; })()", "<test>").unwrap();
-    assert_eq!(result, "dynamic,true,null,true");
+    let result = ctx.eval("(() => { const child = document.createElement('button'); child.setAttribute('id', 'dynamic'); child.setAttribute('class', 'action primary'); document.getElementById('parent').appendChild(child); let invalid = false; try { child.setAttribute('<bad>', 'x'); } catch (_) { invalid = true; } child.removeAttribute('class'); return `${child.getAttribute('id')},${document.querySelector('.primary')},${child.getAttribute('missing')},${invalid}`; })()", "<test>").unwrap();
+    assert_eq!(result, "dynamic,null,null,true");
 }
 
 #[test]

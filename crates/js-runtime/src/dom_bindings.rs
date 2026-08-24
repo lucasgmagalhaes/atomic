@@ -673,6 +673,32 @@ unsafe extern "C" fn node_set_attribute(
     sys::js_undefined()
 }
 
+unsafe extern "C" fn node_remove_attribute(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 1 {
+        return throw_type_error(ctx, "attribute name is required");
+    }
+    let Some(name) = read_js_string(ctx, *argv) else {
+        return throw_type_error(ctx, "attribute name must be a string");
+    };
+    if !valid_attribute_name(&name) {
+        return throw_type_error(ctx, "invalid attribute name");
+    }
+    let Some(id) = node_id(ctx, this_val) else {
+        return throw_type_error(ctx, "attribute target must be a node");
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() || (*dom).get(id).is_none() {
+        return throw_type_error(ctx, "node is no longer attached to this document");
+    }
+    (*dom).remove_attribute(id, &name);
+    sys::js_undefined()
+}
+
 unsafe extern "C" fn node_remove(
     ctx: *mut sys::JSContext,
     this_val: sys::JSValue,
@@ -726,6 +752,11 @@ unsafe fn define_mutation_methods(ctx: *mut sys::JSContext, proto: sys::JSValue)
         ("appendChild", node_append_child as sys::JSCFunction, 1),
         ("getAttribute", node_get_attribute as sys::JSCFunction, 1),
         ("setAttribute", node_set_attribute as sys::JSCFunction, 2),
+        (
+            "removeAttribute",
+            node_remove_attribute as sys::JSCFunction,
+            1,
+        ),
         ("insertBefore", node_insert_before as sys::JSCFunction, 2),
         ("removeChild", node_remove_child as sys::JSCFunction, 1),
         ("remove", node_remove as sys::JSCFunction, 0),

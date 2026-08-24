@@ -150,13 +150,20 @@ impl Dom {
     /// `TreeSink::append_before_sibling`, which never calls this on a
     /// node without one.
     pub fn insert_before(&mut self, sibling: NodeId, new_node: NodeId) {
-        let parent = self.get(sibling).and_then(|n| n.parent).expect("sibling must have a parent");
+        let parent = self
+            .get(sibling)
+            .and_then(|n| n.parent)
+            .expect("sibling must have a parent");
         self.detach(new_node);
         if let Some(node) = self.get_mut(new_node) {
             node.parent = Some(parent);
         }
         if let Some(node) = self.get_mut(parent) {
-            let pos = node.children.iter().position(|&c| c == sibling).unwrap_or(node.children.len());
+            let pos = node
+                .children
+                .iter()
+                .position(|&c| c == sibling)
+                .unwrap_or(node.children.len());
             node.children.insert(pos, new_node);
         }
     }
@@ -225,7 +232,12 @@ impl Dom {
 
     pub fn set_attribute(&mut self, id: NodeId, name: &str, value: &str) {
         if let Some(Node {
-            data: NodeData::Element { attributes, value: value_field, .. },
+            data:
+                NodeData::Element {
+                    attributes,
+                    value: value_field,
+                    ..
+                },
             ..
         }) = self.get_mut(id)
         {
@@ -248,6 +260,29 @@ impl Dom {
             NodeData::Element { attributes, .. } => attributes.get(name).map(String::as_str),
             _ => None,
         }
+    }
+
+    /// Removes an element attribute and returns whether it existed. The
+    /// generic JS `Node` binding mirrors the `value` content attribute into
+    /// its independent form value, so clearing that attribute clears the
+    /// mirror as well.
+    pub fn remove_attribute(&mut self, id: NodeId, name: &str) -> bool {
+        if let Some(Node {
+            data:
+                NodeData::Element {
+                    attributes,
+                    value: value_field,
+                    ..
+                },
+            ..
+        }) = self.get_mut(id)
+        {
+            if name == "value" {
+                *value_field = None;
+            }
+            return attributes.remove(name).is_some();
+        }
+        false
     }
 
     /// Appends `more` onto an existing `Text` node's content in place —
@@ -326,7 +361,9 @@ impl Dom {
     pub fn value(&self, id: NodeId) -> String {
         match self.get(id).map(|n| &n.data) {
             Some(NodeData::Element { value: Some(v), .. }) => v.clone(),
-            Some(NodeData::Element { tag, value: None, .. }) if tag == "textarea" => self.text_content(id),
+            Some(NodeData::Element {
+                tag, value: None, ..
+            }) if tag == "textarea" => self.text_content(id),
             _ => String::new(),
         }
     }
@@ -336,7 +373,9 @@ impl Dom {
     /// node.
     pub fn set_value(&mut self, id: NodeId, value: &str) {
         if let Some(Node {
-            data: NodeData::Element { value: value_field, .. },
+            data: NodeData::Element {
+                value: value_field, ..
+            },
             ..
         }) = self.get_mut(id)
         {
@@ -419,12 +458,18 @@ impl Dom {
     /// but a tag outside that pair without one never appears here.
     pub fn tab_order(&self) -> Vec<NodeId> {
         fn tabindex_of(dom: &Dom, id: NodeId) -> Option<i32> {
-            dom.attribute(id, "tabindex").and_then(|v| v.trim().parse::<i32>().ok())
+            dom.attribute(id, "tabindex")
+                .and_then(|v| v.trim().parse::<i32>().ok())
         }
         fn is_natural_focusable(dom: &Dom, id: NodeId) -> bool {
             matches!(&dom.get(id).map(|n| &n.data), Some(NodeData::Element { tag, .. }) if tag == "input" || tag == "textarea")
         }
-        fn walk(dom: &Dom, node: NodeId, positives: &mut Vec<(i32, NodeId)>, defaults: &mut Vec<NodeId>) {
+        fn walk(
+            dom: &Dom,
+            node: NodeId,
+            positives: &mut Vec<(i32, NodeId)>,
+            defaults: &mut Vec<NodeId>,
+        ) {
             let Some(n) = dom.get(node) else { return };
             if matches!(n.data, NodeData::Element { .. }) {
                 match tabindex_of(dom, node) {
@@ -446,7 +491,11 @@ impl Dom {
         let mut defaults = Vec::new();
         walk(self, self.root, &mut positives, &mut defaults);
         positives.sort_by_key(|&(t, _)| t);
-        positives.into_iter().map(|(_, id)| id).chain(defaults).collect()
+        positives
+            .into_iter()
+            .map(|(_, id)| id)
+            .chain(defaults)
+            .collect()
     }
 
     /// What [`Dom::focused`] should move to on a real `Tab`
@@ -464,7 +513,9 @@ impl Dom {
         if order.is_empty() {
             return None;
         }
-        let current_index = self.active_element().and_then(|id| order.iter().position(|&n| n == id));
+        let current_index = self
+            .active_element()
+            .and_then(|id| order.iter().position(|&n| n == id));
         let next_index = match (current_index, reverse) {
             (Some(i), false) => (i + 1) % order.len(),
             (Some(i), true) => (i + order.len() - 1) % order.len(),

@@ -3278,6 +3278,62 @@ unsafe extern "C" fn document_create_document_fragment(
     )
 }
 
+/// Real `document.importNode(node, deep?)`: clones a node into this
+/// document. Since this engine has a single browsing context (one `Dom`
+/// arena), this is equivalent to `cloneNode(deep)` — the `deep` parameter
+/// defaults to `true` per the modern spec.
+unsafe extern "C" fn document_import_node(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 1 {
+        return throw_type_error(ctx, "node is required");
+    }
+    let Some(source_id) = node_id(ctx, *argv) else {
+        return throw_type_error(ctx, "argument must be a Node");
+    };
+    let deep = if argc >= 2 {
+        let b = sys::JS_ToBool(ctx, *argv.add(1));
+        b >= 0 && b != 0
+    } else {
+        true
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return throw_type_error(ctx, "document is unavailable");
+    }
+    let cloned = (*dom).clone_node(source_id, deep);
+    node_object(
+        ctx,
+        crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NODE_CLASS_KIND),
+        cloned,
+    )
+}
+
+/// Real `document.adoptNode(node)`: moves a node into this document.
+/// Since this engine has a single browsing context (one `Dom` arena),
+/// the node is already in this document — returns it as-is.
+unsafe extern "C" fn document_adopt_node(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 1 {
+        return throw_type_error(ctx, "node is required");
+    }
+    let Some(id) = node_id(ctx, *argv) else {
+        return throw_type_error(ctx, "argument must be a Node");
+    };
+    node_object(
+        ctx,
+        crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NODE_CLASS_KIND),
+        id,
+    )
+}
+
 unsafe extern "C" fn document_get_elements_by_tag_name(
     ctx: *mut sys::JSContext,
     _this_val: sys::JSValue,
@@ -3733,6 +3789,8 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
             "getElementsByClassName",
             document_get_elements_by_class_name as sys::JSCFunction,
         ),
+        ("importNode", document_import_node as sys::JSCFunction),
+        ("adoptNode", document_adopt_node as sys::JSCFunction),
     ] {
         let name = CString::new(name).unwrap();
         let value =

@@ -204,6 +204,13 @@ extern "C" {
     pub fn JS_GetException(ctx: *mut JSContext) -> JSValue;
     pub fn JS_HasException(ctx: *mut JSContext) -> bool;
 
+    /// Returns an owned reference (per the usual `JSValue`-return
+    /// convention — caller must `JS_FreeValue` it): the JSON text as a
+    /// string on success, `JS_UNDEFINED` when the value isn't
+    /// representable (functions, `undefined`, cycles), or an exception
+    /// marker when `toJSON` itself threw.
+    pub fn JS_JSONStringify(ctx: *mut JSContext, obj: JSValue, replacer: JSValue, space: JSValue) -> JSValue;
+
     pub fn JS_GetRuntime(ctx: *mut JSContext) -> *mut JSRuntime;
 
     /// Allocates a class ID the first time `*pclass_id == 0` (writing it

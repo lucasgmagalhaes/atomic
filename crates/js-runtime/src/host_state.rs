@@ -74,6 +74,12 @@ pub(crate) struct HostState {
     /// `Context::new` (no host state behind the sink checks), where the
     /// uniqueness check degrades to accepting duplicates.
     pub trusted_type_policy_names: Vec<String>,
+    /// Formatted `console.*` output (`crate::console`), appended by page
+    /// scripts and by uncaught-exception reporting, drained wholesale by
+    /// `Context::take_console_messages`. Empty on a bare `Context::new`
+    /// (no host state behind the sink) — there `console.*` calls format
+    /// their arguments and discard them.
+    pub console_messages: Vec<crate::console::ConsoleMessage>,
     /// Raw `Permissions-Policy` response-policy text. Native capability
     /// bindings consult it immediately before performing their privileged
     /// operation; `None` means the host did not provide a policy and leaves

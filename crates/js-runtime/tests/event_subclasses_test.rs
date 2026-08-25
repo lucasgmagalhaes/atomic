@@ -1,10 +1,11 @@
 use js_runtime::{Context, Runtime};
 
-// `CustomEvent`/`KeyboardEvent`/`PointerEvent` are registered by
-// `dom_bindings::register` (see `event_subclasses.rs`'s call site), which
-// only runs for `Context::with_dom` — a plain `Context::new` has no DOM and
-// therefore no `Event`-family globals either. Every test here uses an empty
-// `dom::Dom::new()` even when it isn't otherwise exercising the DOM.
+// `CustomEvent`/`KeyboardEvent`/`PointerEvent`/`MouseEvent`/`FocusEvent` are
+// registered by `dom_bindings::register` (see `event_subclasses.rs`'s call
+// site), which only runs for `Context::with_dom` — a plain `Context::new`
+// has no DOM and therefore no `Event`-family globals either. Every test
+// here uses an empty `dom::Dom::new()` even when it isn't otherwise
+// exercising the DOM.
 fn context_with_empty_dom(rt: &Runtime) -> Context<'_> {
     Context::with_dom(rt, dom::Dom::new())
 }
@@ -59,6 +60,77 @@ fn pointer_event_carries_fields_and_defaults() {
         )
         .unwrap();
     assert_eq!(result, "7,mouse,10,20,1,0,true");
+}
+
+#[test]
+fn mouse_event_carries_fields_and_defaults() {
+    let rt = Runtime::new();
+    let ctx = context_with_empty_dom(&rt);
+    let result = ctx
+        .eval(
+            "(() => { const e = new MouseEvent('click', { screenX: 1, screenY: 2, clientX: 10, clientY: 20, ctrlKey: true, button: 2 }); return `${e.screenX},${e.screenY},${e.clientX},${e.clientY},${e.ctrlKey},${e.shiftKey},${e.button},${e.buttons},${e.relatedTarget === null},${e instanceof Event}`; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "1,2,10,20,true,false,2,0,true,true");
+}
+
+#[test]
+fn mouse_event_carries_related_target_node() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let other = d.create_element("div");
+    d.set_attribute(other, "id", "other");
+    d.append_child(root, other);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { const other = document.getElementById('other'); const e = new MouseEvent('mouseout', { relatedTarget: other }); return e.relatedTarget === other; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "true");
+}
+
+#[test]
+fn focus_event_carries_related_target_and_defaults() {
+    let rt = Runtime::new();
+    let ctx = context_with_empty_dom(&rt);
+    let result = ctx
+        .eval(
+            "(() => { const e = new FocusEvent('blur'); return `${e.relatedTarget === null},${e.bubbles},${e instanceof Event}`; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "true,false,true");
+}
+
+#[test]
+fn input_event_carries_fields_and_defaults() {
+    let rt = Runtime::new();
+    let ctx = context_with_empty_dom(&rt);
+    let result = ctx
+        .eval(
+            "(() => { const e = new InputEvent('beforeinput', { data: 'a', inputType: 'insertText', isComposing: true }); return `${e.data},${e.inputType},${e.isComposing},${e instanceof Event}`; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "a,insertText,true,true");
+}
+
+#[test]
+fn input_event_without_options_defaults_data_to_null() {
+    let rt = Runtime::new();
+    let ctx = context_with_empty_dom(&rt);
+    let result = ctx
+        .eval(
+            "(() => { const e = new InputEvent('input'); return `${e.data === null},${e.inputType},${e.isComposing}`; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "true,,false");
 }
 
 #[test]

@@ -10,8 +10,16 @@ fn without_the_directive_a_plain_string_is_still_accepted() {
     let ctx = Context::with_dom(&rt, d);
 
     // No set_csp call at all - the default, pre-Trusted-Types behavior.
-    ctx.eval("document.getElementById('box').innerHTML = '<b>hi</b>'", "<test>").unwrap();
-    assert_eq!(ctx.eval("document.getElementById('box').innerHTML", "<test>").unwrap(), "<b>hi</b>");
+    ctx.eval(
+        "document.getElementById('box').innerHTML = '<b>hi</b>'",
+        "<test>",
+    )
+    .unwrap();
+    assert_eq!(
+        ctx.eval("document.getElementById('box').innerHTML", "<test>")
+            .unwrap(),
+        "<b>hi</b>"
+    );
 }
 
 #[test]
@@ -29,9 +37,17 @@ fn require_trusted_types_for_script_rejects_a_plain_innerhtml_string() {
         "<test>",
     )
     .unwrap();
-    assert_eq!(result, "threw:true", "a plain string must be rejected with a message naming TrustedHTML under enforcement");
+    assert_eq!(
+        result, "threw:true",
+        "a plain string must be rejected with a message naming TrustedHTML under enforcement"
+    );
 
-    assert_eq!(ctx.eval("document.getElementById('box').innerHTML", "<test>").unwrap(), "", "the rejected assignment must not have mutated the DOM");
+    assert_eq!(
+        ctx.eval("document.getElementById('box').innerHTML", "<test>")
+            .unwrap(),
+        "",
+        "the rejected assignment must not have mutated the DOM"
+    );
 }
 
 #[test]
@@ -55,7 +71,11 @@ fn a_policy_created_value_is_accepted_under_enforcement() {
     // element text is uppercase, proving the value flowed *through* the
     // policy rather than being accepted verbatim. (The tag itself reads
     // back lowercase: html5ever normalizes element names at parse time.)
-    assert_eq!(ctx.eval("document.getElementById('box').innerHTML", "<test>").unwrap(), "<b>HI</b>");
+    assert_eq!(
+        ctx.eval("document.getElementById('box').innerHTML", "<test>")
+            .unwrap(),
+        "<b>HI</b>"
+    );
 }
 
 #[test]
@@ -76,7 +96,10 @@ fn outerhtml_is_gated_by_the_same_directive() {
         "<test>",
     )
     .unwrap();
-    assert_eq!(result, "threw", "outerHTML is an HTML injection sink exactly like innerHTML");
+    assert_eq!(
+        result, "threw",
+        "outerHTML is an HTML injection sink exactly like innerHTML"
+    );
 }
 
 #[test]
@@ -95,7 +118,10 @@ fn any_delivered_policy_requiring_enforcement_tightens_it() {
         "<test>",
     )
     .unwrap();
-    assert_eq!(blocked, "true", "enforcement must be on when ANY delivered policy requires it");
+    assert_eq!(
+        blocked, "true",
+        "enforcement must be on when ANY delivered policy requires it"
+    );
 }
 
 #[test]
@@ -111,8 +137,16 @@ fn replacing_the_policy_list_turns_enforcement_back_off() {
     // Wholesale replace with one that says nothing about trusted types -
     // same convention `set_csp` has everywhere else: the old list is gone.
     ctx.set_csp("connect-src 'self'");
-    ctx.eval("document.getElementById('box').innerHTML = '<b>ok</b>'", "<test>").unwrap();
-    assert_eq!(ctx.eval("document.getElementById('box').innerHTML", "<test>").unwrap(), "<b>ok</b>");
+    ctx.eval(
+        "document.getElementById('box').innerHTML = '<b>ok</b>'",
+        "<test>",
+    )
+    .unwrap();
+    assert_eq!(
+        ctx.eval("document.getElementById('box').innerHTML", "<test>")
+            .unwrap(),
+        "<b>ok</b>"
+    );
 }
 
 #[test]
@@ -121,15 +155,23 @@ fn duplicate_policy_names_are_rejected_and_default_policy_reads_null() {
     let d = dom::Dom::new();
     let ctx = Context::with_dom(&rt, d);
 
-    ctx.eval("trustedTypes.createPolicy('one', {})", "<test>").unwrap();
+    ctx.eval("trustedTypes.createPolicy('one', {})", "<test>")
+        .unwrap();
     let duplicate = ctx.eval(
         "(() => { try { trustedTypes.createPolicy('one', {}); return false; } catch (e) { return true; } })()",
         "<test>",
     )
     .unwrap();
-    assert_eq!(duplicate, "true", "real policy names are unique per document");
+    assert_eq!(
+        duplicate, "true",
+        "real policy names are unique per document"
+    );
 
-    assert_eq!(ctx.eval("String(trustedTypes.defaultPolicy)", "<test>").unwrap(), "null");
+    assert_eq!(
+        ctx.eval("String(trustedTypes.defaultPolicy)", "<test>")
+            .unwrap(),
+        "null"
+    );
 }
 
 #[test]

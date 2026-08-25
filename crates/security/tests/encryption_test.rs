@@ -15,7 +15,9 @@ fn ciphertext_does_not_contain_the_plaintext_verbatim() {
     let plaintext = b"a very identifiable secret string";
     let blob = encrypt(&key, plaintext);
     assert!(
-        !blob.windows(plaintext.len()).any(|w| w == plaintext.as_slice()),
+        !blob
+            .windows(plaintext.len())
+            .any(|w| w == plaintext.as_slice()),
         "encrypted blob should not contain the plaintext bytes anywhere"
     );
 }
@@ -41,7 +43,10 @@ fn tampered_ciphertext_fails_authentication() {
 #[test]
 fn truncated_blob_fails_cleanly_instead_of_panicking() {
     let key = generate_key();
-    assert!(matches!(decrypt(&key, &[1, 2, 3]), Err(Error::DecryptionFailed)));
+    assert!(matches!(
+        decrypt(&key, &[1, 2, 3]),
+        Err(Error::DecryptionFailed)
+    ));
     assert!(matches!(decrypt(&key, &[]), Err(Error::DecryptionFailed)));
 }
 

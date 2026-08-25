@@ -34,14 +34,7 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     let performance = sys::JS_NewObject(ctx);
 
     let now_name = CString::new("now").unwrap();
-    let now_fn = sys::JS_NewCFunction2(
-        ctx,
-        now,
-        now_name.as_ptr(),
-        0,
-        sys::JS_CFUNC_GENERIC,
-        0,
-    );
+    let now_fn = sys::JS_NewCFunction2(ctx, now, now_name.as_ptr(), 0, sys::JS_CFUNC_GENERIC, 0);
     sys::JS_SetPropertyStr(ctx, performance, now_name.as_ptr(), now_fn);
 
     let performance_name = CString::new("performance").unwrap();

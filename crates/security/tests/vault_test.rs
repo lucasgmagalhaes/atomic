@@ -3,7 +3,10 @@ use security::vault::CredentialVault;
 fn temp_paths(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
     let dir = std::env::temp_dir();
     let pid = std::process::id();
-    (dir.join(format!("nimble-vault-test-{pid}-{name}.bin")), dir.join(format!("nimble-vault-test-{pid}-{name}.key")))
+    (
+        dir.join(format!("nimble-vault-test-{pid}-{name}.bin")),
+        dir.join(format!("nimble-vault-test-{pid}-{name}.key")),
+    )
 }
 
 fn cleanup(vault_path: &std::path::Path, key_path: &std::path::Path) {
@@ -46,7 +49,9 @@ fn the_vault_file_on_disk_never_contains_the_plaintext_value() {
     cleanup(&vault_path, &key_path);
 
     let mut vault = CredentialVault::open_or_create(&vault_path, &key_path).unwrap();
-    vault.set("login.password", "correct-horse-battery-staple").unwrap();
+    vault
+        .set("login.password", "correct-horse-battery-staple")
+        .unwrap();
 
     let raw = std::fs::read(&vault_path).unwrap();
     let raw_text = String::from_utf8_lossy(&raw);

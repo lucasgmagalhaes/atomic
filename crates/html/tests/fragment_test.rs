@@ -21,9 +21,9 @@ fn simple_fragment_returns_top_level_elements_in_order() {
 fn bare_text_fragment_produces_a_text_node() {
     let (dom, ids) = html::parse_fragment("hello world");
     assert!(!ids.is_empty(), "expected at least one top-level node");
-    let has_text = ids.iter().any(|&id| {
-        matches!(&dom.get(id).unwrap().data, NodeData::Text(text) if text == "hello world")
-    });
+    let has_text = ids.iter().any(
+        |&id| matches!(&dom.get(id).unwrap().data, NodeData::Text(text) if text == "hello world"),
+    );
     assert!(has_text, "expected a text node with the fragment's content");
 }
 
@@ -38,7 +38,10 @@ fn nested_fragment_keeps_the_whole_subtree() {
         .children
         .iter()
         .any(|&c| tag_of(&dom, c) == Some("span"));
-    assert!(has_span, "expected <div>'s children to contain the nested <span>");
+    assert!(
+        has_span,
+        "expected <div>'s children to contain the nested <span>"
+    );
 }
 
 #[test]
@@ -47,6 +50,9 @@ fn malformed_tag_soup_does_not_panic() {
     assert!(!ids.is_empty(), "expected some recovered top-level node(s)");
     // Malformed input should still recover into sensible <p> siblings
     // rather than one broken/nested mess.
-    let p_count = ids.iter().filter(|&&id| tag_of(&dom, id) == Some("p")).count();
+    let p_count = ids
+        .iter()
+        .filter(|&&id| tag_of(&dom, id) == Some("p"))
+        .count();
     assert_eq!(p_count, 2, "expected two implicitly-closed <p> siblings");
 }

@@ -10,7 +10,8 @@ use std::io;
 use windows_sys::core::PWSTR;
 use windows_sys::Win32::Foundation::{GetLastError, ERROR_NOT_FOUND, FALSE};
 use windows_sys::Win32::Security::Credentials::{
-    CredDeleteW, CredFree, CredReadW, CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC,
+    CredDeleteW, CredFree, CredReadW, CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE,
+    CRED_TYPE_GENERIC,
 };
 
 #[derive(Debug)]
@@ -75,7 +76,14 @@ pub fn read_credential(target: &str) -> Result<Vec<u8>, KeychainError> {
     let target_wide = to_wide_null(target);
     let mut credential_ptr: *mut CREDENTIALW = std::ptr::null_mut();
 
-    let ok = unsafe { CredReadW(target_wide.as_ptr() as PWSTR, CRED_TYPE_GENERIC, 0, &mut credential_ptr) };
+    let ok = unsafe {
+        CredReadW(
+            target_wide.as_ptr() as PWSTR,
+            CRED_TYPE_GENERIC,
+            0,
+            &mut credential_ptr,
+        )
+    };
     if ok == FALSE {
         let err = unsafe { GetLastError() };
         return Err(if err == ERROR_NOT_FOUND {
@@ -87,7 +95,11 @@ pub fn read_credential(target: &str) -> Result<Vec<u8>, KeychainError> {
 
     let bytes = unsafe {
         let credential = &*credential_ptr;
-        std::slice::from_raw_parts(credential.CredentialBlob, credential.CredentialBlobSize as usize).to_vec()
+        std::slice::from_raw_parts(
+            credential.CredentialBlob,
+            credential.CredentialBlobSize as usize,
+        )
+        .to_vec()
     };
     unsafe { CredFree(credential_ptr as *const std::ffi::c_void) };
     Ok(bytes)
@@ -104,7 +116,9 @@ pub fn delete_credential(target: &str) -> Result<(), KeychainError> {
         if err == ERROR_NOT_FOUND {
             return Ok(());
         }
-        return Err(KeychainError::DeleteFailed(io::Error::from_raw_os_error(err as i32)));
+        return Err(KeychainError::DeleteFailed(io::Error::from_raw_os_error(
+            err as i32,
+        )));
     }
     Ok(())
 }

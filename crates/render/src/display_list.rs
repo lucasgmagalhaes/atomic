@@ -168,7 +168,13 @@ fn collect(box_: &LayoutBox, out: &mut Vec<Rect>, clip: Option<ClipRect>, parent
 /// the shadow) falls out naturally from this pipeline's existing
 /// "later rects paint over earlier ones" convention - no explicit
 /// z-ordering needed.
-fn push_box_shadow_rect(box_: &LayoutBox, shadow: layout_engine::BoxShadow, out: &mut Vec<Rect>, clip: Option<ClipRect>, opacity: f64) {
+fn push_box_shadow_rect(
+    box_: &LayoutBox,
+    shadow: layout_engine::BoxShadow,
+    out: &mut Vec<Rect>,
+    clip: Option<ClipRect>,
+    opacity: f64,
+) {
     let d = box_.dimensions;
     let rect = Rect {
         x: (d.x + shadow.offset_x - shadow.spread) as f32,
@@ -204,16 +210,40 @@ fn push_border_rects(box_: &LayoutBox, out: &mut Vec<Rect>, clip: Option<ClipRec
         }
     };
     if b.top > 0.0 {
-        push(Rect { x: d.x as f32, y: d.y as f32, width: d.width as f32, height: b.top as f32, color });
+        push(Rect {
+            x: d.x as f32,
+            y: d.y as f32,
+            width: d.width as f32,
+            height: b.top as f32,
+            color,
+        });
     }
     if b.bottom > 0.0 {
-        push(Rect { x: d.x as f32, y: (d.y + d.height - b.bottom) as f32, width: d.width as f32, height: b.bottom as f32, color });
+        push(Rect {
+            x: d.x as f32,
+            y: (d.y + d.height - b.bottom) as f32,
+            width: d.width as f32,
+            height: b.bottom as f32,
+            color,
+        });
     }
     if b.left > 0.0 {
-        push(Rect { x: d.x as f32, y: d.y as f32, width: b.left as f32, height: d.height as f32, color });
+        push(Rect {
+            x: d.x as f32,
+            y: d.y as f32,
+            width: b.left as f32,
+            height: d.height as f32,
+            color,
+        });
     }
     if b.right > 0.0 {
-        push(Rect { x: (d.x + d.width - b.right) as f32, y: d.y as f32, width: b.right as f32, height: d.height as f32, color });
+        push(Rect {
+            x: (d.x + d.width - b.right) as f32,
+            y: d.y as f32,
+            width: b.right as f32,
+            height: d.height as f32,
+            color,
+        });
     }
 }
 
@@ -246,12 +276,21 @@ pub fn build_glyph_list(box_: &LayoutBox) -> Vec<ClippedGlyph> {
     list
 }
 
-fn collect_glyphs(box_: &LayoutBox, out: &mut Vec<ClippedGlyph>, clip: Option<ClipRect>, parent_opacity: f64) {
+fn collect_glyphs(
+    box_: &LayoutBox,
+    out: &mut Vec<ClippedGlyph>,
+    clip: Option<ClipRect>,
+    parent_opacity: f64,
+) {
     let opacity = parent_opacity * box_.style.opacity;
     let ox = box_.dimensions.x as i32;
     let oy = box_.dimensions.y as i32;
     out.extend(box_.glyphs.iter().map(|g| ClippedGlyph {
-        glyph: PositionedGlyph { x: g.x + ox, y: g.y + oy, ..*g },
+        glyph: PositionedGlyph {
+            x: g.x + ox,
+            y: g.y + oy,
+            ..*g
+        },
         clip,
         opacity,
     }));
@@ -301,7 +340,12 @@ pub fn build_image_list(box_: &LayoutBox) -> Vec<ImageQuad> {
     list
 }
 
-fn collect_images(box_: &LayoutBox, out: &mut Vec<ImageQuad>, clip: Option<ClipRect>, parent_opacity: f64) {
+fn collect_images(
+    box_: &LayoutBox,
+    out: &mut Vec<ImageQuad>,
+    clip: Option<ClipRect>,
+    parent_opacity: f64,
+) {
     let opacity = parent_opacity * box_.style.opacity;
     if let Some(image) = &box_.image {
         out.push(ImageQuad {

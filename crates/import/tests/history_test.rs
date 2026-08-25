@@ -19,7 +19,12 @@ fn write_real_chrome_history_db(path: &std::path::Path) {
     // offset (11644473600 seconds), both times 1_000_000 for microseconds.
     conn.execute(
         "INSERT INTO urls (url, title, visit_count, last_visit_time) VALUES (?1, ?2, ?3, ?4)",
-        rusqlite::params!["https://example.com/", "Example Domain", 3, 13_380_163_200_000_000i64],
+        rusqlite::params![
+            "https://example.com/",
+            "Example Domain",
+            3,
+            13_380_163_200_000_000i64
+        ],
     )
     .unwrap();
 }
@@ -31,14 +36,22 @@ fn imports_real_rows_and_converts_webkit_time_to_a_real_unix_time() {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     write_real_chrome_history_db(&path);
 
-    let entries = import_history(&path).expect("a real sqlite file with Chrome's own urls schema should import");
+    let entries = import_history(&path)
+        .expect("a real sqlite file with Chrome's own urls schema should import");
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].url, "https://example.com/");
     assert_eq!(entries[0].title, "Example Domain");
     assert_eq!(entries[0].visit_count, 3);
 
-    let unix_secs = entries[0].last_visit_time.duration_since(std::time::UNIX_EPOCH).expect("should be after unix epoch").as_secs();
-    assert_eq!(unix_secs, 1_735_689_600, "2025-01-01T00:00:00Z as real unix seconds");
+    let unix_secs = entries[0]
+        .last_visit_time
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("should be after unix epoch")
+        .as_secs();
+    assert_eq!(
+        unix_secs, 1_735_689_600,
+        "2025-01-01T00:00:00Z as real unix seconds"
+    );
 
     let _ = std::fs::remove_file(&path);
 }
@@ -53,7 +66,10 @@ fn importing_leaves_the_original_file_untouched() {
 
     let _ = import_history(&path).expect("import should succeed");
     let bytes_after = std::fs::read(&path).unwrap();
-    assert_eq!(original_bytes, bytes_after, "import copies the file before reading - the real original must be untouched");
+    assert_eq!(
+        original_bytes, bytes_after,
+        "import copies the file before reading - the real original must be untouched"
+    );
 
     let _ = std::fs::remove_file(&path);
 }

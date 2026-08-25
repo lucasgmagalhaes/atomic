@@ -58,33 +58,63 @@ unsafe fn store(ctx: *mut sys::JSContext, magic: c_int) -> *mut storage::LocalSt
     if state.is_null() {
         return std::ptr::null_mut();
     }
-    let field = if magic == 0 { &mut (*state).local_storage } else { &mut (*state).session_storage };
-    field.as_mut().map(|s| s as *mut storage::LocalStorage).unwrap_or(std::ptr::null_mut())
+    let field = if magic == 0 {
+        &mut (*state).local_storage
+    } else {
+        &mut (*state).session_storage
+    };
+    field
+        .as_mut()
+        .map(|s| s as *mut storage::LocalStorage)
+        .unwrap_or(std::ptr::null_mut())
 }
 
-unsafe extern "C" fn get_item(ctx: *mut sys::JSContext, _this: sys::JSValue, argc: c_int, argv: *mut sys::JSValue, magic: c_int) -> sys::JSValue {
+unsafe extern "C" fn get_item(
+    ctx: *mut sys::JSContext,
+    _this: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+    magic: c_int,
+) -> sys::JSValue {
     let s = store(ctx, magic);
     if s.is_null() || argc < 1 {
         return sys::js_null();
     }
-    let Some(key) = read_js_string(ctx, *argv) else { return sys::js_null() };
+    let Some(key) = read_js_string(ctx, *argv) else {
+        return sys::js_null();
+    };
     match (*s).get(&key) {
         Some(v) => new_js_string(ctx, v),
         None => sys::js_null(),
     }
 }
 
-unsafe extern "C" fn set_item(ctx: *mut sys::JSContext, _this: sys::JSValue, argc: c_int, argv: *mut sys::JSValue, magic: c_int) -> sys::JSValue {
+unsafe extern "C" fn set_item(
+    ctx: *mut sys::JSContext,
+    _this: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+    magic: c_int,
+) -> sys::JSValue {
     let s = store(ctx, magic);
     if !s.is_null() && argc >= 2 {
-        if let (Some(key), Some(value)) = (read_js_string(ctx, *argv), read_js_string(ctx, *argv.add(1))) {
+        if let (Some(key), Some(value)) = (
+            read_js_string(ctx, *argv),
+            read_js_string(ctx, *argv.add(1)),
+        ) {
             let _ = (*s).set(&key, &value);
         }
     }
     sys::js_undefined()
 }
 
-unsafe extern "C" fn remove_item(ctx: *mut sys::JSContext, _this: sys::JSValue, argc: c_int, argv: *mut sys::JSValue, magic: c_int) -> sys::JSValue {
+unsafe extern "C" fn remove_item(
+    ctx: *mut sys::JSContext,
+    _this: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+    magic: c_int,
+) -> sys::JSValue {
     let s = store(ctx, magic);
     if !s.is_null() && argc >= 1 {
         if let Some(key) = read_js_string(ctx, *argv) {
@@ -94,7 +124,13 @@ unsafe extern "C" fn remove_item(ctx: *mut sys::JSContext, _this: sys::JSValue, 
     sys::js_undefined()
 }
 
-unsafe extern "C" fn clear_storage(ctx: *mut sys::JSContext, _this: sys::JSValue, _argc: c_int, _argv: *mut sys::JSValue, magic: c_int) -> sys::JSValue {
+unsafe extern "C" fn clear_storage(
+    ctx: *mut sys::JSContext,
+    _this: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
+    magic: c_int,
+) -> sys::JSValue {
     let s = store(ctx, magic);
     if !s.is_null() {
         let _ = (*s).clear();
@@ -102,7 +138,13 @@ unsafe extern "C" fn clear_storage(ctx: *mut sys::JSContext, _this: sys::JSValue
     sys::js_undefined()
 }
 
-unsafe extern "C" fn key_at(ctx: *mut sys::JSContext, _this: sys::JSValue, argc: c_int, argv: *mut sys::JSValue, magic: c_int) -> sys::JSValue {
+unsafe extern "C" fn key_at(
+    ctx: *mut sys::JSContext,
+    _this: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+    magic: c_int,
+) -> sys::JSValue {
     let s = store(ctx, magic);
     if s.is_null() || argc < 1 {
         return sys::js_null();
@@ -114,29 +156,72 @@ unsafe extern "C" fn key_at(ctx: *mut sys::JSContext, _this: sys::JSValue, argc:
     }
 }
 
-unsafe extern "C" fn length_getter(ctx: *mut sys::JSContext, _this: sys::JSValue, magic: c_int) -> sys::JSValue {
+unsafe extern "C" fn length_getter(
+    ctx: *mut sys::JSContext,
+    _this: sys::JSValue,
+    magic: c_int,
+) -> sys::JSValue {
     let s = store(ctx, magic);
     sys::js_float64(if s.is_null() { 0.0 } else { (*s).len() as f64 })
 }
 
-type GenericMagic = unsafe extern "C" fn(*mut sys::JSContext, sys::JSValue, c_int, *mut sys::JSValue, c_int) -> sys::JSValue;
+type GenericMagic = unsafe extern "C" fn(
+    *mut sys::JSContext,
+    sys::JSValue,
+    c_int,
+    *mut sys::JSValue,
+    c_int,
+) -> sys::JSValue;
 type GetterMagic = unsafe extern "C" fn(*mut sys::JSContext, sys::JSValue, c_int) -> sys::JSValue;
 
-unsafe fn define_method(ctx: *mut sys::JSContext, obj: sys::JSValue, name: &str, func: GenericMagic, length: c_int, magic: c_int) {
+unsafe fn define_method(
+    ctx: *mut sys::JSContext,
+    obj: sys::JSValue,
+    name: &str,
+    func: GenericMagic,
+    length: c_int,
+    magic: c_int,
+) {
     let cname = CString::new(name).unwrap();
-    let f = sys::JS_NewCFunction2(ctx, std::mem::transmute::<GenericMagic, sys::JSCFunction>(func), cname.as_ptr(), length, sys::JS_CFUNC_GENERIC_MAGIC, magic);
+    let f = sys::JS_NewCFunction2(
+        ctx,
+        std::mem::transmute::<GenericMagic, sys::JSCFunction>(func),
+        cname.as_ptr(),
+        length,
+        sys::JS_CFUNC_GENERIC_MAGIC,
+        magic,
+    );
     sys::JS_SetPropertyStr(ctx, obj, cname.as_ptr(), f);
 }
 
 unsafe fn define_length(ctx: *mut sys::JSContext, obj: sys::JSValue, magic: c_int) {
     let name = CString::new("length").unwrap();
-    let getter = sys::JS_NewCFunction2(ctx, std::mem::transmute::<GetterMagic, sys::JSCFunction>(length_getter), name.as_ptr(), 0, sys::JS_CFUNC_GETTER_MAGIC, magic);
+    let getter = sys::JS_NewCFunction2(
+        ctx,
+        std::mem::transmute::<GetterMagic, sys::JSCFunction>(length_getter),
+        name.as_ptr(),
+        0,
+        sys::JS_CFUNC_GETTER_MAGIC,
+        magic,
+    );
     let atom = sys::JS_NewAtom(ctx, name.as_ptr());
-    sys::JS_DefinePropertyGetSet(ctx, obj, atom, getter, sys::js_undefined(), sys::JS_PROP_HAS_GET | sys::JS_PROP_ENUMERABLE);
+    sys::JS_DefinePropertyGetSet(
+        ctx,
+        obj,
+        atom,
+        getter,
+        sys::js_undefined(),
+        sys::JS_PROP_HAS_GET | sys::JS_PROP_ENUMERABLE,
+    );
     sys::JS_FreeAtom(ctx, atom);
 }
 
-unsafe fn register_storage_object(ctx: *mut sys::JSContext, global: sys::JSValue, name: &str, magic: c_int) {
+unsafe fn register_storage_object(
+    ctx: *mut sys::JSContext,
+    global: sys::JSValue,
+    name: &str,
+    magic: c_int,
+) {
     let obj = sys::JS_NewObject(ctx);
     define_method(ctx, obj, "getItem", get_item, 1, magic);
     define_method(ctx, obj, "setItem", set_item, 2, magic);

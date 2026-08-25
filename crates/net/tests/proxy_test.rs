@@ -17,8 +17,11 @@ fn spawn_origin_server(body: &'static str) -> u16 {
             let Ok(mut stream) = stream else { continue };
             let mut buf = [0u8; 4096];
             let _ = stream.read(&mut buf);
-            let response =
-                format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
             let _ = stream.write_all(response.as_bytes());
         }
     });
@@ -43,7 +46,12 @@ fn spawn_connect_proxy(on_connect_request: Option<std::sync::mpsc::Sender<Vec<St
             if reader.read_line(&mut request_line).is_err() || request_line.is_empty() {
                 continue;
             }
-            let target = request_line.trim_start_matches("CONNECT ").split(' ').next().unwrap_or("").to_string();
+            let target = request_line
+                .trim_start_matches("CONNECT ")
+                .split(' ')
+                .next()
+                .unwrap_or("")
+                .to_string();
 
             let mut header_lines = Vec::new();
             loop {
@@ -84,8 +92,14 @@ fn tunnels_a_plain_http_request_through_a_connect_proxy() {
     let origin_port = spawn_origin_server("hello via proxy");
     let proxy_port = spawn_connect_proxy(None);
 
-    let proxy = ProxyConfig { host: "127.0.0.1".to_string(), port: proxy_port, username: None, password: None };
-    let response = net::get_via_proxy(&format!("http://127.0.0.1:{origin_port}/"), &[], &proxy).expect("proxied request should succeed");
+    let proxy = ProxyConfig {
+        host: "127.0.0.1".to_string(),
+        port: proxy_port,
+        username: None,
+        password: None,
+    };
+    let response = net::get_via_proxy(&format!("http://127.0.0.1:{origin_port}/"), &[], &proxy)
+        .expect("proxied request should succeed");
 
     assert_eq!(response.status, 200);
     assert_eq!(String::from_utf8_lossy(&response.body), "hello via proxy");
@@ -103,11 +117,17 @@ fn sends_proxy_authorization_when_credentials_are_set() {
         username: Some("alice".to_string()),
         password: Some("s3cret".to_string()),
     };
-    let response = net::get_via_proxy(&format!("http://127.0.0.1:{origin_port}/"), &[], &proxy).expect("proxied request should succeed");
+    let response = net::get_via_proxy(&format!("http://127.0.0.1:{origin_port}/"), &[], &proxy)
+        .expect("proxied request should succeed");
     assert_eq!(response.status, 200);
 
-    let connect_headers = rx.recv_timeout(std::time::Duration::from_secs(5)).expect("proxy should have received a CONNECT request");
-    let expected = format!("Proxy-Authorization: Basic {}", base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"alice:s3cret"));
+    let connect_headers = rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("proxy should have received a CONNECT request");
+    let expected = format!(
+        "Proxy-Authorization: Basic {}",
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"alice:s3cret")
+    );
     assert!(
         connect_headers.iter().any(|h| h == &expected),
         "expected {expected:?} among CONNECT headers, got {connect_headers:?}"
@@ -116,7 +136,12 @@ fn sends_proxy_authorization_when_credentials_are_set() {
 
 #[test]
 fn fails_when_the_proxy_is_unreachable() {
-    let proxy = ProxyConfig { host: "127.0.0.1".to_string(), port: 1, username: None, password: None };
+    let proxy = ProxyConfig {
+        host: "127.0.0.1".to_string(),
+        port: 1,
+        username: None,
+        password: None,
+    };
     let result = net::get_via_proxy("http://example.com/", &[], &proxy);
     assert!(matches!(result, Err(net::Error::Request(_))));
 }
@@ -129,7 +154,12 @@ fn fails_when_the_proxy_refuses_the_connect() {
     // expected to be parsed for status — good enough to exercise the
     // non-200 rejection path without writing a second proxy stub.
     let origin_port = spawn_origin_server("not a proxy");
-    let proxy = ProxyConfig { host: "127.0.0.1".to_string(), port: origin_port, username: None, password: None };
+    let proxy = ProxyConfig {
+        host: "127.0.0.1".to_string(),
+        port: origin_port,
+        username: None,
+        password: None,
+    };
     let result = net::get_via_proxy("http://example.com/", &[], &proxy);
     assert!(matches!(result, Err(net::Error::Request(_))));
 }

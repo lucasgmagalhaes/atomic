@@ -20,14 +20,21 @@ void main() {
 
 fn pixel(pixels: &[u8], width: u32, x: u32, y: u32) -> [u8; 4] {
     let idx = ((y * width + x) * 4) as usize;
-    [pixels[idx], pixels[idx + 1], pixels[idx + 2], pixels[idx + 3]]
+    [
+        pixels[idx],
+        pixels[idx + 1],
+        pixels[idx + 2],
+        pixels[idx + 3],
+    ]
 }
 
 #[test]
 fn compiles_valid_glsl_shaders() {
     let gl = WebGl::new();
     assert!(gl.create_shader(ShaderType::Vertex, VERTEX_SRC).is_ok());
-    assert!(gl.create_shader(ShaderType::Fragment, RED_FRAGMENT_SRC).is_ok());
+    assert!(gl
+        .create_shader(ShaderType::Fragment, RED_FRAGMENT_SRC)
+        .is_ok());
 }
 
 #[test]
@@ -42,12 +49,18 @@ fn invalid_glsl_fails_to_compile_with_an_error_message() {
 fn draws_a_fullscreen_triangle_and_reads_back_the_fill_color() {
     let gl = WebGl::new();
     let vs = gl.create_shader(ShaderType::Vertex, VERTEX_SRC).unwrap();
-    let fs = gl.create_shader(ShaderType::Fragment, RED_FRAGMENT_SRC).unwrap();
+    let fs = gl
+        .create_shader(ShaderType::Fragment, RED_FRAGMENT_SRC)
+        .unwrap();
     let program = gl
         .create_program(
             &vs,
             &fs,
-            &[VertexAttribute { location: 0, components: 2, offset: 0 }],
+            &[VertexAttribute {
+                location: 0,
+                components: 2,
+                offset: 0,
+            }],
             8, // 2 x f32
         )
         .unwrap();
@@ -65,9 +78,20 @@ fn draws_a_fullscreen_triangle_and_reads_back_the_fill_color() {
 fn zero_vertex_count_just_clears() {
     let gl = WebGl::new();
     let vs = gl.create_shader(ShaderType::Vertex, VERTEX_SRC).unwrap();
-    let fs = gl.create_shader(ShaderType::Fragment, RED_FRAGMENT_SRC).unwrap();
+    let fs = gl
+        .create_shader(ShaderType::Fragment, RED_FRAGMENT_SRC)
+        .unwrap();
     let program = gl
-        .create_program(&vs, &fs, &[VertexAttribute { location: 0, components: 2, offset: 0 }], 8)
+        .create_program(
+            &vs,
+            &fs,
+            &[VertexAttribute {
+                location: 0,
+                components: 2,
+                offset: 0,
+            }],
+            8,
+        )
         .unwrap();
 
     let vertices: [f32; 0] = [];
@@ -80,7 +104,9 @@ fn zero_vertex_count_just_clears() {
 fn create_program_rejects_swapped_shader_stages() {
     let gl = WebGl::new();
     let vs = gl.create_shader(ShaderType::Vertex, VERTEX_SRC).unwrap();
-    let fs = gl.create_shader(ShaderType::Fragment, RED_FRAGMENT_SRC).unwrap();
+    let fs = gl
+        .create_shader(ShaderType::Fragment, RED_FRAGMENT_SRC)
+        .unwrap();
 
     let result = gl.create_program(&fs, &vs, &[], 0);
     assert!(result.is_err());

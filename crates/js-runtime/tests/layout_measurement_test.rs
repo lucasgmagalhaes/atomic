@@ -104,11 +104,27 @@ fn set_layout_rects_replaces_the_whole_map() {
     let rt = Runtime::new();
     let mut ctx = Context::with_dom(&rt, d);
     let mut first = std::collections::HashMap::new();
-    first.insert(a, Rect { x: 1.0, y: 1.0, width: 1.0, height: 1.0 });
+    first.insert(
+        a,
+        Rect {
+            x: 1.0,
+            y: 1.0,
+            width: 1.0,
+            height: 1.0,
+        },
+    );
     ctx.set_layout_rects(first);
 
     let mut second = std::collections::HashMap::new();
-    second.insert(b, Rect { x: 2.0, y: 2.0, width: 2.0, height: 2.0 });
+    second.insert(
+        b,
+        Rect {
+            x: 2.0,
+            y: 2.0,
+            width: 2.0,
+            height: 2.0,
+        },
+    );
     ctx.set_layout_rects(second);
 
     let result = ctx
@@ -121,5 +137,8 @@ fn set_layout_rects_replaces_the_whole_map() {
             "<test>",
         )
         .unwrap();
-    assert_eq!(result, "0,2", "a fresh set_layout_rects call must replace the old map, not merge into it");
+    assert_eq!(
+        result, "0,2",
+        "a fresh set_layout_rects call must replace the old map, not merge into it"
+    );
 }

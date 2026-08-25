@@ -19,7 +19,10 @@ fn constructor_reads_back_sample_rate_and_length() {
     let rt = Runtime::new();
     let ctx = Context::new(&rt);
     let result = ctx
-        .eval("const c = new OfflineAudioContext(1, 100, 8000); `${c.sampleRate}|${c.length}`", "<test>")
+        .eval(
+            "const c = new OfflineAudioContext(1, 100, 8000); `${c.sampleRate}|${c.length}`",
+            "<test>",
+        )
         .unwrap();
     assert_eq!(result, "8000|100");
 }
@@ -40,7 +43,11 @@ fn an_unconnected_oscillator_renders_silence() {
     )
     .unwrap();
 
-    let done = pump_until(&ctx, |c| c.eval("seen !== null", "<test>").unwrap() == "true", Duration::from_secs(2));
+    let done = pump_until(
+        &ctx,
+        |c| c.eval("seen !== null", "<test>").unwrap() == "true",
+        Duration::from_secs(2),
+    );
     assert!(done);
     assert_eq!(ctx.eval("seen", "<test>").unwrap(), "true");
 }
@@ -63,12 +70,18 @@ fn a_connected_oscillator_renders_a_real_sine_wave() {
     )
     .unwrap();
 
-    let done = pump_until(&ctx, |c| c.eval("samples !== null", "<test>").unwrap() == "true", Duration::from_secs(2));
+    let done = pump_until(
+        &ctx,
+        |c| c.eval("samples !== null", "<test>").unwrap() == "true",
+        Duration::from_secs(2),
+    );
     assert!(done);
 
     let samples_str = ctx.eval("samples", "<test>").unwrap();
     let got: Vec<f64> = samples_str.split(',').map(|s| s.parse().unwrap()).collect();
-    let expected: Vec<f64> = (0..4).map(|i| (2.0 * std::f64::consts::PI * 1000.0 * (i as f64 / 8000.0)).sin()).collect();
+    let expected: Vec<f64> = (0..4)
+        .map(|i| (2.0 * std::f64::consts::PI * 1000.0 * (i as f64 / 8000.0)).sin())
+        .collect();
     assert_eq!(got.len(), expected.len());
     for (g, e) in got.iter().zip(expected.iter()) {
         assert!((g - e).abs() < 1e-9, "got {g}, expected {e}");
@@ -96,12 +109,18 @@ fn gain_scales_the_oscillator_output() {
     )
     .unwrap();
 
-    let done = pump_until(&ctx, |c| c.eval("samples !== null", "<test>").unwrap() == "true", Duration::from_secs(2));
+    let done = pump_until(
+        &ctx,
+        |c| c.eval("samples !== null", "<test>").unwrap() == "true",
+        Duration::from_secs(2),
+    );
     assert!(done);
 
     let samples_str = ctx.eval("samples", "<test>").unwrap();
     let got: Vec<f64> = samples_str.split(',').map(|s| s.parse().unwrap()).collect();
-    let expected: Vec<f64> = (0..4).map(|i| 0.5 * (2.0 * std::f64::consts::PI * 1000.0 * (i as f64 / 8000.0)).sin()).collect();
+    let expected: Vec<f64> = (0..4)
+        .map(|i| 0.5 * (2.0 * std::f64::consts::PI * 1000.0 * (i as f64 / 8000.0)).sin())
+        .collect();
     for (g, e) in got.iter().zip(expected.iter()) {
         assert!((g - e).abs() < 1e-9, "got {g}, expected {e}");
     }
@@ -126,7 +145,11 @@ fn stop_silences_the_oscillator_after_the_given_time() {
     )
     .unwrap();
 
-    let done = pump_until(&ctx, |c| c.eval("samples !== null", "<test>").unwrap() == "true", Duration::from_secs(2));
+    let done = pump_until(
+        &ctx,
+        |c| c.eval("samples !== null", "<test>").unwrap() == "true",
+        Duration::from_secs(2),
+    );
     assert!(done);
 
     let samples_str = ctx.eval("samples", "<test>").unwrap();
@@ -135,7 +158,10 @@ fn stop_silences_the_oscillator_after_the_given_time() {
     for s in &got[4..] {
         assert_eq!(*s, 0.0, "samples at/after stop() should be silent");
     }
-    assert!(got[0..4].iter().any(|s| *s != 0.0), "samples before stop() should still be real audio");
+    assert!(
+        got[0..4].iter().any(|s| *s != 0.0),
+        "samples before stop() should still be real audio"
+    );
 }
 
 #[test]
@@ -160,7 +186,11 @@ fn two_oscillators_mix_additively_at_the_destination() {
     )
     .unwrap();
 
-    let done = pump_until(&ctx, |c| c.eval("samples !== null", "<test>").unwrap() == "true", Duration::from_secs(2));
+    let done = pump_until(
+        &ctx,
+        |c| c.eval("samples !== null", "<test>").unwrap() == "true",
+        Duration::from_secs(2),
+    );
     assert!(done);
 
     let samples_str = ctx.eval("samples", "<test>").unwrap();
@@ -168,7 +198,8 @@ fn two_oscillators_mix_additively_at_the_destination() {
     let expected: Vec<f64> = (0..4)
         .map(|i| {
             let t = i as f64 / 8000.0;
-            (2.0 * std::f64::consts::PI * 1000.0 * t).sin() + (2.0 * std::f64::consts::PI * 2000.0 * t).sin()
+            (2.0 * std::f64::consts::PI * 1000.0 * t).sin()
+                + (2.0 * std::f64::consts::PI * 2000.0 * t).sin()
         })
         .collect();
     for (g, e) in got.iter().zip(expected.iter()) {
@@ -199,6 +230,11 @@ fn oscillator_type_defaults_to_sine_and_is_settable() {
 fn start_rendering_returns_a_real_promise() {
     let rt = Runtime::new();
     let ctx = Context::new(&rt);
-    let result = ctx.eval("Object.prototype.toString.call(new OfflineAudioContext(1, 1, 8000).startRendering())", "<test>").unwrap();
+    let result = ctx
+        .eval(
+            "Object.prototype.toString.call(new OfflineAudioContext(1, 1, 8000).startRendering())",
+            "<test>",
+        )
+        .unwrap();
     assert_eq!(result, "[object Promise]");
 }

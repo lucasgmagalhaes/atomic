@@ -24,16 +24,46 @@ pub struct Color {
 }
 
 impl Color {
-    pub const TRANSPARENT: Color = Color { r: 0, g: 0, b: 0, a: 0 };
+    pub const TRANSPARENT: Color = Color {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 0,
+    };
 
     fn named(name: &str) -> Option<Color> {
         Some(match name {
             "transparent" => Color::TRANSPARENT,
-            "black" => Color { r: 0, g: 0, b: 0, a: 255 },
-            "white" => Color { r: 255, g: 255, b: 255, a: 255 },
-            "red" => Color { r: 255, g: 0, b: 0, a: 255 },
-            "green" => Color { r: 0, g: 128, b: 0, a: 255 },
-            "blue" => Color { r: 0, g: 0, b: 255, a: 255 },
+            "black" => Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
+            "white" => Color {
+                r: 255,
+                g: 255,
+                b: 255,
+                a: 255,
+            },
+            "red" => Color {
+                r: 255,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
+            "green" => Color {
+                r: 0,
+                g: 128,
+                b: 0,
+                a: 255,
+            },
+            "blue" => Color {
+                r: 0,
+                g: 0,
+                b: 255,
+                a: 255,
+            },
             _ => return None,
         })
     }
@@ -310,7 +340,12 @@ impl ComputedStyle {
             float: Float::None,
             clear: Clear::None,
             box_shadow: None,
-            border_color: Color { r: 0, g: 0, b: 0, a: 255 },
+            border_color: Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
             flex_direction: FlexDirection::Row,
             justify_content: JustifyContent::Start,
             align_items: AlignItems::Stretch,
@@ -319,7 +354,12 @@ impl ComputedStyle {
             flex_basis: Length::Auto,
             background_color: Color::TRANSPARENT,
             font_size: 16.0,
-            color: Color { r: 0, g: 0, b: 0, a: 255 },
+            color: Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
             opacity: 1.0,
         }
     }
@@ -398,7 +438,12 @@ fn apply_border_shorthand(style: &mut ComputedStyle, tokens: &[Token]) {
         }
     }
     if let Some(w) = width {
-        style.border_width = EdgeSizes { top: w, right: w, bottom: w, left: w };
+        style.border_width = EdgeSizes {
+            top: w,
+            right: w,
+            bottom: w,
+            left: w,
+        };
     }
     if let Some(s) = border_style {
         style.border_style = s;
@@ -433,9 +478,16 @@ fn apply_box_shadow(style: &mut ComputedStyle, tokens: &[Token]) {
     }
     // `lengths[2]` (blur-radius), when present, is deliberately skipped -
     // only offsets and spread feed the flat rect this crate paints.
-    if let (Some(&offset_x), Some(&offset_y), Some(color)) = (lengths.first(), lengths.get(1), color) {
+    if let (Some(&offset_x), Some(&offset_y), Some(color)) =
+        (lengths.first(), lengths.get(1), color)
+    {
         let spread = lengths.get(3).copied().unwrap_or(0.0);
-        style.box_shadow = Some(BoxShadow { offset_x, offset_y, spread, color });
+        style.box_shadow = Some(BoxShadow {
+            offset_x,
+            offset_y,
+            spread,
+            color,
+        });
     }
 }
 

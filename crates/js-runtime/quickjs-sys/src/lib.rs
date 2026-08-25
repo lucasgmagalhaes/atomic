@@ -209,7 +209,12 @@ extern "C" {
     /// string on success, `JS_UNDEFINED` when the value isn't
     /// representable (functions, `undefined`, cycles), or an exception
     /// marker when `toJSON` itself threw.
-    pub fn JS_JSONStringify(ctx: *mut JSContext, obj: JSValue, replacer: JSValue, space: JSValue) -> JSValue;
+    pub fn JS_JSONStringify(
+        ctx: *mut JSContext,
+        obj: JSValue,
+        replacer: JSValue,
+        space: JSValue,
+    ) -> JSValue;
 
     /// Runtime-wide allocation cap (bytes). Once exceeded, allocations
     /// from inside running script throw instead of succeeding — see
@@ -220,7 +225,11 @@ extern "C" {
     /// script runs; return non-zero to abort execution with an
     /// "interrupted" InternalError. `opaque` is whatever was passed to
     /// [`JS_SetInterruptHandler`].
-    pub fn JS_SetInterruptHandler(rt: *mut JSRuntime, cb: Option<unsafe extern "C" fn(rt: *mut JSRuntime, opaque: *mut c_void) -> c_int>, opaque: *mut c_void);
+    pub fn JS_SetInterruptHandler(
+        rt: *mut JSRuntime,
+        cb: Option<unsafe extern "C" fn(rt: *mut JSRuntime, opaque: *mut c_void) -> c_int>,
+        opaque: *mut c_void,
+    );
 
     pub fn JS_GetRuntime(ctx: *mut JSContext) -> *mut JSRuntime;
 

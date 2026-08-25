@@ -121,7 +121,11 @@ unsafe extern "C" fn set_interval(
     schedule(ctx, argc, argv, true)
 }
 
-unsafe fn clear_timer(ctx: *mut sys::JSContext, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe fn clear_timer(
+    ctx: *mut sys::JSContext,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
     if argc < 1 {
         return sys::js_undefined();
     }
@@ -239,7 +243,13 @@ pub(crate) unsafe fn pump(ctx: *mut sys::JSContext) -> usize {
 
     let mut fired = 0;
     for timer in due_timers {
-        let result = sys::JS_Call(ctx, timer.callback, sys::js_undefined(), 0, std::ptr::null_mut());
+        let result = sys::JS_Call(
+            ctx,
+            timer.callback,
+            sys::js_undefined(),
+            0,
+            std::ptr::null_mut(),
+        );
         sys::JS_FreeValue(ctx, result);
         fired += 1;
 
@@ -266,7 +276,13 @@ pub(crate) unsafe fn pump(ctx: *mut sys::JSContext) -> usize {
     }
 
     for raf in due_rafs {
-        let result = sys::JS_Call(ctx, raf.callback, sys::js_undefined(), 0, std::ptr::null_mut());
+        let result = sys::JS_Call(
+            ctx,
+            raf.callback,
+            sys::js_undefined(),
+            0,
+            std::ptr::null_mut(),
+        );
         sys::JS_FreeValue(ctx, result);
         sys::JS_FreeValue(ctx, raf.callback);
         fired += 1;

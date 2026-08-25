@@ -32,7 +32,15 @@ fn colored_box_produces_one_rect_matching_its_dimensions() {
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].width, 100.0);
     assert_eq!(list[0].height, 50.0);
-    assert_eq!(list[0].color, Color { r: 255, g: 0, b: 0, a: 255 });
+    assert_eq!(
+        list[0].color,
+        Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255
+        }
+    );
 }
 
 #[test]
@@ -52,8 +60,24 @@ fn parent_paints_before_children_so_children_can_draw_on_top() {
 
     let list = build_display_list(&tree);
     assert_eq!(list.len(), 2);
-    assert_eq!(list[0].color, Color { r: 0, g: 0, b: 255, a: 255 });
-    assert_eq!(list[1].color, Color { r: 255, g: 0, b: 0, a: 255 });
+    assert_eq!(
+        list[0].color,
+        Color {
+            r: 0,
+            g: 0,
+            b: 255,
+            a: 255
+        }
+    );
+    assert_eq!(
+        list[1].color,
+        Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255
+        }
+    );
 }
 
 #[test]
@@ -73,7 +97,15 @@ fn only_colored_descendants_are_collected_among_transparent_ones() {
 
     let list = build_display_list(&tree);
     assert_eq!(list.len(), 1);
-    assert_eq!(list[0].color, Color { r: 0, g: 255, b: 0, a: 255 });
+    assert_eq!(
+        list[0].color,
+        Color {
+            r: 0,
+            g: 255,
+            b: 0,
+            a: 255
+        }
+    );
 }
 
 #[test]
@@ -97,16 +129,32 @@ fn bordered_box_produces_four_real_border_strips_around_its_edge() {
     let list = build_display_list(&tree);
     assert_eq!(list.len(), 4);
     for rect in &list {
-        assert_eq!(rect.color, Color { r: 0, g: 0, b: 255, a: 255 });
+        assert_eq!(
+            rect.color,
+            Color {
+                r: 0,
+                g: 0,
+                b: 255,
+                a: 255
+            }
+        );
     }
     // top
-    assert!(list.iter().any(|r| r.x == 0.0 && r.y == 0.0 && r.width == 110.0 && r.height == 5.0));
+    assert!(list
+        .iter()
+        .any(|r| r.x == 0.0 && r.y == 0.0 && r.width == 110.0 && r.height == 5.0));
     // bottom
-    assert!(list.iter().any(|r| r.x == 0.0 && r.y == 55.0 && r.width == 110.0 && r.height == 5.0));
+    assert!(list
+        .iter()
+        .any(|r| r.x == 0.0 && r.y == 55.0 && r.width == 110.0 && r.height == 5.0));
     // left
-    assert!(list.iter().any(|r| r.x == 0.0 && r.y == 0.0 && r.width == 5.0 && r.height == 60.0));
+    assert!(list
+        .iter()
+        .any(|r| r.x == 0.0 && r.y == 0.0 && r.width == 5.0 && r.height == 60.0));
     // right
-    assert!(list.iter().any(|r| r.x == 105.0 && r.y == 0.0 && r.width == 5.0 && r.height == 60.0));
+    assert!(list
+        .iter()
+        .any(|r| r.x == 105.0 && r.y == 0.0 && r.width == 5.0 && r.height == 60.0));
 }
 
 #[test]
@@ -150,7 +198,9 @@ fn background_and_border_paint_in_the_right_order_for_a_bordered_colored_box() {
     let div = d.create_element("div");
     d.append_child(root, div);
 
-    let sheet = parse_stylesheet("div { width: 100px; height: 50px; background-color: #ffff00; border: 2px solid black; }");
+    let sheet = parse_stylesheet(
+        "div { width: 100px; height: 50px; background-color: #ffff00; border: 2px solid black; }",
+    );
     let mut tree = build_box_tree(&d, div, &sheet).unwrap();
     layout_block(&mut tree, 800.0, 0.0, 0.0);
 
@@ -158,9 +208,25 @@ fn background_and_border_paint_in_the_right_order_for_a_bordered_colored_box() {
     // Background first (so the border strips paint on top of it, real
     // paint order), then the 4 border strips.
     assert_eq!(list.len(), 5);
-    assert_eq!(list[0].color, Color { r: 255, g: 255, b: 0, a: 255 });
+    assert_eq!(
+        list[0].color,
+        Color {
+            r: 255,
+            g: 255,
+            b: 0,
+            a: 255
+        }
+    );
     for rect in &list[1..] {
-        assert_eq!(rect.color, Color { r: 0, g: 0, b: 0, a: 255 });
+        assert_eq!(
+            rect.color,
+            Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255
+            }
+        );
     }
 }
 
@@ -225,7 +291,9 @@ fn overflow_hidden_does_not_clip_the_box_itself_only_its_descendants() {
     // A box's own background/border paint at their real (unclipped) size
     // even when that same box sets `overflow: hidden` - real CSS clips a
     // box's *content*, not the box's own border box.
-    let sheet = parse_stylesheet("div { width: 50px; height: 50px; overflow: hidden; background-color: blue; }");
+    let sheet = parse_stylesheet(
+        "div { width: 50px; height: 50px; overflow: hidden; background-color: blue; }",
+    );
     let mut tree = build_box_tree(&d, div, &sheet).unwrap();
     layout_block(&mut tree, 800.0, 0.0, 0.0);
 
@@ -297,7 +365,9 @@ fn box_shadow_paints_one_offset_rect_behind_the_box() {
     let div = d.create_element("div");
     d.append_child(root, div);
 
-    let sheet = parse_stylesheet("div { width: 50px; height: 50px; background-color: #ffff00; box-shadow: 5px 10px blue; }");
+    let sheet = parse_stylesheet(
+        "div { width: 50px; height: 50px; background-color: #ffff00; box-shadow: 5px 10px blue; }",
+    );
     let mut tree = build_box_tree(&d, div, &sheet).unwrap();
     layout_block(&mut tree, 800.0, 0.0, 0.0);
 
@@ -309,8 +379,24 @@ fn box_shadow_paints_one_offset_rect_behind_the_box() {
     assert_eq!(list[0].y, 10.0);
     assert_eq!(list[0].width, 50.0);
     assert_eq!(list[0].height, 50.0);
-    assert_eq!(list[0].color, Color { r: 0, g: 0, b: 255, a: 255 });
-    assert_eq!(list[1].color, Color { r: 255, g: 255, b: 0, a: 255 });
+    assert_eq!(
+        list[0].color,
+        Color {
+            r: 0,
+            g: 0,
+            b: 255,
+            a: 255
+        }
+    );
+    assert_eq!(
+        list[1].color,
+        Color {
+            r: 255,
+            g: 255,
+            b: 0,
+            a: 255
+        }
+    );
 }
 
 #[test]
@@ -320,7 +406,8 @@ fn box_shadow_spread_grows_the_shadow_rect_on_every_side() {
     let div = d.create_element("div");
     d.append_child(root, div);
 
-    let sheet = parse_stylesheet("div { width: 50px; height: 50px; box-shadow: 0px 0px 0px 5px red; }");
+    let sheet =
+        parse_stylesheet("div { width: 50px; height: 50px; box-shadow: 0px 0px 0px 5px red; }");
     let mut tree = build_box_tree(&d, div, &sheet).unwrap();
     layout_block(&mut tree, 800.0, 0.0, 0.0);
 
@@ -375,13 +462,22 @@ fn opacity_scales_a_boxs_own_background_alpha() {
     let div = d.create_element("div");
     d.append_child(root, div);
 
-    let sheet = parse_stylesheet("div { width: 10px; height: 10px; background-color: red; opacity: 0.5; }");
+    let sheet =
+        parse_stylesheet("div { width: 10px; height: 10px; background-color: red; opacity: 0.5; }");
     let mut tree = build_box_tree(&d, div, &sheet).unwrap();
     layout_block(&mut tree, 800.0, 0.0, 0.0);
 
     let list = build_display_list(&tree);
     assert_eq!(list.len(), 1);
-    assert_eq!(list[0].color, Color { r: 255, g: 0, b: 0, a: 128 });
+    assert_eq!(
+        list[0].color,
+        Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 128
+        }
+    );
 }
 
 #[test]
@@ -410,7 +506,15 @@ fn opacity_compounds_multiplicatively_through_nested_ancestors() {
     let list = build_display_list(&tree);
     assert_eq!(list.len(), 1);
     // 255 * 0.5 * 0.5 = 63.75, rounds to 64.
-    assert_eq!(list[0].color, Color { r: 255, g: 0, b: 0, a: 64 });
+    assert_eq!(
+        list[0].color,
+        Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 64
+        }
+    );
 }
 
 #[test]
@@ -429,9 +533,25 @@ fn opacity_scales_the_box_shadow_and_border_alpha_too() {
     let list = build_display_list(&tree);
     // Shadow rect, then 4 border strips (no background set).
     assert_eq!(list.len(), 5);
-    assert_eq!(list[0].color, Color { r: 255, g: 0, b: 0, a: 128 });
+    assert_eq!(
+        list[0].color,
+        Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 128
+        }
+    );
     for rect in &list[1..] {
-        assert_eq!(rect.color, Color { r: 0, g: 0, b: 255, a: 128 });
+        assert_eq!(
+            rect.color,
+            Color {
+                r: 0,
+                g: 0,
+                b: 255,
+                a: 128
+            }
+        );
     }
 }
 
@@ -447,5 +567,13 @@ fn opacity_one_leaves_colors_unchanged() {
     layout_block(&mut tree, 800.0, 0.0, 0.0);
 
     let list = build_display_list(&tree);
-    assert_eq!(list[0].color, Color { r: 255, g: 0, b: 0, a: 255 });
+    assert_eq!(
+        list[0].color,
+        Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255
+        }
+    );
 }

@@ -54,14 +54,27 @@ impl ProxyConfig {
 /// calling thread until the response body is fully read — same calling
 /// convention as [`crate::get_with_headers`], just routed through a
 /// `CONNECT` tunnel instead of a direct connection.
-pub fn get_via_proxy(url: &str, extra_headers: &[(&str, &str)], proxy: &ProxyConfig) -> Result<Response, Error> {
+pub fn get_via_proxy(
+    url: &str,
+    extra_headers: &[(&str, &str)],
+    proxy: &ProxyConfig,
+) -> Result<Response, Error> {
     let runtime = tokio::runtime::Runtime::new().map_err(|e| Error::Request(e.to_string()))?;
     runtime.block_on(get_via_proxy_async(url, extra_headers, proxy))
 }
 
-async fn get_via_proxy_async(url: &str, extra_headers: &[(&str, &str)], proxy: &ProxyConfig) -> Result<Response, Error> {
-    let uri: hyper::Uri = url.parse().map_err(|e: hyper::http::uri::InvalidUri| Error::InvalidUrl(e.to_string()))?;
-    let target_host = uri.host().ok_or_else(|| Error::InvalidUrl("missing host".to_string()))?.to_string();
+async fn get_via_proxy_async(
+    url: &str,
+    extra_headers: &[(&str, &str)],
+    proxy: &ProxyConfig,
+) -> Result<Response, Error> {
+    let uri: hyper::Uri = url
+        .parse()
+        .map_err(|e: hyper::http::uri::InvalidUri| Error::InvalidUrl(e.to_string()))?;
+    let target_host = uri
+        .host()
+        .ok_or_else(|| Error::InvalidUrl("missing host".to_string()))?
+        .to_string();
     let is_https = uri.scheme_str() == Some("https");
     let target_port = uri.port_u16().unwrap_or(if is_https { 443 } else { 80 });
 
@@ -81,12 +94,23 @@ async fn get_via_proxy_async(url: &str, extra_headers: &[(&str, &str)], proxy: &
 /// to whatever protocol the caller tunnels next (TLS handshake bytes for
 /// an `https://` target, a plain HTTP/1.1 request otherwise), not to this
 /// handshake.
-async fn open_connect_tunnel(proxy: &ProxyConfig, target_host: &str, target_port: u16) -> Result<TcpStream, Error> {
+async fn open_connect_tunnel(
+    proxy: &ProxyConfig,
+    target_host: &str,
+    target_port: u16,
+) -> Result<TcpStream, Error> {
     let mut stream = TcpStream::connect((proxy.host.as_str(), proxy.port))
         .await
-        .map_err(|e| Error::Request(format!("proxy connect to {}:{} failed: {e}", proxy.host, proxy.port)))?;
+        .map_err(|e| {
+            Error::Request(format!(
+                "proxy connect to {}:{} failed: {e}",
+                proxy.host, proxy.port
+            ))
+        })?;
 
-    let mut connect_request = format!("CONNECT {target_host}:{target_port} HTTP/1.1\r\nHost: {target_host}:{target_port}\r\n");
+    let mut connect_request = format!(
+        "CONNECT {target_host}:{target_port} HTTP/1.1\r\nHost: {target_host}:{target_port}\r\n"
+    );
     if let Some(auth) = proxy.proxy_authorization() {
         connect_request.push_str(&format!("Proxy-Authorization: {auth}\r\n"));
     }
@@ -112,7 +136,12 @@ async fn open_connect_tunnel(proxy: &ProxyConfig, target_host: &str, target_port
         .split_whitespace()
         .nth(1)
         .and_then(|s| s.parse().ok())
-        .ok_or_else(|| Error::Request(format!("malformed proxy CONNECT response: {}", status_line.trim())))?;
+        .ok_or_else(|| {
+            Error::Request(format!(
+                "malformed proxy CONNECT response: {}",
+                status_line.trim()
+            ))
+        })?;
 
     loop {
         let mut line = String::new();
@@ -126,22 +155,33 @@ async fn open_connect_tunnel(proxy: &ProxyConfig, target_host: &str, target_port
     }
 
     if status_code != 200 {
-        return Err(Error::Request(format!("proxy CONNECT to {target_host}:{target_port} failed with status {status_code}")));
+        return Err(Error::Request(format!(
+            "proxy CONNECT to {target_host}:{target_port} failed with status {status_code}"
+        )));
     }
 
     Ok(reader.into_inner())
 }
 
-pub(crate) async fn wrap_tls(stream: TcpStream, target_host: &str) -> Result<tokio_rustls::client::TlsStream<TcpStream>, Error> {
+pub(crate) async fn wrap_tls(
+    stream: TcpStream,
+    target_host: &str,
+) -> Result<tokio_rustls::client::TlsStream<TcpStream>, Error> {
     let mut root_store = rustls::RootCertStore::empty();
     let loaded = rustls_native_certs::load_native_certs();
     for cert in loaded.certs {
         let _ = root_store.add(cert);
     }
-    let config = rustls::ClientConfig::builder().with_root_certificates(root_store).with_no_client_auth();
+    let config = rustls::ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
     let connector = tokio_rustls::TlsConnector::from(Arc::new(config));
-    let server_name = rustls::pki_types::ServerName::try_from(target_host.to_string()).map_err(|e| Error::Tls(e.to_string()))?;
-    connector.connect(server_name, stream).await.map_err(|e| Error::Tls(e.to_string()))
+    let server_name = rustls::pki_types::ServerName::try_from(target_host.to_string())
+        .map_err(|e| Error::Tls(e.to_string()))?;
+    connector
+        .connect(server_name, stream)
+        .await
+        .map_err(|e| Error::Tls(e.to_string()))
 }
 
 /// Runs one GET request over an already-established stream (a raw
@@ -149,12 +189,19 @@ pub(crate) async fn wrap_tls(stream: TcpStream, target_host: &str) -> Result<tok
 /// for `https://`) via `hyper`'s low-level `client::conn::http1` — the
 /// tunnel is only good for one connection, so there's no `hyper_util`
 /// pooling `Client` to hand it to.
-pub(crate) async fn send_one_request<S>(stream: S, uri: &hyper::Uri, target_host: &str, extra_headers: &[(&str, &str)]) -> Result<Response, Error>
+pub(crate) async fn send_one_request<S>(
+    stream: S,
+    uri: &hyper::Uri,
+    target_host: &str,
+    extra_headers: &[(&str, &str)],
+) -> Result<Response, Error>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
     let io = TokioIo::new(stream);
-    let (mut sender, connection) = hyper::client::conn::http1::handshake(io).await.map_err(|e| Error::Request(e.to_string()))?;
+    let (mut sender, connection) = hyper::client::conn::http1::handshake(io)
+        .await
+        .map_err(|e| Error::Request(e.to_string()))?;
     tokio::spawn(async move {
         let _ = connection.await;
     });
@@ -165,17 +212,26 @@ where
         .body(Empty::<Bytes>::new())
         .map_err(|e| Error::Request(e.to_string()))?;
     for (name, value) in extra_headers {
-        let name = HeaderName::from_bytes(name.as_bytes()).map_err(|e| Error::Request(e.to_string()))?;
+        let name =
+            HeaderName::from_bytes(name.as_bytes()).map_err(|e| Error::Request(e.to_string()))?;
         let value = HeaderValue::from_str(value).map_err(|e| Error::Request(e.to_string()))?;
         request.headers_mut().insert(name, value);
     }
 
-    let res = sender.send_request(request).await.map_err(|e| Error::Request(e.to_string()))?;
+    let res = sender
+        .send_request(request)
+        .await
+        .map_err(|e| Error::Request(e.to_string()))?;
     let status = res.status().as_u16();
     let headers = res
         .headers()
         .iter()
-        .map(|(name, value)| (name.as_str().to_string(), value.to_str().unwrap_or("").to_string()))
+        .map(|(name, value)| {
+            (
+                name.as_str().to_string(),
+                value.to_str().unwrap_or("").to_string(),
+            )
+        })
         .collect();
     let body = res
         .into_body()
@@ -185,5 +241,9 @@ where
         .to_bytes()
         .to_vec();
 
-    Ok(Response { status, body, headers })
+    Ok(Response {
+        status,
+        body,
+        headers,
+    })
 }

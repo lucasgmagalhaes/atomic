@@ -32,12 +32,17 @@ impl std::error::Error for ImportError {}
 /// row that can't be decrypted (wrong key, `v20`) doesn't lose every other
 /// real credential.
 pub fn import_passwords(path: &Path, master_key: &[u8]) -> Result<Vec<Password>, ImportError> {
-    let temp_path = std::env::temp_dir().join(format!("nimble-import-logins-{}.sqlite", std::process::id()));
+    let temp_path = std::env::temp_dir().join(format!(
+        "nimble-import-logins-{}.sqlite",
+        std::process::id()
+    ));
     std::fs::copy(path, &temp_path).map_err(ImportError::Io)?;
 
     let result = (|| {
         let conn = rusqlite::Connection::open(&temp_path).map_err(ImportError::Sqlite)?;
-        let mut stmt = conn.prepare("SELECT origin_url, username_value, password_value FROM logins").map_err(ImportError::Sqlite)?;
+        let mut stmt = conn
+            .prepare("SELECT origin_url, username_value, password_value FROM logins")
+            .map_err(ImportError::Sqlite)?;
         let rows = stmt
             .query_map([], |row| {
                 let origin_url: String = row.get(0)?;
@@ -51,7 +56,11 @@ pub fn import_passwords(path: &Path, master_key: &[u8]) -> Result<Vec<Password>,
         for row in rows {
             let (origin_url, username, encrypted) = row.map_err(ImportError::Sqlite)?;
             if let Ok(password) = encrypted_value::decrypt(master_key, &encrypted) {
-                passwords.push(Password { origin_url, username, password });
+                passwords.push(Password {
+                    origin_url,
+                    username,
+                    password,
+                });
             }
         }
         Ok(passwords)

@@ -47,15 +47,32 @@ fn rect_vertices(x: f32, y: f32, w: f32, h: f32, color: [f32; 4], vw: f32, vh: f
     let x1 = to_ndc_x(x + w);
     let y0 = to_ndc_y(y);
     let y1 = to_ndc_y(y + h);
-    let tl = Vertex { position: [x0, y0], color };
-    let tr = Vertex { position: [x1, y0], color };
-    let bl = Vertex { position: [x0, y1], color };
-    let br = Vertex { position: [x1, y1], color };
+    let tl = Vertex {
+        position: [x0, y0],
+        color,
+    };
+    let tr = Vertex {
+        position: [x1, y0],
+        color,
+    };
+    let bl = Vertex {
+        position: [x0, y1],
+        color,
+    };
+    let br = Vertex {
+        position: [x1, y1],
+        color,
+    };
     [tl, bl, tr, tr, bl, br]
 }
 
 fn color_to_f32(c: Color) -> [f32; 4] {
-    [c.r as f32 / 255.0, c.g as f32 / 255.0, c.b as f32 / 255.0, c.a as f32 / 255.0]
+    [
+        c.r as f32 / 255.0,
+        c.g as f32 / 255.0,
+        c.b as f32 / 255.0,
+        c.a as f32 / 255.0,
+    ]
 }
 
 pub struct Canvas2D {
@@ -87,7 +104,9 @@ impl Canvas2D {
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions::default())
             .await
-            .expect("no wgpu adapter available - this needs a GPU (or software fallback) on the host");
+            .expect(
+                "no wgpu adapter available - this needs a GPU (or software fallback) on the host",
+            );
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor::default(), None)
             .await
@@ -106,7 +125,11 @@ impl Canvas2D {
             array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &[
-                wgpu::VertexAttribute { offset: 0, shader_location: 0, format: wgpu::VertexFormat::Float32x2 },
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    shader_location: 0,
+                    format: wgpu::VertexFormat::Float32x2,
+                },
                 wgpu::VertexAttribute {
                     offset: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
                     shader_location: 1,
@@ -145,7 +168,11 @@ impl Canvas2D {
 
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("canvas2d-backing"),
-            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -162,7 +189,12 @@ impl Canvas2D {
             clear_pipeline,
             width,
             height,
-            fill_style: Color { r: 0, g: 0, b: 0, a: 255 },
+            fill_style: Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
         };
         // The real spec starts a canvas fully transparent, not undefined.
         canvas.clear_rect(0.0, 0.0, width as f32, height as f32);
@@ -174,17 +206,31 @@ impl Canvas2D {
     }
 
     fn draw_rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color, replace: bool) {
-        let view = self.texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let vertices = rect_vertices(x, y, w, h, color_to_f32(color), self.width as f32, self.height as f32);
+        let view = self
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let vertices = rect_vertices(
+            x,
+            y,
+            w,
+            h,
+            color_to_f32(color),
+            self.width as f32,
+            self.height as f32,
+        );
 
         use wgpu::util::DeviceExt;
-        let vertex_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("canvas2d-rect-vertices"),
-            contents: bytemuck::cast_slice(&vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
+        let vertex_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("canvas2d-rect-vertices"),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
 
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("canvas2d-draw"),
@@ -193,13 +239,20 @@ impl Canvas2D {
                     resolve_target: None,
                     // Load, not Clear: this canvas accumulates draws across
                     // calls, unlike GpuRenderer's one-shot render_to_rgba.
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            pass.set_pipeline(if replace { &self.clear_pipeline } else { &self.fill_pipeline });
+            pass.set_pipeline(if replace {
+                &self.clear_pipeline
+            } else {
+                &self.fill_pipeline
+            });
             pass.set_vertex_buffer(0, vertex_buffer.slice(..));
             pass.draw(0..6, 0..1);
         }
@@ -231,7 +284,9 @@ impl Canvas2D {
             mapped_at_creation: false,
         });
 
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         encoder.copy_texture_to_buffer(
             wgpu::ImageCopyTexture {
                 texture: &self.texture,
@@ -247,7 +302,11 @@ impl Canvas2D {
                     rows_per_image: Some(self.height),
                 },
             },
-            wgpu::Extent3d { width: self.width, height: self.height, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width: self.width,
+                height: self.height,
+                depth_or_array_layers: 1,
+            },
         );
         self.queue.submit(std::iter::once(encoder.finish()));
 

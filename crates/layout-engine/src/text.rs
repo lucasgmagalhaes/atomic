@@ -72,7 +72,14 @@ pub struct InlineSpan<'a> {
 /// `background_color` and let `render` read it back off the style). A thin
 /// single-span wrapper over [`layout_inline`].
 pub fn layout_text(text: &str, font_size: f32, max_width: Option<f32>, color: Color) -> TextLayout {
-    layout_inline(&[InlineSpan { text, font_size, color }], max_width)
+    layout_inline(
+        &[InlineSpan {
+            text,
+            font_size,
+            color,
+        }],
+        max_width,
+    )
 }
 
 /// Shapes `spans` as **one** inline formatting context — real multi-span
@@ -108,7 +115,10 @@ pub fn layout_inline(spans: &[InlineSpan], max_width: Option<f32>) -> TextLayout
         .enumerate()
         .map(|(i, span)| {
             let span_metrics = Metrics::new(span.font_size, span.font_size * 1.2);
-            (span.text, default_attrs.clone().metrics(span_metrics).metadata(i))
+            (
+                span.text,
+                default_attrs.clone().metrics(span_metrics).metadata(i),
+            )
         })
         .collect();
     buffer.set_rich_text(rich_spans, &default_attrs, Shaping::Advanced, None);
@@ -126,7 +136,10 @@ pub fn layout_inline(spans: &[InlineSpan], max_width: Option<f32>) -> TextLayout
             // original DOM-derived span (and therefore which color) this
             // glyph belongs to, after cosmic-text has already merged all
             // spans into one shaped/wrapped paragraph.
-            let color = spans.get(glyph.metadata).map(|s| s.color).unwrap_or(spans[0].color);
+            let color = spans
+                .get(glyph.metadata)
+                .map(|s| s.color)
+                .unwrap_or(spans[0].color);
             let physical = glyph.physical((0.0, run.line_y), 1.0);
             glyphs.push(PositionedGlyph {
                 cache_key: physical.cache_key,

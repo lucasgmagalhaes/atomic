@@ -92,7 +92,9 @@ pub(crate) unsafe fn js_to_storage_value(ctx: *mut sys::JSContext, val: sys::JSV
         sys::JS_TAG_BOOL => Value::Bool(val.u.int32 != 0),
         sys::JS_TAG_INT => Value::Number(val.u.int32 as f64),
         sys::JS_TAG_FLOAT64 => Value::Number(val.u.float64),
-        sys::JS_TAG_STRING => read_js_string(ctx, val).map(Value::String).unwrap_or(Value::Null),
+        sys::JS_TAG_STRING => read_js_string(ctx, val)
+            .map(Value::String)
+            .unwrap_or(Value::Null),
         sys::JS_TAG_OBJECT => {
             if sys::JS_IsArray(val) {
                 js_array_to_value(ctx, val)

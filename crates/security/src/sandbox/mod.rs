@@ -30,7 +30,10 @@ mod unsupported {
 
     impl std::fmt::Display for SandboxError {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "process sandboxing is not implemented on this platform yet")
+            write!(
+                f,
+                "process sandboxing is not implemented on this platform yet"
+            )
         }
     }
 

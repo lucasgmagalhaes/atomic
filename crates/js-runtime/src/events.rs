@@ -423,10 +423,30 @@ unsafe fn make_record(
     options: &ListenerOptions,
 ) -> sys::JSValue {
     let record = sys::JS_NewObject(ctx);
-    sys::JS_SetPropertyStr(ctx, record, RECORD_CALLBACK.as_ptr() as *const _, sys::JS_DupValue(ctx, callback));
-    sys::JS_SetPropertyStr(ctx, record, RECORD_CAPTURE.as_ptr() as *const _, sys::js_bool(options.capture));
-    sys::JS_SetPropertyStr(ctx, record, RECORD_ONCE.as_ptr() as *const _, sys::js_bool(options.once));
-    sys::JS_SetPropertyStr(ctx, record, RECORD_PASSIVE.as_ptr() as *const _, sys::js_bool(options.passive));
+    sys::JS_SetPropertyStr(
+        ctx,
+        record,
+        RECORD_CALLBACK.as_ptr() as *const _,
+        sys::JS_DupValue(ctx, callback),
+    );
+    sys::JS_SetPropertyStr(
+        ctx,
+        record,
+        RECORD_CAPTURE.as_ptr() as *const _,
+        sys::js_bool(options.capture),
+    );
+    sys::JS_SetPropertyStr(
+        ctx,
+        record,
+        RECORD_ONCE.as_ptr() as *const _,
+        sys::js_bool(options.once),
+    );
+    sys::JS_SetPropertyStr(
+        ctx,
+        record,
+        RECORD_PASSIVE.as_ptr() as *const _,
+        sys::js_bool(options.passive),
+    );
     record
 }
 unsafe fn record_callback(ctx: *mut sys::JSContext, record: sys::JSValue) -> sys::JSValue {
@@ -453,7 +473,10 @@ unsafe extern "C" fn add(
     };
     let callback = *argv.add(1);
     if !is_valid_listener(ctx, callback) {
-        return type_error(ctx, "event listener must be a function or an object with handleEvent");
+        return type_error(
+            ctx,
+            "event listener must be a function or an object with handleEvent",
+        );
     }
     let options = read_listener_options(ctx, argc, argv, 2);
     let all = listeners(ctx, node);
@@ -732,7 +755,10 @@ unsafe fn run_phases(
     first_exception: &mut Option<sys::JSValue>,
 ) {
     let node_class = crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), "Node");
-    let run_at = |ctx: *mut sys::JSContext, id: dom::NodeId, phase: Phase, first_exception: &mut Option<sys::JSValue>| {
+    let run_at = |ctx: *mut sys::JSContext,
+                  id: dom::NodeId,
+                  phase: Phase,
+                  first_exception: &mut Option<sys::JSValue>| {
         let p = state(ctx, event);
         (*p).current_target = Some(id);
         let node = crate::dom_bindings::node_object(ctx, node_class, id);

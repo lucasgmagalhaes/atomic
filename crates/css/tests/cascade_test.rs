@@ -68,10 +68,7 @@ fn matching_declarations_orders_by_specificity_then_source() {
 
     assert_eq!(matches.len(), 3);
     // Lowest specificity first: type (0,0,1), class (0,1,0), id (1,0,0).
-    let colors: Vec<_> = matches
-        .iter()
-        .map(|m| &m.declarations[0].value)
-        .collect();
+    let colors: Vec<_> = matches.iter().map(|m| &m.declarations[0].value).collect();
     assert_eq!(colors.len(), 3);
     assert_eq!(matches[0].specificity, (0, 0, 1));
     assert_eq!(matches[1].specificity, (0, 1, 0));

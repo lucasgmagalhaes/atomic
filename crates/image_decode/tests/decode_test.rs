@@ -36,7 +36,9 @@ fn decodes_a_png_with_distinct_pixels_in_the_right_positions() {
         }
     });
     let mut bytes = Vec::new();
-    DynamicImage::ImageRgba8(img).write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png).unwrap();
+    DynamicImage::ImageRgba8(img)
+        .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)
+        .unwrap();
 
     let decoded = image_decode::decode(&bytes).expect("should decode");
     assert_eq!(decoded.width, 2);
@@ -64,7 +66,9 @@ fn decodes_a_real_jpeg() {
     // the right dimensions.
     let img = RgbaImage::from_fn(4, 4, |_, _| image::Rgba([200, 50, 100, 255]));
     let mut bytes = Vec::new();
-    DynamicImage::ImageRgba8(img).write_to(&mut Cursor::new(&mut bytes), ImageFormat::Jpeg).expect("encoding a test JPEG should succeed");
+    DynamicImage::ImageRgba8(img)
+        .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Jpeg)
+        .expect("encoding a test JPEG should succeed");
 
     let decoded = image_decode::decode(&bytes).expect("a real JPEG should decode");
     assert_eq!(decoded.width, 4);

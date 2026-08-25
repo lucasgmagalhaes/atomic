@@ -336,7 +336,14 @@ unsafe fn register_subclass(
     sys::JS_FreeValue(ctx, event_proto);
 
     let cname = CString::new(name).unwrap();
-    let constructor = sys::JS_NewCFunction2(ctx, constructor_fn, cname.as_ptr(), 1, sys::JS_CFUNC_GENERIC, 0);
+    let constructor = sys::JS_NewCFunction2(
+        ctx,
+        constructor_fn,
+        cname.as_ptr(),
+        1,
+        sys::JS_CFUNC_GENERIC,
+        0,
+    );
     sys::JS_SetConstructorBit(ctx, constructor, true);
     let proto_name = CString::new("prototype").unwrap();
     sys::JS_SetPropertyStr(ctx, constructor, proto_name.as_ptr(), proto);

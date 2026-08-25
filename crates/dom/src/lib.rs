@@ -582,7 +582,9 @@ impl Dom {
                 out.push_str(text);
                 out.push_str("-->");
             }
-            NodeData::Element { tag, attributes, .. } => {
+            NodeData::Element {
+                tag, attributes, ..
+            } => {
                 out.push('<');
                 out.push_str(tag);
                 // HashMap has no ordering; sort by name for determinism —
@@ -691,7 +693,10 @@ impl Dom {
                     self.set_attribute(new_id, name, value);
                 }
                 if deep {
-                    let children = self.get(node).map(|n| n.children.clone()).unwrap_or_default();
+                    let children = self
+                        .get(node)
+                        .map(|n| n.children.clone())
+                        .unwrap_or_default();
                     for child in children {
                         let cloned_child = self.clone_node(child, true);
                         self.append_child(new_id, cloned_child);
@@ -779,7 +784,9 @@ impl Dom {
             return self.create_text("");
         };
         match &src.data {
-            NodeData::Element { tag, attributes, .. } => {
+            NodeData::Element {
+                tag, attributes, ..
+            } => {
                 let new_id = self.create_element(tag);
                 for (name, value) in attributes {
                     self.set_attribute(new_id, name, value);

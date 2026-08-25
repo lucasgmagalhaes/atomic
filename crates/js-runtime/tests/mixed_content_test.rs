@@ -1,6 +1,10 @@
 use js_runtime::{Context, Runtime};
 
-fn pump_until<F: Fn(&Context) -> bool>(ctx: &Context, predicate: F, timeout: std::time::Duration) -> bool {
+fn pump_until<F: Fn(&Context) -> bool>(
+    ctx: &Context,
+    predicate: F,
+    timeout: std::time::Duration,
+) -> bool {
     let deadline = std::time::Instant::now() + timeout;
     loop {
         ctx.run_pending_timers();
@@ -20,7 +24,8 @@ fn pump_until<F: Fn(&Context) -> bool>(ctx: &Context, predicate: F, timeout: std
 /// here rather than failing for an unrelated reason.
 fn serve_once(body: &'static str) -> std::net::SocketAddr {
     use std::io::{Read, Write};
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("failed to bind a loopback test server");
+    let listener =
+        std::net::TcpListener::bind("127.0.0.1:0").expect("failed to bind a loopback test server");
     let addr = listener.local_addr().unwrap();
     std::thread::spawn(move || {
         if let Ok((mut stream, _)) = listener.accept() {
@@ -44,7 +49,9 @@ fn fetch_sync_blocks_a_plain_http_request_from_an_https_page() {
     let mut ctx = Context::with_dom(&rt, d);
     ctx.set_url("https://secure-page.example/");
 
-    let result = ctx.eval(&format!("JSON.stringify(fetchSync('{url}'))"), "<test>").unwrap();
+    let result = ctx
+        .eval(&format!("JSON.stringify(fetchSync('{url}'))"), "<test>")
+        .unwrap();
     assert_eq!(result, r#"{"ok":false,"status":0,"body":""}"#);
 }
 
@@ -58,8 +65,13 @@ fn fetch_sync_allows_a_plain_http_request_from_an_http_page() {
     let mut ctx = Context::with_dom(&rt, d);
     ctx.set_url(&url);
 
-    let result = ctx.eval(&format!("fetchSync('{url}').ok"), "<test>").unwrap();
-    assert_eq!(result, "true", "an http:// page fetching its own http:// origin is never mixed content");
+    let result = ctx
+        .eval(&format!("fetchSync('{url}').ok"), "<test>")
+        .unwrap();
+    assert_eq!(
+        result, "true",
+        "an http:// page fetching its own http:// origin is never mixed content"
+    );
 }
 
 #[test]
@@ -86,12 +98,18 @@ fn fetch_promise_rejects_for_mixed_content() {
 
     let settled = pump_until(
         &ctx,
-        |ctx| ctx.eval("window.__resolved || window.__rejected", "<test>").unwrap() == "true",
+        |ctx| {
+            ctx.eval("window.__resolved || window.__rejected", "<test>")
+                .unwrap()
+                == "true"
+        },
         std::time::Duration::from_secs(5),
     );
     assert!(settled, "the fetch should have settled within the timeout");
 
-    let result = ctx.eval("`${window.__resolved},${window.__rejected}`", "<test>").unwrap();
+    let result = ctx
+        .eval("`${window.__resolved},${window.__rejected}`", "<test>")
+        .unwrap();
     assert_eq!(result, "false,true");
 }
 
@@ -123,11 +141,17 @@ fn xhr_reports_onerror_for_mixed_content() {
 
     let settled = pump_until(
         &ctx,
-        |ctx| ctx.eval("window.__loaded || window.__errored", "<test>").unwrap() == "true",
+        |ctx| {
+            ctx.eval("window.__loaded || window.__errored", "<test>")
+                .unwrap()
+                == "true"
+        },
         std::time::Duration::from_secs(5),
     );
     assert!(settled, "the XHR should have settled within the timeout");
 
-    let result = ctx.eval("`${window.__loaded},${window.__errored}`", "<test>").unwrap();
+    let result = ctx
+        .eval("`${window.__loaded},${window.__errored}`", "<test>")
+        .unwrap();
     assert_eq!(result, "false,true");
 }

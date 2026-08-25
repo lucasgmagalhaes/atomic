@@ -26,7 +26,11 @@ fn multiple_arguments_are_space_joined_and_primitives_self_stringify() {
     let d = dom::Dom::new();
     let ctx = Context::with_dom(&rt, d);
 
-    ctx.eval("console.log('answer:', 42, true, null, undefined)", "<test>").unwrap();
+    ctx.eval(
+        "console.log('answer:', 42, true, null, undefined)",
+        "<test>",
+    )
+    .unwrap();
 
     let messages = ctx.take_console_messages();
     assert_eq!(messages.len(), 1);
@@ -75,7 +79,10 @@ fn taking_drains_the_buffer() {
 
     ctx.eval("console.log('first')", "<test>").unwrap();
     assert_eq!(ctx.take_console_messages().len(), 1);
-    assert!(ctx.take_console_messages().is_empty(), "a second drain must come back empty");
+    assert!(
+        ctx.take_console_messages().is_empty(),
+        "a second drain must come back empty"
+    );
 
     ctx.eval("console.log('second')", "<test>").unwrap();
     assert_eq!(ctx.take_console_messages()[0].text, "second");
@@ -87,11 +94,18 @@ fn the_buffer_keeps_only_the_most_recent_messages_under_spam() {
     let d = dom::Dom::new();
     let ctx = Context::with_dom(&rt, d);
 
-    ctx.eval("for (let i = 0; i < 1100; i++) console.log('m' + i)", "<test>").unwrap();
+    ctx.eval(
+        "for (let i = 0; i < 1100; i++) console.log('m' + i)",
+        "<test>",
+    )
+    .unwrap();
 
     let messages = ctx.take_console_messages();
     assert_eq!(messages.len(), 1000, "the ring must cap retained messages");
-    assert_eq!(messages[0].text, "m100", "oldest entries must be dropped first");
+    assert_eq!(
+        messages[0].text, "m100",
+        "oldest entries must be dropped first"
+    );
     assert_eq!(messages.last().unwrap().text, "m1099");
 }
 
@@ -113,7 +127,9 @@ fn an_uncaught_error_surfaces_its_real_text() {
     let d = dom::Dom::new();
     let ctx = Context::with_dom(&rt, d);
 
-    let err = ctx.eval("throw new TypeError('boom')", "<test>").unwrap_err();
+    let err = ctx
+        .eval("throw new TypeError('boom')", "<test>")
+        .unwrap_err();
     assert!(
         err.0.contains("TypeError") && err.0.contains("boom"),
         "the EvalError must carry the real stringified exception, got: {}",
@@ -143,7 +159,9 @@ fn uncaught_errors_fire_a_window_error_event_carrying_the_message() {
     )
     .unwrap();
 
-    assert!(ctx.eval("throw new RangeError('detonate')", "<test>").is_err());
+    assert!(ctx
+        .eval("throw new RangeError('detonate')", "<test>")
+        .is_err());
     let caught = ctx.eval("window.caught", "<test>").unwrap();
     assert!(
         caught.contains("RangeError") && caught.contains("detonate"),
@@ -160,7 +178,15 @@ fn uncaught_errors_are_also_reported_into_the_console_stream() {
     assert!(ctx.eval("noSuchFunction()", "<test>").is_err());
 
     let messages = ctx.take_console_messages();
-    assert_eq!(messages.len(), 1, "exactly one console entry per uncaught error");
+    assert_eq!(
+        messages.len(),
+        1,
+        "exactly one console entry per uncaught error"
+    );
     assert_eq!(messages[0].level, ConsoleLevel::Error);
-    assert!(messages[0].text.starts_with("Uncaught "), "got: {}", messages[0].text);
+    assert!(
+        messages[0].text.starts_with("Uncaught "),
+        "got: {}",
+        messages[0].text
+    );
 }

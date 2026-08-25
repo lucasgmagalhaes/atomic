@@ -22,26 +22,39 @@ void main() {
 
 fn pixel(pixels: &[u8], width: u32, x: u32, y: u32) -> [u8; 4] {
     let idx = ((y * width + x) * 4) as usize;
-    [pixels[idx], pixels[idx + 1], pixels[idx + 2], pixels[idx + 3]]
+    [
+        pixels[idx],
+        pixels[idx + 1],
+        pixels[idx + 2],
+        pixels[idx + 3],
+    ]
 }
 
 #[test]
 fn compiles_real_glsl_es_300_shaders() {
     let gl = WebGl::new();
     assert!(gl.create_shader(ShaderType::Vertex, ES_VERTEX_SRC).is_ok());
-    assert!(gl.create_shader(ShaderType::Fragment, ES_FRAGMENT_SRC).is_ok());
+    assert!(gl
+        .create_shader(ShaderType::Fragment, ES_FRAGMENT_SRC)
+        .is_ok());
 }
 
 #[test]
 fn draws_with_a_real_glsl_es_program_and_reads_back_the_fill_color() {
     let gl = WebGl::new();
     let vs = gl.create_shader(ShaderType::Vertex, ES_VERTEX_SRC).unwrap();
-    let fs = gl.create_shader(ShaderType::Fragment, ES_FRAGMENT_SRC).unwrap();
+    let fs = gl
+        .create_shader(ShaderType::Fragment, ES_FRAGMENT_SRC)
+        .unwrap();
     let program = gl
         .create_program(
             &vs,
             &fs,
-            &[VertexAttribute { location: 0, components: 2, offset: 0 }],
+            &[VertexAttribute {
+                location: 0,
+                components: 2,
+                offset: 0,
+            }],
             8, // 2 x f32
         )
         .unwrap();
@@ -64,7 +77,8 @@ fn accepts_es_310_and_320_versions_too() {
 #[test]
 fn still_reports_real_errors_in_es_source() {
     let gl = WebGl::new();
-    let broken = "#version 300 es\nprecision highp float;\nvoid main() { this is not valid glsl {{{ }";
+    let broken =
+        "#version 300 es\nprecision highp float;\nvoid main() { this is not valid glsl {{{ }";
     let result = gl.create_shader(ShaderType::Vertex, broken);
     assert!(result.is_err());
     assert!(!result.unwrap_err().is_empty());

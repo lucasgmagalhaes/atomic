@@ -11,7 +11,8 @@ use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
     QueryInformationJobObject, SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-    JOB_OBJECT_LIMIT_ACTIVE_PROCESS, JOB_OBJECT_LIMIT_JOB_MEMORY, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    JOB_OBJECT_LIMIT_ACTIVE_PROCESS, JOB_OBJECT_LIMIT_JOB_MEMORY,
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
 
 #[derive(Debug)]
@@ -61,7 +62,9 @@ impl Drop for Sandbox {
 pub fn confine(child: &Child, memory_limit_bytes: u64) -> Result<Sandbox, SandboxError> {
     let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
     if job.is_null() {
-        return Err(SandboxError::CreateJobObject(std::io::Error::last_os_error()));
+        return Err(SandboxError::CreateJobObject(
+            std::io::Error::last_os_error(),
+        ));
     }
     let sandbox = Sandbox { job };
 

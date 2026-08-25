@@ -92,7 +92,10 @@ impl Value {
     /// Looks up a key in an `Object` value. `None` for a non-object or a
     /// missing key alike.
     pub fn get(&self, key: &str) -> Option<&Value> {
-        self.as_object()?.iter().find(|(k, _)| k == key).map(|(_, v)| v)
+        self.as_object()?
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v)
     }
 
     /// A real deep/independent copy — see the module doc for why this is
@@ -206,7 +209,10 @@ struct Parser<'a> {
 
 impl<'a> Parser<'a> {
     fn new(source: &'a str) -> Self {
-        Parser { source, chars: source.char_indices().peekable() }
+        Parser {
+            source,
+            chars: source.char_indices().peekable(),
+        }
     }
 
     fn peek_char(&mut self) -> Option<char> {
@@ -281,7 +287,8 @@ impl<'a> Parser<'a> {
                             let mut code = 0u32;
                             for _ in 0..4 {
                                 let digit = self.bump().ok_or(ParseError::UnexpectedEnd)?;
-                                code = code * 16 + digit.to_digit(16).ok_or(ParseError::InvalidEscape)?;
+                                code = code * 16
+                                    + digit.to_digit(16).ok_or(ParseError::InvalidEscape)?;
                             }
                             out.push(char::from_u32(code).ok_or(ParseError::InvalidEscape)?);
                         }
@@ -294,7 +301,11 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_number(&mut self) -> Result<Value, ParseError> {
-        let start = self.chars.peek().map(|&(i, _)| i).unwrap_or(self.source.len());
+        let start = self
+            .chars
+            .peek()
+            .map(|&(i, _)| i)
+            .unwrap_or(self.source.len());
         if self.peek_char() == Some('-') {
             self.bump();
         }
@@ -316,8 +327,15 @@ impl<'a> Parser<'a> {
                 self.bump();
             }
         }
-        let end = self.chars.peek().map(|&(i, _)| i).unwrap_or(self.source.len());
-        self.source[start..end].parse::<f64>().map(Value::Number).map_err(|_| ParseError::InvalidNumber)
+        let end = self
+            .chars
+            .peek()
+            .map(|&(i, _)| i)
+            .unwrap_or(self.source.len());
+        self.source[start..end]
+            .parse::<f64>()
+            .map(Value::Number)
+            .map_err(|_| ParseError::InvalidNumber)
     }
 
     fn parse_array(&mut self) -> Result<Value, ParseError> {

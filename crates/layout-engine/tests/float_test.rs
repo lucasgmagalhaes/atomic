@@ -11,7 +11,9 @@ fn a_left_float_sits_flush_to_the_containing_blocks_left_edge() {
     d.append_child(root, container);
     d.append_child(container, float);
 
-    let sheet = parse_stylesheet("div { width: 200px; } div div { float: left; width: 50px; height: 40px; }");
+    let sheet = parse_stylesheet(
+        "div { width: 200px; } div div { float: left; width: 50px; height: 40px; }",
+    );
     let mut tree = build_box_tree(&d, container, &sheet).unwrap();
     layout_block(&mut tree, 800.0, 0.0, 0.0);
 
@@ -29,7 +31,9 @@ fn a_right_float_sits_flush_to_the_containing_blocks_right_edge() {
     d.append_child(root, container);
     d.append_child(container, float);
 
-    let sheet = parse_stylesheet("div { width: 200px; } div div { float: right; width: 50px; height: 40px; }");
+    let sheet = parse_stylesheet(
+        "div { width: 200px; } div div { float: right; width: 50px; height: 40px; }",
+    );
     let mut tree = build_box_tree(&d, container, &sheet).unwrap();
     layout_block(&mut tree, 800.0, 0.0, 0.0);
 
@@ -77,7 +81,9 @@ fn a_second_same_side_float_stacks_below_the_first_not_beside_it() {
     d.append_child(container, first);
     d.append_child(container, second);
 
-    let sheet = parse_stylesheet("div { width: 200px; } div div { float: left; width: 50px; height: 40px; }");
+    let sheet = parse_stylesheet(
+        "div { width: 200px; } div div { float: left; width: 50px; height: 40px; }",
+    );
     let mut tree = build_box_tree(&d, container, &sheet).unwrap();
     layout_block(&mut tree, 800.0, 0.0, 0.0);
 
@@ -101,7 +107,9 @@ fn a_float_does_not_push_down_the_next_normal_sibling() {
     d.append_child(container, normal);
     d.set_attribute(float, "id", "float");
 
-    let sheet = parse_stylesheet("div { width: 200px; height: 10px; } #float { float: left; width: 50px; height: 100px; }");
+    let sheet = parse_stylesheet(
+        "div { width: 200px; height: 10px; } #float { float: left; width: 50px; height: 100px; }",
+    );
     let mut tree = build_box_tree(&d, container, &sheet).unwrap();
     layout_block(&mut tree, 800.0, 0.0, 0.0);
 
@@ -177,7 +185,9 @@ fn a_non_cleared_sibling_after_a_float_can_overlap_it_visually() {
     d.append_child(container, normal);
     d.set_attribute(float, "id", "float");
 
-    let sheet = parse_stylesheet("div { width: 200px; } #float { float: left; width: 50px; height: 100px; }");
+    let sheet = parse_stylesheet(
+        "div { width: 200px; } #float { float: left; width: 50px; height: 100px; }",
+    );
     let mut tree = build_box_tree(&d, container, &sheet).unwrap();
     layout_block(&mut tree, 800.0, 0.0, 0.0);
 
@@ -198,7 +208,9 @@ fn a_container_grows_its_own_height_to_contain_its_floats() {
     d.append_child(root, container);
     d.append_child(container, float);
 
-    let sheet = parse_stylesheet("div { width: 200px; } div div { float: left; width: 50px; height: 100px; }");
+    let sheet = parse_stylesheet(
+        "div { width: 200px; } div div { float: left; width: 50px; height: 100px; }",
+    );
     let mut tree = build_box_tree(&d, container, &sheet).unwrap();
     layout_block(&mut tree, 800.0, 0.0, 0.0);
 

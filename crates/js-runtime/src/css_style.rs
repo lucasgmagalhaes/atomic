@@ -88,7 +88,11 @@ thread_local! {
 /// `dom_bindings::evict_node_object` alongside its own caches, so a removed
 /// node's style object doesn't outlive it.
 pub(crate) unsafe fn evict(ctx: *mut sys::JSContext, id: dom::NodeId) {
-    let cached = STYLE_OBJECTS.with(|reg| reg.borrow_mut().get_mut(&(ctx as usize)).and_then(|nodes| nodes.remove(&id)));
+    let cached = STYLE_OBJECTS.with(|reg| {
+        reg.borrow_mut()
+            .get_mut(&(ctx as usize))
+            .and_then(|nodes| nodes.remove(&id))
+    });
     if let Some(object) = cached {
         sys::JS_FreeValue(ctx, object);
     }
@@ -197,7 +201,11 @@ fn parse_declarations(text: &str) -> Vec<(String, String)> {
 }
 
 fn serialize_declarations(decls: &[(String, String)]) -> String {
-    decls.iter().map(|(name, value)| format!("{name}: {value};")).collect::<Vec<_>>().join(" ")
+    decls
+        .iter()
+        .map(|(name, value)| format!("{name}: {value};"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// The last declared value for `name` in `id`'s `style` attribute, or
@@ -206,7 +214,11 @@ fn serialize_declarations(decls: &[(String, String)]) -> String {
 /// cascade-within-one-declaration-block semantics.
 unsafe fn get_declaration(dom: *const dom::Dom, id: dom::NodeId, name: &str) -> Option<String> {
     let text = (*dom).attribute(id, "style").unwrap_or_default();
-    parse_declarations(text).into_iter().rev().find(|(n, _)| n == name).map(|(_, v)| v)
+    parse_declarations(text)
+        .into_iter()
+        .rev()
+        .find(|(n, _)| n == name)
+        .map(|(_, v)| v)
 }
 
 /// Sets (`Some(value)`) or removes (`None`) `name` in `id`'s `style`
@@ -215,7 +227,10 @@ unsafe fn get_declaration(dom: *const dom::Dom, id: dom::NodeId, name: &str) -> 
 /// `color:red;color:blue` collapses to a single clean declaration on the
 /// next write.
 unsafe fn write_declaration(dom: *mut dom::Dom, id: dom::NodeId, name: &str, value: Option<&str>) {
-    let text = (*dom).attribute(id, "style").unwrap_or_default().to_string();
+    let text = (*dom)
+        .attribute(id, "style")
+        .unwrap_or_default()
+        .to_string();
     let mut decls = parse_declarations(&text);
     decls.retain(|(n, _)| n != name);
     if let Some(value) = value {
@@ -238,10 +253,24 @@ unsafe fn style_owner(ctx: *mut sys::JSContext, value: sys::JSValue) -> Option<d
 /// attribute, clearing any trailing index left over from a longer previous
 /// declaration list. Called on every mutation and every `element.style`
 /// getter hit, same convention `dom_bindings::sync_class_list` uses.
-unsafe fn sync_indices(ctx: *mut sys::JSContext, dom: *mut dom::Dom, id: dom::NodeId, object: sys::JSValue) {
-    let text = (*dom).attribute(id, "style").unwrap_or_default().to_string();
+unsafe fn sync_indices(
+    ctx: *mut sys::JSContext,
+    dom: *mut dom::Dom,
+    id: dom::NodeId,
+    object: sys::JSValue,
+) {
+    let text = (*dom)
+        .attribute(id, "style")
+        .unwrap_or_default()
+        .to_string();
     let decls = parse_declarations(&text);
-    let old_len = STYLE_LENGTHS.with(|reg| reg.borrow().get(&(ctx as usize)).and_then(|nodes| nodes.get(&id).copied())).unwrap_or(0);
+    let old_len = STYLE_LENGTHS
+        .with(|reg| {
+            reg.borrow()
+                .get(&(ctx as usize))
+                .and_then(|nodes| nodes.get(&id).copied())
+        })
+        .unwrap_or(0);
     for (index, (name, _)) in decls.iter().enumerate() {
         sys::JS_SetPropertyUint32(ctx, object, index as u32, new_string(ctx, name));
     }
@@ -249,8 +278,18 @@ unsafe fn sync_indices(ctx: *mut sys::JSContext, dom: *mut dom::Dom, id: dom::No
         sys::JS_SetPropertyUint32(ctx, object, index as u32, sys::js_undefined());
     }
     let length_name = CString::new("length").unwrap();
-    sys::JS_SetPropertyStr(ctx, object, length_name.as_ptr(), sys::js_float64(decls.len() as f64));
-    STYLE_LENGTHS.with(|reg| reg.borrow_mut().entry(ctx as usize).or_default().insert(id, decls.len()));
+    sys::JS_SetPropertyStr(
+        ctx,
+        object,
+        length_name.as_ptr(),
+        sys::js_float64(decls.len() as f64),
+    );
+    STYLE_LENGTHS.with(|reg| {
+        reg.borrow_mut()
+            .entry(ctx as usize)
+            .or_default()
+            .insert(id, decls.len())
+    });
 }
 
 unsafe extern "C" fn set_property(
@@ -333,9 +372,13 @@ unsafe extern "C" fn remove_property(
 type Getter = unsafe extern "C" fn(*mut sys::JSContext, sys::JSValue) -> sys::JSValue;
 type Setter = unsafe extern "C" fn(*mut sys::JSContext, sys::JSValue, sys::JSValue) -> sys::JSValue;
 type GetterMagic = unsafe extern "C" fn(*mut sys::JSContext, sys::JSValue, c_int) -> sys::JSValue;
-type SetterMagic = unsafe extern "C" fn(*mut sys::JSContext, sys::JSValue, sys::JSValue, c_int) -> sys::JSValue;
+type SetterMagic =
+    unsafe extern "C" fn(*mut sys::JSContext, sys::JSValue, sys::JSValue, c_int) -> sys::JSValue;
 
-unsafe extern "C" fn css_text_get(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn css_text_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
     let Some(id) = style_owner(ctx, this_val) else {
         return new_string(ctx, "");
     };
@@ -346,7 +389,11 @@ unsafe extern "C" fn css_text_get(ctx: *mut sys::JSContext, this_val: sys::JSVal
     new_string(ctx, (*dom).attribute(id, "style").unwrap_or_default())
 }
 
-unsafe extern "C" fn css_text_set(ctx: *mut sys::JSContext, this_val: sys::JSValue, val: sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn css_text_set(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    val: sys::JSValue,
+) -> sys::JSValue {
     let Some(text) = read_string(ctx, val) else {
         return throw_type_error(ctx, "cssText must be a string");
     };
@@ -365,7 +412,11 @@ unsafe extern "C" fn css_text_set(ctx: *mut sys::JSContext, this_val: sys::JSVal
     sys::js_undefined()
 }
 
-unsafe extern "C" fn named_get(ctx: *mut sys::JSContext, this_val: sys::JSValue, magic: c_int) -> sys::JSValue {
+unsafe extern "C" fn named_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    magic: c_int,
+) -> sys::JSValue {
     let Some(&name) = KEBAB_PROPERTIES.get(magic as usize) else {
         return sys::js_undefined();
     };
@@ -379,7 +430,12 @@ unsafe extern "C" fn named_get(ctx: *mut sys::JSContext, this_val: sys::JSValue,
     new_string(ctx, &get_declaration(dom, id, name).unwrap_or_default())
 }
 
-unsafe extern "C" fn named_set(ctx: *mut sys::JSContext, this_val: sys::JSValue, val: sys::JSValue, magic: c_int) -> sys::JSValue {
+unsafe extern "C" fn named_set(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    val: sys::JSValue,
+    magic: c_int,
+) -> sys::JSValue {
     let Some(&name) = KEBAB_PROPERTIES.get(magic as usize) else {
         return sys::js_undefined();
     };
@@ -401,11 +457,18 @@ unsafe extern "C" fn named_set(ctx: *mut sys::JSContext, this_val: sys::JSValue,
     sys::js_undefined()
 }
 
-unsafe extern "C" fn node_style_get(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn node_style_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
     let Some(id) = crate::dom_bindings::node_id(ctx, this_val) else {
         return sys::js_undefined();
     };
-    if let Some(value) = STYLE_OBJECTS.with(|reg| reg.borrow().get(&(ctx as usize)).and_then(|nodes| nodes.get(&id).copied())) {
+    if let Some(value) = STYLE_OBJECTS.with(|reg| {
+        reg.borrow()
+            .get(&(ctx as usize))
+            .and_then(|nodes| nodes.get(&id).copied())
+    }) {
         let dom = dom_opaque(ctx);
         if !dom.is_null() {
             sync_indices(ctx, dom, id, value);
@@ -419,11 +482,20 @@ unsafe extern "C" fn node_style_get(ctx: *mut sys::JSContext, this_val: sys::JSV
     sys::JS_FreeValue(ctx, proto);
 
     let owner_name = CString::new("__nimbleStyleOwner").unwrap();
-    sys::JS_SetPropertyStr(ctx, object, owner_name.as_ptr(), sys::JS_DupValue(ctx, this_val));
+    sys::JS_SetPropertyStr(
+        ctx,
+        object,
+        owner_name.as_ptr(),
+        sys::JS_DupValue(ctx, this_val),
+    );
 
     for (name, function, arity) in [
         ("setProperty", set_property as sys::JSCFunction, 2),
-        ("getPropertyValue", get_property_value as sys::JSCFunction, 1),
+        (
+            "getPropertyValue",
+            get_property_value as sys::JSCFunction,
+            1,
+        ),
         ("removeProperty", remove_property as sys::JSCFunction, 1),
     ] {
         let cname = CString::new(name).unwrap();
@@ -431,7 +503,14 @@ unsafe extern "C" fn node_style_get(ctx: *mut sys::JSContext, this_val: sys::JSV
             ctx,
             object,
             cname.as_ptr(),
-            sys::JS_NewCFunction2(ctx, function, cname.as_ptr(), arity, sys::JS_CFUNC_GENERIC, 0),
+            sys::JS_NewCFunction2(
+                ctx,
+                function,
+                cname.as_ptr(),
+                arity,
+                sys::JS_CFUNC_GENERIC,
+                0,
+            ),
         );
     }
 
@@ -498,7 +577,12 @@ unsafe extern "C" fn node_style_get(ctx: *mut sys::JSContext, this_val: sys::JSV
     if !dom.is_null() {
         sync_indices(ctx, dom, id, object);
     }
-    STYLE_OBJECTS.with(|reg| reg.borrow_mut().entry(ctx as usize).or_default().insert(id, sys::JS_DupValue(ctx, object)));
+    STYLE_OBJECTS.with(|reg| {
+        reg.borrow_mut()
+            .entry(ctx as usize)
+            .or_default()
+            .insert(id, sys::JS_DupValue(ctx, object))
+    });
     object
 }
 
@@ -518,6 +602,13 @@ pub(crate) unsafe fn define_style(ctx: *mut sys::JSContext, proto: sys::JSValue)
         0,
     );
     let atom = sys::JS_NewAtom(ctx, name.as_ptr());
-    sys::JS_DefinePropertyGetSet(ctx, proto, atom, getter, sys::js_undefined(), sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE);
+    sys::JS_DefinePropertyGetSet(
+        ctx,
+        proto,
+        atom,
+        getter,
+        sys::js_undefined(),
+        sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE,
+    );
     sys::JS_FreeAtom(ctx, atom);
 }

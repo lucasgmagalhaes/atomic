@@ -34,7 +34,11 @@ pub struct PerformanceSettings {
 
 impl PerformanceSettings {
     pub fn new() -> Self {
-        PerformanceSettings { max_panes: 6, fps_cap: None, gpu_adapter: None }
+        PerformanceSettings {
+            max_panes: 6,
+            fps_cap: None,
+            gpu_adapter: None,
+        }
     }
 
     /// Clamps `requested` into `1..=self.max_panes` - a shell should

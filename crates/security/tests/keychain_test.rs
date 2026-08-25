@@ -14,8 +14,10 @@ fn write_then_read_round_trips_the_exact_bytes() {
     let target = unique_target("round-trip");
     let secret = b"a 32-byte-ish secret for testing!!".to_vec();
 
-    keychain::write_credential(&target, &secret).expect("write should succeed against the real credential store");
-    let read_back = keychain::read_credential(&target).expect("read should succeed right after a write");
+    keychain::write_credential(&target, &secret)
+        .expect("write should succeed against the real credential store");
+    let read_back =
+        keychain::read_credential(&target).expect("read should succeed right after a write");
     assert_eq!(read_back, secret);
 
     keychain::delete_credential(&target).expect("cleanup delete should succeed");
@@ -24,8 +26,12 @@ fn write_then_read_round_trips_the_exact_bytes() {
 #[test]
 fn read_missing_credential_returns_not_found() {
     let target = unique_target("never-written");
-    let err = keychain::read_credential(&target).expect_err("reading a credential that was never written should fail");
-    assert!(matches!(err, keychain::KeychainError::NotFound), "expected NotFound, got {err:?}");
+    let err = keychain::read_credential(&target)
+        .expect_err("reading a credential that was never written should fail");
+    assert!(
+        matches!(err, keychain::KeychainError::NotFound),
+        "expected NotFound, got {err:?}"
+    );
 }
 
 #[test]
@@ -53,7 +59,8 @@ fn delete_then_read_returns_not_found() {
 #[test]
 fn deleting_a_missing_credential_is_not_an_error() {
     let target = unique_target("delete-missing");
-    keychain::delete_credential(&target).expect("deleting a never-written credential should be a no-op, not an error");
+    keychain::delete_credential(&target)
+        .expect("deleting a never-written credential should be a no-op, not an error");
 }
 
 #[test]

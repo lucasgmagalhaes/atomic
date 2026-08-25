@@ -64,8 +64,14 @@ fn registry() -> &'static Mutex<HashMap<Key, sys::JSClassID>> {
 /// cached ID without touching `JS_NewClass` again (e.g. `Blob` and
 /// `File` intentionally share one class/kind, so `File`'s call after
 /// `Blob`'s on the same runtime is a pure cache hit).
-pub(crate) unsafe fn ensure_class(rt: *mut sys::JSRuntime, kind: &'static str, def: &sys::JSClassDef) -> sys::JSClassID {
-    let mut map = registry().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+pub(crate) unsafe fn ensure_class(
+    rt: *mut sys::JSRuntime,
+    kind: &'static str,
+    def: &sys::JSClassDef,
+) -> sys::JSClassID {
+    let mut map = registry()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let key = (rt as usize, kind);
     if let Some(&id) = map.get(&key) {
         return id;
@@ -84,12 +90,20 @@ pub(crate) unsafe fn ensure_class(rt: *mut sys::JSRuntime, kind: &'static str, d
 /// `kind` was never registered for this runtime — safely fails whatever
 /// `JS_GetOpaque` check follows, rather than panicking.
 pub(crate) fn class_id_for(rt: *mut sys::JSRuntime, kind: &'static str) -> sys::JSClassID {
-    registry().lock().unwrap_or_else(|poisoned| poisoned.into_inner()).get(&(rt as usize, kind)).copied().unwrap_or(0)
+    registry()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(&(rt as usize, kind))
+        .copied()
+        .unwrap_or(0)
 }
 
 /// Removes every entry for `rt` — must be called from `Runtime::drop`
 /// before the runtime's memory can be reused by a new one (see module
 /// docs).
 pub(crate) fn cleanup_runtime(rt: *mut sys::JSRuntime) {
-    registry().lock().unwrap_or_else(|poisoned| poisoned.into_inner()).retain(|(rt_ptr, _), _| *rt_ptr != rt as usize);
+    registry()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .retain(|(rt_ptr, _), _| *rt_ptr != rt as usize);
 }

@@ -331,7 +331,10 @@ fn tab_order_puts_positive_tabindex_first_sorted_ascending_before_document_order
     dom.append_child(root, tabindex_two);
     dom.append_child(root, tabindex_one);
 
-    assert_eq!(dom.tab_order(), vec![tabindex_one, tabindex_two, first_in_doc]);
+    assert_eq!(
+        dom.tab_order(),
+        vec![tabindex_one, tabindex_two, first_in_doc]
+    );
 }
 
 #[test]

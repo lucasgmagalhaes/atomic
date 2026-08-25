@@ -19,7 +19,9 @@ fn find_directive<'a>(policy: &'a str, feature: &str) -> Option<&'a str> {
     policy.split(',').find_map(|part| {
         let part = part.trim();
         let (name, rest) = part.split_once('=')?;
-        name.trim().eq_ignore_ascii_case(feature).then(|| rest.trim())
+        name.trim()
+            .eq_ignore_ascii_case(feature)
+            .then(|| rest.trim())
     })
 }
 

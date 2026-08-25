@@ -115,7 +115,11 @@ fn recurses_into_nested_img_descendants() {
     images.insert(img, fake_decoded_image(64, 48));
     apply_image_sizes(&d, &mut tree, &images);
 
-    let img_box = tree.children.iter().find(|c| c.node == img).expect("img child box should exist");
+    let img_box = tree
+        .children
+        .iter()
+        .find(|c| c.node == img)
+        .expect("img child box should exist");
     assert_eq!(img_box.style.width, Length::Px(64.0));
     assert_eq!(img_box.style.height, Length::Px(48.0));
 }

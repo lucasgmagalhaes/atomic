@@ -115,15 +115,45 @@ unsafe fn evict_node_object(ctx: *mut sys::JSContext, id: dom::NodeId) {
     if let Some(object) = cached {
         sys::JS_FreeValue(ctx, object);
     }
-    let cached = CLASS_LIST_OBJECTS.with(|reg| reg.borrow_mut().get_mut(&(ctx as usize)).and_then(|nodes| nodes.remove(&id)));
-    if let Some(object) = cached { sys::JS_FreeValue(ctx, object); }
-    CLASS_LIST_LENGTHS.with(|reg| { if let Some(nodes) = reg.borrow_mut().get_mut(&(ctx as usize)) { nodes.remove(&id); } });
-    let cached = DATASET_OBJECTS.with(|reg| reg.borrow_mut().get_mut(&(ctx as usize)).and_then(|nodes| nodes.remove(&id)));
-    if let Some(object) = cached { sys::JS_FreeValue(ctx, object); }
-    DATASET_KEYS.with(|reg| { if let Some(nodes) = reg.borrow_mut().get_mut(&(ctx as usize)) { nodes.remove(&id); } });
-    let cached = ATTRS_OBJECTS.with(|reg| reg.borrow_mut().get_mut(&(ctx as usize)).and_then(|nodes| nodes.remove(&id)));
-    if let Some(object) = cached { sys::JS_FreeValue(ctx, object); }
-    ATTRS_LENGTHS.with(|reg| { if let Some(nodes) = reg.borrow_mut().get_mut(&(ctx as usize)) { nodes.remove(&id); } });
+    let cached = CLASS_LIST_OBJECTS.with(|reg| {
+        reg.borrow_mut()
+            .get_mut(&(ctx as usize))
+            .and_then(|nodes| nodes.remove(&id))
+    });
+    if let Some(object) = cached {
+        sys::JS_FreeValue(ctx, object);
+    }
+    CLASS_LIST_LENGTHS.with(|reg| {
+        if let Some(nodes) = reg.borrow_mut().get_mut(&(ctx as usize)) {
+            nodes.remove(&id);
+        }
+    });
+    let cached = DATASET_OBJECTS.with(|reg| {
+        reg.borrow_mut()
+            .get_mut(&(ctx as usize))
+            .and_then(|nodes| nodes.remove(&id))
+    });
+    if let Some(object) = cached {
+        sys::JS_FreeValue(ctx, object);
+    }
+    DATASET_KEYS.with(|reg| {
+        if let Some(nodes) = reg.borrow_mut().get_mut(&(ctx as usize)) {
+            nodes.remove(&id);
+        }
+    });
+    let cached = ATTRS_OBJECTS.with(|reg| {
+        reg.borrow_mut()
+            .get_mut(&(ctx as usize))
+            .and_then(|nodes| nodes.remove(&id))
+    });
+    if let Some(object) = cached {
+        sys::JS_FreeValue(ctx, object);
+    }
+    ATTRS_LENGTHS.with(|reg| {
+        if let Some(nodes) = reg.borrow_mut().get_mut(&(ctx as usize)) {
+            nodes.remove(&id);
+        }
+    });
     crate::css_style::evict(ctx, id);
 }
 
@@ -138,17 +168,29 @@ pub(crate) unsafe fn cleanup(ctx: *mut sys::JSContext) {
         }
     }
     if let Some(objects) = CLASS_LIST_OBJECTS.with(|reg| reg.borrow_mut().remove(&(ctx as usize))) {
-        for (_, obj) in objects { sys::JS_FreeValue(ctx, obj); }
+        for (_, obj) in objects {
+            sys::JS_FreeValue(ctx, obj);
+        }
     }
-    CLASS_LIST_LENGTHS.with(|reg| { reg.borrow_mut().remove(&(ctx as usize)); });
+    CLASS_LIST_LENGTHS.with(|reg| {
+        reg.borrow_mut().remove(&(ctx as usize));
+    });
     if let Some(objects) = DATASET_OBJECTS.with(|reg| reg.borrow_mut().remove(&(ctx as usize))) {
-        for (_, obj) in objects { sys::JS_FreeValue(ctx, obj); }
+        for (_, obj) in objects {
+            sys::JS_FreeValue(ctx, obj);
+        }
     }
-    DATASET_KEYS.with(|reg| { reg.borrow_mut().remove(&(ctx as usize)); });
+    DATASET_KEYS.with(|reg| {
+        reg.borrow_mut().remove(&(ctx as usize));
+    });
     if let Some(objects) = ATTRS_OBJECTS.with(|reg| reg.borrow_mut().remove(&(ctx as usize))) {
-        for (_, obj) in objects { sys::JS_FreeValue(ctx, obj); }
+        for (_, obj) in objects {
+            sys::JS_FreeValue(ctx, obj);
+        }
     }
-    ATTRS_LENGTHS.with(|reg| { reg.borrow_mut().remove(&(ctx as usize)); });
+    ATTRS_LENGTHS.with(|reg| {
+        reg.borrow_mut().remove(&(ctx as usize));
+    });
     crate::css_style::cleanup(ctx);
 }
 
@@ -604,38 +646,123 @@ unsafe extern "C" fn node_class_name_set(
 ) -> sys::JSValue {
     attribute_property_set(ctx, this_val, val, "class")
 }
-unsafe extern "C" fn node_form_name_get(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue { attribute_property_get(ctx, this_val, "name") }
-unsafe extern "C" fn node_form_name_set(ctx: *mut sys::JSContext, this_val: sys::JSValue, val: sys::JSValue) -> sys::JSValue { attribute_property_set(ctx, this_val, val, "name") }
-unsafe extern "C" fn node_type_attribute_get(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue { attribute_property_get(ctx, this_val, "type") }
-unsafe extern "C" fn node_type_attribute_set(ctx: *mut sys::JSContext, this_val: sys::JSValue, val: sys::JSValue) -> sys::JSValue { attribute_property_set(ctx, this_val, val, "type") }
-unsafe extern "C" fn node_href_get(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue { attribute_property_get(ctx, this_val, "href") }
-unsafe extern "C" fn node_href_set(ctx: *mut sys::JSContext, this_val: sys::JSValue, val: sys::JSValue) -> sys::JSValue { attribute_property_set(ctx, this_val, val, "href") }
+unsafe extern "C" fn node_form_name_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    attribute_property_get(ctx, this_val, "name")
+}
+unsafe extern "C" fn node_form_name_set(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    val: sys::JSValue,
+) -> sys::JSValue {
+    attribute_property_set(ctx, this_val, val, "name")
+}
+unsafe extern "C" fn node_type_attribute_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    attribute_property_get(ctx, this_val, "type")
+}
+unsafe extern "C" fn node_type_attribute_set(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    val: sys::JSValue,
+) -> sys::JSValue {
+    attribute_property_set(ctx, this_val, val, "type")
+}
+unsafe extern "C" fn node_href_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    attribute_property_get(ctx, this_val, "href")
+}
+unsafe extern "C" fn node_href_set(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    val: sys::JSValue,
+) -> sys::JSValue {
+    attribute_property_set(ctx, this_val, val, "href")
+}
 
 /// Boolean-attribute reflection (`checked`/`disabled`/`selected`): HTML
 /// boolean attributes are presence-only — any attribute value (including
 /// `""`) means `true`, and `false` means the attribute is absent entirely,
 /// not present with a falsy string value. Mirrors `attribute_property_get`/
 /// `_set`'s structure but with that different get/set semantics.
-unsafe fn boolean_attribute_get(ctx: *mut sys::JSContext, this_val: sys::JSValue, name: &str) -> sys::JSValue {
-    let Some(id) = node_id(ctx, this_val) else { return sys::js_bool(false); };
+unsafe fn boolean_attribute_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    name: &str,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_bool(false);
+    };
     let dom = dom_opaque(ctx);
     sys::js_bool(!dom.is_null() && (*dom).attribute(id, name).is_some())
 }
 
-unsafe fn boolean_attribute_set(ctx: *mut sys::JSContext, this_val: sys::JSValue, val: sys::JSValue, name: &str) -> sys::JSValue {
-    let Some(id) = node_id(ctx, this_val) else { return throw_type_error(ctx, "attribute target must be a node"); };
+unsafe fn boolean_attribute_set(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    val: sys::JSValue,
+    name: &str,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return throw_type_error(ctx, "attribute target must be a node");
+    };
     let dom = dom_opaque(ctx);
-    if dom.is_null() || (*dom).get(id).is_none() { return throw_type_error(ctx, "node is no longer attached to this document"); }
-    if sys::JS_ToBool(ctx, val) != 0 { (*dom).set_attribute(id, name, ""); } else { (*dom).remove_attribute(id, name); }
+    if dom.is_null() || (*dom).get(id).is_none() {
+        return throw_type_error(ctx, "node is no longer attached to this document");
+    }
+    if sys::JS_ToBool(ctx, val) != 0 {
+        (*dom).set_attribute(id, name, "");
+    } else {
+        (*dom).remove_attribute(id, name);
+    }
     sys::js_undefined()
 }
 
-unsafe extern "C" fn node_checked_get(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue { boolean_attribute_get(ctx, this_val, "checked") }
-unsafe extern "C" fn node_checked_set(ctx: *mut sys::JSContext, this_val: sys::JSValue, val: sys::JSValue) -> sys::JSValue { boolean_attribute_set(ctx, this_val, val, "checked") }
-unsafe extern "C" fn node_disabled_get(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue { boolean_attribute_get(ctx, this_val, "disabled") }
-unsafe extern "C" fn node_disabled_set(ctx: *mut sys::JSContext, this_val: sys::JSValue, val: sys::JSValue) -> sys::JSValue { boolean_attribute_set(ctx, this_val, val, "disabled") }
-unsafe extern "C" fn node_selected_get(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue { boolean_attribute_get(ctx, this_val, "selected") }
-unsafe extern "C" fn node_selected_set(ctx: *mut sys::JSContext, this_val: sys::JSValue, val: sys::JSValue) -> sys::JSValue { boolean_attribute_set(ctx, this_val, val, "selected") }
+unsafe extern "C" fn node_checked_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    boolean_attribute_get(ctx, this_val, "checked")
+}
+unsafe extern "C" fn node_checked_set(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    val: sys::JSValue,
+) -> sys::JSValue {
+    boolean_attribute_set(ctx, this_val, val, "checked")
+}
+unsafe extern "C" fn node_disabled_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    boolean_attribute_get(ctx, this_val, "disabled")
+}
+unsafe extern "C" fn node_disabled_set(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    val: sys::JSValue,
+) -> sys::JSValue {
+    boolean_attribute_set(ctx, this_val, val, "disabled")
+}
+unsafe extern "C" fn node_selected_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    boolean_attribute_get(ctx, this_val, "selected")
+}
+unsafe extern "C" fn node_selected_set(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    val: sys::JSValue,
+) -> sys::JSValue {
+    boolean_attribute_set(ctx, this_val, val, "selected")
+}
 
 unsafe fn define_attribute_properties(ctx: *mut sys::JSContext, proto: sys::JSValue) {
     for (name, getter, setter) in [
@@ -649,12 +776,32 @@ unsafe fn define_attribute_properties(ctx: *mut sys::JSContext, proto: sys::JSVa
             node_class_name_get as Getter,
             node_class_name_set as Setter,
         ),
-        ("name", node_form_name_get as Getter, node_form_name_set as Setter),
-        ("type", node_type_attribute_get as Getter, node_type_attribute_set as Setter),
+        (
+            "name",
+            node_form_name_get as Getter,
+            node_form_name_set as Setter,
+        ),
+        (
+            "type",
+            node_type_attribute_get as Getter,
+            node_type_attribute_set as Setter,
+        ),
         ("href", node_href_get as Getter, node_href_set as Setter),
-        ("checked", node_checked_get as Getter, node_checked_set as Setter),
-        ("disabled", node_disabled_get as Getter, node_disabled_set as Setter),
-        ("selected", node_selected_get as Getter, node_selected_set as Setter),
+        (
+            "checked",
+            node_checked_get as Getter,
+            node_checked_set as Setter,
+        ),
+        (
+            "disabled",
+            node_disabled_get as Getter,
+            node_disabled_set as Setter,
+        ),
+        (
+            "selected",
+            node_selected_get as Getter,
+            node_selected_set as Setter,
+        ),
     ] {
         let name = CString::new(name).unwrap();
         let getter = sys::JS_NewCFunction2(
@@ -702,7 +849,9 @@ fn class_tokens(value: &str) -> Vec<String> {
 }
 
 fn valid_class_token(token: &str) -> bool {
-    !token.is_empty() && token.len() <= MAX_ATTRIBUTE_NAME_LENGTH && !token.bytes().any(|byte| byte.is_ascii_whitespace())
+    !token.is_empty()
+        && token.len() <= MAX_ATTRIBUTE_NAME_LENGTH
+        && !token.bytes().any(|byte| byte.is_ascii_whitespace())
 }
 
 /// Refreshes a classList object's indexed properties (`0`, `1`, ...) and
@@ -711,11 +860,20 @@ fn valid_class_token(token: &str) -> bool {
 /// mutation and every `element.classList` getter hit, so a cached wrapper
 /// (identity-stable per `NodeId`, see `CLASS_LIST_OBJECTS`) never serves
 /// stale indices after a direct `setAttribute("class", ...)` bypassed it.
-unsafe fn sync_class_list(ctx: *mut sys::JSContext, dom: *mut dom::Dom, id: dom::NodeId, object: sys::JSValue) {
+unsafe fn sync_class_list(
+    ctx: *mut sys::JSContext,
+    dom: *mut dom::Dom,
+    id: dom::NodeId,
+    object: sys::JSValue,
+) {
     let tokens = class_tokens((*dom).attribute(id, "class").unwrap_or_default());
-    let old_len = CLASS_LIST_LENGTHS.with(|reg| {
-        reg.borrow().get(&(ctx as usize)).and_then(|nodes| nodes.get(&id).copied())
-    }).unwrap_or(0);
+    let old_len = CLASS_LIST_LENGTHS
+        .with(|reg| {
+            reg.borrow()
+                .get(&(ctx as usize))
+                .and_then(|nodes| nodes.get(&id).copied())
+        })
+        .unwrap_or(0);
     for (index, token) in tokens.iter().enumerate() {
         sys::JS_SetPropertyUint32(ctx, object, index as u32, new_js_string(ctx, token));
     }
@@ -723,8 +881,18 @@ unsafe fn sync_class_list(ctx: *mut sys::JSContext, dom: *mut dom::Dom, id: dom:
         sys::JS_SetPropertyUint32(ctx, object, index as u32, sys::js_undefined());
     }
     let length_name = CString::new("length").unwrap();
-    sys::JS_SetPropertyStr(ctx, object, length_name.as_ptr(), sys::js_float64(tokens.len() as f64));
-    CLASS_LIST_LENGTHS.with(|reg| reg.borrow_mut().entry(ctx as usize).or_default().insert(id, tokens.len()));
+    sys::JS_SetPropertyStr(
+        ctx,
+        object,
+        length_name.as_ptr(),
+        sys::js_float64(tokens.len() as f64),
+    );
+    CLASS_LIST_LENGTHS.with(|reg| {
+        reg.borrow_mut()
+            .entry(ctx as usize)
+            .or_default()
+            .insert(id, tokens.len())
+    });
 }
 
 /// Fetches `Array.prototype` so a classList object can inherit it via
@@ -743,94 +911,222 @@ unsafe fn array_prototype(ctx: *mut sys::JSContext) -> sys::JSValue {
     proto
 }
 
-unsafe fn class_list_mutate(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue, add: bool) -> sys::JSValue {
-    let Some(id) = class_list_owner(ctx, this_val) else { return throw_type_error(ctx, "invalid classList receiver"); };
+unsafe fn class_list_mutate(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+    add: bool,
+) -> sys::JSValue {
+    let Some(id) = class_list_owner(ctx, this_val) else {
+        return throw_type_error(ctx, "invalid classList receiver");
+    };
     let dom = dom_opaque(ctx);
-    if dom.is_null() || (*dom).get(id).is_none() { return throw_type_error(ctx, "node is no longer attached to this document"); }
+    if dom.is_null() || (*dom).get(id).is_none() {
+        return throw_type_error(ctx, "node is no longer attached to this document");
+    }
     let mut tokens = class_tokens((*dom).attribute(id, "class").unwrap_or_default());
     for index in 0..argc {
-        let Some(token) = read_js_string(ctx, *argv.add(index as usize)) else { return throw_type_error(ctx, "class token must be a string"); };
-        if !valid_class_token(&token) { return throw_type_error(ctx, "invalid class token"); }
-        if add { if !tokens.contains(&token) { tokens.push(token); } } else { tokens.retain(|current| current != &token); }
+        let Some(token) = read_js_string(ctx, *argv.add(index as usize)) else {
+            return throw_type_error(ctx, "class token must be a string");
+        };
+        if !valid_class_token(&token) {
+            return throw_type_error(ctx, "invalid class token");
+        }
+        if add {
+            if !tokens.contains(&token) {
+                tokens.push(token);
+            }
+        } else {
+            tokens.retain(|current| current != &token);
+        }
     }
     let value = tokens.join(" ");
-    if value.len() > MAX_ATTRIBUTE_VALUE_LENGTH { return throw_type_error(ctx, "class attribute exceeds the maximum length"); }
+    if value.len() > MAX_ATTRIBUTE_VALUE_LENGTH {
+        return throw_type_error(ctx, "class attribute exceeds the maximum length");
+    }
     (*dom).set_attribute(id, "class", &value);
     sync_class_list(ctx, dom, id, this_val);
     sys::js_undefined()
 }
 
-unsafe extern "C" fn class_list_add(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue { class_list_mutate(ctx, this_val, argc, argv, true) }
-unsafe extern "C" fn class_list_remove(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue { class_list_mutate(ctx, this_val, argc, argv, false) }
-unsafe extern "C" fn class_list_contains(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
-    if argc < 1 { return throw_type_error(ctx, "class token is required"); }
-    let Some(token) = read_js_string(ctx, *argv) else { return throw_type_error(ctx, "class token must be a string"); };
-    if !valid_class_token(&token) { return throw_type_error(ctx, "invalid class token"); }
-    let Some(id) = class_list_owner(ctx, this_val) else { return sys::js_bool(false); };
+unsafe extern "C" fn class_list_add(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    class_list_mutate(ctx, this_val, argc, argv, true)
+}
+unsafe extern "C" fn class_list_remove(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    class_list_mutate(ctx, this_val, argc, argv, false)
+}
+unsafe extern "C" fn class_list_contains(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 1 {
+        return throw_type_error(ctx, "class token is required");
+    }
+    let Some(token) = read_js_string(ctx, *argv) else {
+        return throw_type_error(ctx, "class token must be a string");
+    };
+    if !valid_class_token(&token) {
+        return throw_type_error(ctx, "invalid class token");
+    }
+    let Some(id) = class_list_owner(ctx, this_val) else {
+        return sys::js_bool(false);
+    };
     let dom = dom_opaque(ctx);
-    sys::js_bool(!dom.is_null() && class_tokens((*dom).attribute(id, "class").unwrap_or_default()).contains(&token))
+    sys::js_bool(
+        !dom.is_null()
+            && class_tokens((*dom).attribute(id, "class").unwrap_or_default()).contains(&token),
+    )
 }
 
-unsafe extern "C" fn class_list_toggle(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
-    if argc < 1 { return throw_type_error(ctx, "class token is required"); }
-    let Some(token) = read_js_string(ctx, *argv) else { return throw_type_error(ctx, "class token must be a string"); };
-    if !valid_class_token(&token) { return throw_type_error(ctx, "invalid class token"); }
-    let Some(id) = class_list_owner(ctx, this_val) else { return throw_type_error(ctx, "invalid classList receiver"); };
+unsafe extern "C" fn class_list_toggle(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 1 {
+        return throw_type_error(ctx, "class token is required");
+    }
+    let Some(token) = read_js_string(ctx, *argv) else {
+        return throw_type_error(ctx, "class token must be a string");
+    };
+    if !valid_class_token(&token) {
+        return throw_type_error(ctx, "invalid class token");
+    }
+    let Some(id) = class_list_owner(ctx, this_val) else {
+        return throw_type_error(ctx, "invalid classList receiver");
+    };
     let dom = dom_opaque(ctx);
-    if dom.is_null() || (*dom).get(id).is_none() { return throw_type_error(ctx, "node is no longer attached to this document"); }
+    if dom.is_null() || (*dom).get(id).is_none() {
+        return throw_type_error(ctx, "node is no longer attached to this document");
+    }
     let mut tokens = class_tokens((*dom).attribute(id, "class").unwrap_or_default());
     let present = tokens.contains(&token);
-    let force = if argc >= 2 { Some(sys::JS_ToBool(ctx, *argv.add(1)) != 0) } else { None };
+    let force = if argc >= 2 {
+        Some(sys::JS_ToBool(ctx, *argv.add(1)) != 0)
+    } else {
+        None
+    };
     let should_be_present = force.unwrap_or(!present);
-    if should_be_present && !present { tokens.push(token); } else if !should_be_present && present { tokens.retain(|current| current != &token); }
+    if should_be_present && !present {
+        tokens.push(token);
+    } else if !should_be_present && present {
+        tokens.retain(|current| current != &token);
+    }
     let value = tokens.join(" ");
-    if value.len() > MAX_ATTRIBUTE_VALUE_LENGTH { return throw_type_error(ctx, "class attribute exceeds the maximum length"); }
+    if value.len() > MAX_ATTRIBUTE_VALUE_LENGTH {
+        return throw_type_error(ctx, "class attribute exceeds the maximum length");
+    }
     (*dom).set_attribute(id, "class", &value);
     sync_class_list(ctx, dom, id, this_val);
     sys::js_bool(should_be_present)
 }
 
-unsafe extern "C" fn class_list_replace(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
-    if argc < 2 { return throw_type_error(ctx, "old and new class tokens are required"); }
-    let Some(old_token) = read_js_string(ctx, *argv) else { return throw_type_error(ctx, "class token must be a string"); };
-    let Some(new_token) = read_js_string(ctx, *argv.add(1)) else { return throw_type_error(ctx, "class token must be a string"); };
-    if !valid_class_token(&old_token) || !valid_class_token(&new_token) { return throw_type_error(ctx, "invalid class token"); }
-    let Some(id) = class_list_owner(ctx, this_val) else { return throw_type_error(ctx, "invalid classList receiver"); };
+unsafe extern "C" fn class_list_replace(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 2 {
+        return throw_type_error(ctx, "old and new class tokens are required");
+    }
+    let Some(old_token) = read_js_string(ctx, *argv) else {
+        return throw_type_error(ctx, "class token must be a string");
+    };
+    let Some(new_token) = read_js_string(ctx, *argv.add(1)) else {
+        return throw_type_error(ctx, "class token must be a string");
+    };
+    if !valid_class_token(&old_token) || !valid_class_token(&new_token) {
+        return throw_type_error(ctx, "invalid class token");
+    }
+    let Some(id) = class_list_owner(ctx, this_val) else {
+        return throw_type_error(ctx, "invalid classList receiver");
+    };
     let dom = dom_opaque(ctx);
-    if dom.is_null() || (*dom).get(id).is_none() { return throw_type_error(ctx, "node is no longer attached to this document"); }
+    if dom.is_null() || (*dom).get(id).is_none() {
+        return throw_type_error(ctx, "node is no longer attached to this document");
+    }
     let mut tokens = class_tokens((*dom).attribute(id, "class").unwrap_or_default());
-    let Some(position) = tokens.iter().position(|current| current == &old_token) else { return sys::js_bool(false); };
+    let Some(position) = tokens.iter().position(|current| current == &old_token) else {
+        return sys::js_bool(false);
+    };
     tokens[position] = new_token;
     let value = tokens.join(" ");
-    if value.len() > MAX_ATTRIBUTE_VALUE_LENGTH { return throw_type_error(ctx, "class attribute exceeds the maximum length"); }
+    if value.len() > MAX_ATTRIBUTE_VALUE_LENGTH {
+        return throw_type_error(ctx, "class attribute exceeds the maximum length");
+    }
     (*dom).set_attribute(id, "class", &value);
     sync_class_list(ctx, dom, id, this_val);
     sys::js_bool(true)
 }
 
-unsafe extern "C" fn class_list_value_get(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue {
-    let Some(id) = class_list_owner(ctx, this_val) else { return new_js_string(ctx, ""); };
+unsafe extern "C" fn class_list_value_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = class_list_owner(ctx, this_val) else {
+        return new_js_string(ctx, "");
+    };
     let dom = dom_opaque(ctx);
-    if dom.is_null() { return new_js_string(ctx, ""); }
+    if dom.is_null() {
+        return new_js_string(ctx, "");
+    }
     new_js_string(ctx, (*dom).attribute(id, "class").unwrap_or_default())
 }
 
-unsafe extern "C" fn class_list_value_set(ctx: *mut sys::JSContext, this_val: sys::JSValue, argv: sys::JSValue) -> sys::JSValue {
-    let Some(id) = class_list_owner(ctx, this_val) else { return throw_type_error(ctx, "invalid classList receiver"); };
+unsafe extern "C" fn class_list_value_set(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argv: sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = class_list_owner(ctx, this_val) else {
+        return throw_type_error(ctx, "invalid classList receiver");
+    };
     let dom = dom_opaque(ctx);
-    if dom.is_null() || (*dom).get(id).is_none() { return throw_type_error(ctx, "node is no longer attached to this document"); }
-    let Some(value) = read_js_string(ctx, argv) else { return throw_type_error(ctx, "classList.value must be a string"); };
-    if value.len() > MAX_ATTRIBUTE_VALUE_LENGTH { return throw_type_error(ctx, "class attribute exceeds the maximum length"); }
+    if dom.is_null() || (*dom).get(id).is_none() {
+        return throw_type_error(ctx, "node is no longer attached to this document");
+    }
+    let Some(value) = read_js_string(ctx, argv) else {
+        return throw_type_error(ctx, "classList.value must be a string");
+    };
+    if value.len() > MAX_ATTRIBUTE_VALUE_LENGTH {
+        return throw_type_error(ctx, "class attribute exceeds the maximum length");
+    }
     (*dom).set_attribute(id, "class", &value);
     sync_class_list(ctx, dom, id, this_val);
     sys::js_undefined()
 }
 
-unsafe extern "C" fn node_class_list_get(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue {
-    let Some(id) = node_id(ctx, this_val) else { return sys::js_undefined(); };
-    if let Some(value) = CLASS_LIST_OBJECTS.with(|reg| reg.borrow().get(&(ctx as usize)).and_then(|objects| objects.get(&id).copied())) {
+unsafe extern "C" fn node_class_list_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    if let Some(value) = CLASS_LIST_OBJECTS.with(|reg| {
+        reg.borrow()
+            .get(&(ctx as usize))
+            .and_then(|objects| objects.get(&id).copied())
+    }) {
         let dom = dom_opaque(ctx);
-        if !dom.is_null() { sync_class_list(ctx, dom, id, value); }
+        if !dom.is_null() {
+            sync_class_list(ctx, dom, id, value);
+        }
         return sys::JS_DupValue(ctx, value);
     }
     let object = sys::JS_NewObject(ctx);
@@ -847,25 +1143,72 @@ unsafe extern "C" fn node_class_list_get(ctx: *mut sys::JSContext, this_val: sys
         ("replace", class_list_replace as sys::JSCFunction),
     ] {
         let name = CString::new(name).unwrap();
-        sys::JS_SetPropertyStr(ctx, object, name.as_ptr(), sys::JS_NewCFunction2(ctx, function, name.as_ptr(), 1, sys::JS_CFUNC_GENERIC, 0));
+        sys::JS_SetPropertyStr(
+            ctx,
+            object,
+            name.as_ptr(),
+            sys::JS_NewCFunction2(ctx, function, name.as_ptr(), 1, sys::JS_CFUNC_GENERIC, 0),
+        );
     }
     let value_name = CString::new("value").unwrap();
-    let value_getter = sys::JS_NewCFunction2(ctx, std::mem::transmute::<Getter, sys::JSCFunction>(class_list_value_get), value_name.as_ptr(), 0, sys::JS_CFUNC_GETTER, 0);
-    let value_setter = sys::JS_NewCFunction2(ctx, std::mem::transmute::<Setter, sys::JSCFunction>(class_list_value_set), value_name.as_ptr(), 1, sys::JS_CFUNC_SETTER, 0);
+    let value_getter = sys::JS_NewCFunction2(
+        ctx,
+        std::mem::transmute::<Getter, sys::JSCFunction>(class_list_value_get),
+        value_name.as_ptr(),
+        0,
+        sys::JS_CFUNC_GETTER,
+        0,
+    );
+    let value_setter = sys::JS_NewCFunction2(
+        ctx,
+        std::mem::transmute::<Setter, sys::JSCFunction>(class_list_value_set),
+        value_name.as_ptr(),
+        1,
+        sys::JS_CFUNC_SETTER,
+        0,
+    );
     let value_atom = sys::JS_NewAtom(ctx, value_name.as_ptr());
-    sys::JS_DefinePropertyGetSet(ctx, object, value_atom, value_getter, value_setter, sys::JS_PROP_HAS_GET | sys::JS_PROP_HAS_SET | sys::JS_PROP_CONFIGURABLE);
+    sys::JS_DefinePropertyGetSet(
+        ctx,
+        object,
+        value_atom,
+        value_getter,
+        value_setter,
+        sys::JS_PROP_HAS_GET | sys::JS_PROP_HAS_SET | sys::JS_PROP_CONFIGURABLE,
+    );
     sys::JS_FreeAtom(ctx, value_atom);
     let dom = dom_opaque(ctx);
-    if !dom.is_null() { sync_class_list(ctx, dom, id, object); }
-    CLASS_LIST_OBJECTS.with(|reg| reg.borrow_mut().entry(ctx as usize).or_default().insert(id, sys::JS_DupValue(ctx, object)));
+    if !dom.is_null() {
+        sync_class_list(ctx, dom, id, object);
+    }
+    CLASS_LIST_OBJECTS.with(|reg| {
+        reg.borrow_mut()
+            .entry(ctx as usize)
+            .or_default()
+            .insert(id, sys::JS_DupValue(ctx, object))
+    });
     object
 }
 
 unsafe fn define_class_list(ctx: *mut sys::JSContext, proto: sys::JSValue) {
     let name = CString::new("classList").unwrap();
-    let getter = sys::JS_NewCFunction2(ctx, std::mem::transmute::<Getter, sys::JSCFunction>(node_class_list_get), name.as_ptr(), 0, sys::JS_CFUNC_GETTER, 0);
+    let getter = sys::JS_NewCFunction2(
+        ctx,
+        std::mem::transmute::<Getter, sys::JSCFunction>(node_class_list_get),
+        name.as_ptr(),
+        0,
+        sys::JS_CFUNC_GETTER,
+        0,
+    );
     let atom = sys::JS_NewAtom(ctx, name.as_ptr());
-    sys::JS_DefinePropertyGetSet(ctx, proto, atom, getter, sys::js_undefined(), sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE);
+    sys::JS_DefinePropertyGetSet(
+        ctx,
+        proto,
+        atom,
+        getter,
+        sys::js_undefined(),
+        sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE,
+    );
     sys::JS_FreeAtom(ctx, atom);
 }
 
@@ -900,13 +1243,21 @@ fn kebab_to_camel(name: &str) -> String {
 /// expose) rather than the fixed getter/setter pairs `id`/`className`/etc.
 /// use — same documented scope-down as `localStorage`'s missing
 /// `localStorage.foo` bracket access.
-unsafe fn sync_dataset(ctx: *mut sys::JSContext, dom: *mut dom::Dom, id: dom::NodeId, object: sys::JSValue) {
-    let Some(dom::NodeData::Element { attributes, .. }) = (*dom).get(id).map(|node| &node.data) else {
+unsafe fn sync_dataset(
+    ctx: *mut sys::JSContext,
+    dom: *mut dom::Dom,
+    id: dom::NodeId,
+    object: sys::JSValue,
+) {
+    let Some(dom::NodeData::Element { attributes, .. }) = (*dom).get(id).map(|node| &node.data)
+    else {
         return;
     };
     let mut current = Vec::new();
     for (name, value) in attributes.iter() {
-        let Some(rest) = name.strip_prefix("data-") else { continue };
+        let Some(rest) = name.strip_prefix("data-") else {
+            continue;
+        };
         if rest.is_empty() {
             continue;
         }
@@ -927,28 +1278,65 @@ unsafe fn sync_dataset(ctx: *mut sys::JSContext, dom: *mut dom::Dom, id: dom::No
             sys::JS_SetPropertyStr(ctx, object, key.as_ptr(), sys::js_undefined());
         }
     }
-    DATASET_KEYS.with(|reg| reg.borrow_mut().entry(ctx as usize).or_default().insert(id, current));
+    DATASET_KEYS.with(|reg| {
+        reg.borrow_mut()
+            .entry(ctx as usize)
+            .or_default()
+            .insert(id, current)
+    });
 }
 
-unsafe extern "C" fn node_dataset_get(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue {
-    let Some(id) = node_id(ctx, this_val) else { return sys::js_undefined(); };
-    if let Some(value) = DATASET_OBJECTS.with(|reg| reg.borrow().get(&(ctx as usize)).and_then(|objects| objects.get(&id).copied())) {
+unsafe extern "C" fn node_dataset_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    if let Some(value) = DATASET_OBJECTS.with(|reg| {
+        reg.borrow()
+            .get(&(ctx as usize))
+            .and_then(|objects| objects.get(&id).copied())
+    }) {
         let dom = dom_opaque(ctx);
-        if !dom.is_null() { sync_dataset(ctx, dom, id, value); }
+        if !dom.is_null() {
+            sync_dataset(ctx, dom, id, value);
+        }
         return sys::JS_DupValue(ctx, value);
     }
     let object = sys::JS_NewObject(ctx);
     let dom = dom_opaque(ctx);
-    if !dom.is_null() { sync_dataset(ctx, dom, id, object); }
-    DATASET_OBJECTS.with(|reg| reg.borrow_mut().entry(ctx as usize).or_default().insert(id, sys::JS_DupValue(ctx, object)));
+    if !dom.is_null() {
+        sync_dataset(ctx, dom, id, object);
+    }
+    DATASET_OBJECTS.with(|reg| {
+        reg.borrow_mut()
+            .entry(ctx as usize)
+            .or_default()
+            .insert(id, sys::JS_DupValue(ctx, object))
+    });
     object
 }
 
 unsafe fn define_dataset(ctx: *mut sys::JSContext, proto: sys::JSValue) {
     let name = CString::new("dataset").unwrap();
-    let getter = sys::JS_NewCFunction2(ctx, std::mem::transmute::<Getter, sys::JSCFunction>(node_dataset_get), name.as_ptr(), 0, sys::JS_CFUNC_GETTER, 0);
+    let getter = sys::JS_NewCFunction2(
+        ctx,
+        std::mem::transmute::<Getter, sys::JSCFunction>(node_dataset_get),
+        name.as_ptr(),
+        0,
+        sys::JS_CFUNC_GETTER,
+        0,
+    );
     let atom = sys::JS_NewAtom(ctx, name.as_ptr());
-    sys::JS_DefinePropertyGetSet(ctx, proto, atom, getter, sys::js_undefined(), sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE);
+    sys::JS_DefinePropertyGetSet(
+        ctx,
+        proto,
+        atom,
+        getter,
+        sys::js_undefined(),
+        sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE,
+    );
     sys::JS_FreeAtom(ctx, atom);
 }
 
@@ -973,8 +1361,14 @@ unsafe fn make_attr_entry(ctx: *mut sys::JSContext, name: &str, value: &str) -> 
 /// entries and `length` from every live attribute on `id`, same
 /// "diff against the last sync, clear trailing indices" convention
 /// `sync_class_list` already uses for a shrinking token list.
-unsafe fn sync_attributes(ctx: *mut sys::JSContext, dom: *mut dom::Dom, id: dom::NodeId, object: sys::JSValue) {
-    let Some(dom::NodeData::Element { attributes, .. }) = (*dom).get(id).map(|node| &node.data) else {
+unsafe fn sync_attributes(
+    ctx: *mut sys::JSContext,
+    dom: *mut dom::Dom,
+    id: dom::NodeId,
+    object: sys::JSValue,
+) {
+    let Some(dom::NodeData::Element { attributes, .. }) = (*dom).get(id).map(|node| &node.data)
+    else {
         return;
     };
     let mut names: Vec<_> = attributes.keys().cloned().collect();
@@ -984,31 +1378,72 @@ unsafe fn sync_attributes(ctx: *mut sys::JSContext, dom: *mut dom::Dom, id: dom:
         let entry = make_attr_entry(ctx, name, &value);
         sys::JS_SetPropertyUint32(ctx, object, index as u32, entry);
     }
-    let old_len = ATTRS_LENGTHS.with(|reg| {
-        reg.borrow().get(&(ctx as usize)).and_then(|nodes| nodes.get(&id).copied())
-    }).unwrap_or(0);
+    let old_len = ATTRS_LENGTHS
+        .with(|reg| {
+            reg.borrow()
+                .get(&(ctx as usize))
+                .and_then(|nodes| nodes.get(&id).copied())
+        })
+        .unwrap_or(0);
     for index in names.len()..old_len {
         sys::JS_SetPropertyUint32(ctx, object, index as u32, sys::js_undefined());
     }
     let length_name = CString::new("length").unwrap();
-    sys::JS_SetPropertyStr(ctx, object, length_name.as_ptr(), sys::js_float64(names.len() as f64));
-    ATTRS_LENGTHS.with(|reg| reg.borrow_mut().entry(ctx as usize).or_default().insert(id, names.len()));
+    sys::JS_SetPropertyStr(
+        ctx,
+        object,
+        length_name.as_ptr(),
+        sys::js_float64(names.len() as f64),
+    );
+    ATTRS_LENGTHS.with(|reg| {
+        reg.borrow_mut()
+            .entry(ctx as usize)
+            .or_default()
+            .insert(id, names.len())
+    });
 }
 
-unsafe extern "C" fn attrs_get_named_item(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
-    if argc < 1 { return throw_type_error(ctx, "attribute name is required"); }
-    let Some(name) = read_js_string(ctx, *argv) else { return throw_type_error(ctx, "attribute name must be a string"); };
-    let Some(id) = attrs_owner(ctx, this_val) else { return sys::js_null(); };
+unsafe extern "C" fn attrs_get_named_item(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 1 {
+        return throw_type_error(ctx, "attribute name is required");
+    }
+    let Some(name) = read_js_string(ctx, *argv) else {
+        return throw_type_error(ctx, "attribute name must be a string");
+    };
+    let Some(id) = attrs_owner(ctx, this_val) else {
+        return sys::js_null();
+    };
     let dom = dom_opaque(ctx);
-    if dom.is_null() { return sys::js_null(); }
-    (*dom).attribute(id, &name).map(|value| make_attr_entry(ctx, &name, value)).unwrap_or_else(sys::js_null)
+    if dom.is_null() {
+        return sys::js_null();
+    }
+    (*dom)
+        .attribute(id, &name)
+        .map(|value| make_attr_entry(ctx, &name, value))
+        .unwrap_or_else(sys::js_null)
 }
 
-unsafe extern "C" fn node_attributes_get(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue {
-    let Some(id) = node_id(ctx, this_val) else { return sys::js_undefined(); };
-    if let Some(value) = ATTRS_OBJECTS.with(|reg| reg.borrow().get(&(ctx as usize)).and_then(|objects| objects.get(&id).copied())) {
+unsafe extern "C" fn node_attributes_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    if let Some(value) = ATTRS_OBJECTS.with(|reg| {
+        reg.borrow()
+            .get(&(ctx as usize))
+            .and_then(|objects| objects.get(&id).copied())
+    }) {
         let dom = dom_opaque(ctx);
-        if !dom.is_null() { sync_attributes(ctx, dom, id, value); }
+        if !dom.is_null() {
+            sync_attributes(ctx, dom, id, value);
+        }
         return sys::JS_DupValue(ctx, value);
     }
     let object = sys::JS_NewObject(ctx);
@@ -1018,18 +1453,51 @@ unsafe extern "C" fn node_attributes_get(ctx: *mut sys::JSContext, this_val: sys
     let owner = CString::new("__nimbleAttributesOwner").unwrap();
     sys::JS_SetPropertyStr(ctx, object, owner.as_ptr(), sys::JS_DupValue(ctx, this_val));
     let method_name = CString::new("getNamedItem").unwrap();
-    sys::JS_SetPropertyStr(ctx, object, method_name.as_ptr(), sys::JS_NewCFunction2(ctx, attrs_get_named_item, method_name.as_ptr(), 1, sys::JS_CFUNC_GENERIC, 0));
+    sys::JS_SetPropertyStr(
+        ctx,
+        object,
+        method_name.as_ptr(),
+        sys::JS_NewCFunction2(
+            ctx,
+            attrs_get_named_item,
+            method_name.as_ptr(),
+            1,
+            sys::JS_CFUNC_GENERIC,
+            0,
+        ),
+    );
     let dom = dom_opaque(ctx);
-    if !dom.is_null() { sync_attributes(ctx, dom, id, object); }
-    ATTRS_OBJECTS.with(|reg| reg.borrow_mut().entry(ctx as usize).or_default().insert(id, sys::JS_DupValue(ctx, object)));
+    if !dom.is_null() {
+        sync_attributes(ctx, dom, id, object);
+    }
+    ATTRS_OBJECTS.with(|reg| {
+        reg.borrow_mut()
+            .entry(ctx as usize)
+            .or_default()
+            .insert(id, sys::JS_DupValue(ctx, object))
+    });
     object
 }
 
 unsafe fn define_attributes_collection(ctx: *mut sys::JSContext, proto: sys::JSValue) {
     let name = CString::new("attributes").unwrap();
-    let getter = sys::JS_NewCFunction2(ctx, std::mem::transmute::<Getter, sys::JSCFunction>(node_attributes_get), name.as_ptr(), 0, sys::JS_CFUNC_GETTER, 0);
+    let getter = sys::JS_NewCFunction2(
+        ctx,
+        std::mem::transmute::<Getter, sys::JSCFunction>(node_attributes_get),
+        name.as_ptr(),
+        0,
+        sys::JS_CFUNC_GETTER,
+        0,
+    );
     let atom = sys::JS_NewAtom(ctx, name.as_ptr());
-    sys::JS_DefinePropertyGetSet(ctx, proto, atom, getter, sys::js_undefined(), sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE);
+    sys::JS_DefinePropertyGetSet(
+        ctx,
+        proto,
+        atom,
+        getter,
+        sys::js_undefined(),
+        sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE,
+    );
     sys::JS_FreeAtom(ctx, atom);
 }
 
@@ -1396,7 +1864,10 @@ unsafe fn replace_children_with_html(
     id: dom::NodeId,
     html: &str,
 ) {
-    let old_children = (*dom).get(id).map(|node| node.children.clone()).unwrap_or_default();
+    let old_children = (*dom)
+        .get(id)
+        .map(|node| node.children.clone())
+        .unwrap_or_default();
     for child in old_children {
         evict_subtree(ctx, &*dom, child);
         (*dom).remove(child);
@@ -1714,10 +2185,18 @@ unsafe extern "C" fn node_has_attribute(
     argc: c_int,
     argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-    if argc < 1 { return throw_type_error(ctx, "attribute name is required"); }
-    let Some(name) = read_js_string(ctx, *argv) else { return throw_type_error(ctx, "attribute name must be a string"); };
-    if !valid_attribute_name(&name) { return throw_type_error(ctx, "invalid attribute name"); }
-    let Some(id) = node_id(ctx, this_val) else { return sys::js_bool(false); };
+    if argc < 1 {
+        return throw_type_error(ctx, "attribute name is required");
+    }
+    let Some(name) = read_js_string(ctx, *argv) else {
+        return throw_type_error(ctx, "attribute name must be a string");
+    };
+    if !valid_attribute_name(&name) {
+        return throw_type_error(ctx, "invalid attribute name");
+    }
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_bool(false);
+    };
     let dom = dom_opaque(ctx);
     sys::js_bool(!dom.is_null() && (*dom).attribute(id, &name).is_some())
 }
@@ -1729,12 +2208,21 @@ unsafe extern "C" fn node_get_attribute_names(
     _argv: *mut sys::JSValue,
 ) -> sys::JSValue {
     let array = sys::JS_NewArray(ctx);
-    let Some(id) = node_id(ctx, this_val) else { return array; };
+    let Some(id) = node_id(ctx, this_val) else {
+        return array;
+    };
     let dom = dom_opaque(ctx);
-    let Some(dom::NodeData::Element { attributes, .. }) = (!dom.is_null()).then(|| (*dom).get(id).map(|node| &node.data)).flatten() else { return array; };
+    let Some(dom::NodeData::Element { attributes, .. }) = (!dom.is_null())
+        .then(|| (*dom).get(id).map(|node| &node.data))
+        .flatten()
+    else {
+        return array;
+    };
     let mut names: Vec<_> = attributes.keys().collect();
     names.sort_unstable();
-    for (index, name) in names.into_iter().enumerate() { sys::JS_SetPropertyUint32(ctx, array, index as u32, new_js_string(ctx, name)); }
+    for (index, name) in names.into_iter().enumerate() {
+        sys::JS_SetPropertyUint32(ctx, array, index as u32, new_js_string(ctx, name));
+    }
     array
 }
 
@@ -1984,7 +2472,11 @@ unsafe fn define_mutation_methods(ctx: *mut sys::JSContext, proto: sys::JSValue)
         ("appendChild", node_append_child as sys::JSCFunction, 1),
         ("getAttribute", node_get_attribute as sys::JSCFunction, 1),
         ("hasAttribute", node_has_attribute as sys::JSCFunction, 1),
-        ("getAttributeNames", node_get_attribute_names as sys::JSCFunction, 0),
+        (
+            "getAttributeNames",
+            node_get_attribute_names as sys::JSCFunction,
+            0,
+        ),
         ("setAttribute", node_set_attribute as sys::JSCFunction, 2),
         (
             "removeAttribute",
@@ -2808,10 +3300,7 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
             "querySelectorAll",
             document_query_selector_all as sys::JSCFunction,
         ),
-        (
-            "createComment",
-            document_create_comment as sys::JSCFunction,
-        ),
+        ("createComment", document_create_comment as sys::JSCFunction),
         (
             "getElementsByTagName",
             document_get_elements_by_tag_name as sys::JSCFunction,

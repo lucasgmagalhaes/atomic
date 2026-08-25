@@ -65,7 +65,10 @@ impl Sink {
     }
 
     fn is_text_node(&self, node: NodeId) -> bool {
-        matches!(self.dom.borrow().get(node).map(|n| &n.data), Some(dom::NodeData::Text(_)))
+        matches!(
+            self.dom.borrow().get(node).map(|n| &n.data),
+            Some(dom::NodeData::Text(_))
+        )
     }
 
     /// Shared logic for `append`/`append_before_sibling`: merges adjacent
@@ -118,13 +121,22 @@ impl TreeSink for Sink {
     }
 
     fn elem_name<'a>(&'a self, target: &'a NodeId) -> &'a QualName {
-        self.names.get(target).expect("elem_name called on a non-element handle")
+        self.names
+            .get(target)
+            .expect("elem_name called on a non-element handle")
     }
 
-    fn create_element(&self, name: QualName, attrs: Vec<Attribute>, _flags: ElementFlags) -> NodeId {
+    fn create_element(
+        &self,
+        name: QualName,
+        attrs: Vec<Attribute>,
+        _flags: ElementFlags,
+    ) -> NodeId {
         let id = self.dom.borrow_mut().create_element(&name.local);
         for attr in &attrs {
-            self.dom.borrow_mut().set_attribute(id, &attr.name.local, &attr.value);
+            self.dom
+                .borrow_mut()
+                .set_attribute(id, &attr.name.local, &attr.value);
         }
         self.names.insert(id, Box::new(name));
         id
@@ -156,8 +168,18 @@ impl TreeSink for Sink {
         );
     }
 
-    fn append_based_on_parent_node(&self, element: &NodeId, prev_element: &NodeId, child: NodeOrText<NodeId>) {
-        let has_parent = self.dom.borrow().get(*element).and_then(|n| n.parent).is_some();
+    fn append_based_on_parent_node(
+        &self,
+        element: &NodeId,
+        prev_element: &NodeId,
+        child: NodeOrText<NodeId>,
+    ) {
+        let has_parent = self
+            .dom
+            .borrow()
+            .get(*element)
+            .and_then(|n| n.parent)
+            .is_some();
         if has_parent {
             self.append_before_sibling(element, child);
         } else {
@@ -165,7 +187,12 @@ impl TreeSink for Sink {
         }
     }
 
-    fn append_doctype_to_document(&self, _name: StrTendril, _public_id: StrTendril, _system_id: StrTendril) {
+    fn append_doctype_to_document(
+        &self,
+        _name: StrTendril,
+        _public_id: StrTendril,
+        _system_id: StrTendril,
+    ) {
         // dom has no Doctype node - see module docs.
     }
 
@@ -187,7 +214,9 @@ impl TreeSink for Sink {
         let existing: HashSet<String> = {
             let dom = self.dom.borrow();
             match &dom.get(*target).map(|n| &n.data) {
-                Some(dom::NodeData::Element { attributes, .. }) => attributes.keys().cloned().collect(),
+                Some(dom::NodeData::Element { attributes, .. }) => {
+                    attributes.keys().cloned().collect()
+                }
                 _ => return,
             }
         };
@@ -205,7 +234,12 @@ impl TreeSink for Sink {
     }
 
     fn reparent_children(&self, node: &NodeId, new_parent: &NodeId) {
-        let children = self.dom.borrow().get(*node).map(|n| n.children.clone()).unwrap_or_default();
+        let children = self
+            .dom
+            .borrow()
+            .get(*node)
+            .map(|n| n.children.clone())
+            .unwrap_or_default();
         let mut dom = self.dom.borrow_mut();
         for child in children {
             dom.append_child(*new_parent, child);

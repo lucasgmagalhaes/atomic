@@ -35,7 +35,11 @@ unsafe fn read_js_string(ctx: *mut sys::JSContext, val: sys::JSValue) -> Option<
 // still observes, just not an `instanceof Error` — same "no real error
 // value yet" gap `Context::eval`'s own doc comment already flags.
 unsafe fn throw(ctx: *mut sys::JSContext, message: &str) -> sys::JSValue {
-    let msg = sys::JS_NewStringLen(ctx, message.as_ptr() as *const std::os::raw::c_char, message.len());
+    let msg = sys::JS_NewStringLen(
+        ctx,
+        message.as_ptr() as *const std::os::raw::c_char,
+        message.len(),
+    );
     sys::JS_Throw(ctx, msg)
 }
 
@@ -51,7 +55,11 @@ unsafe fn with_pane<R>(
     f: impl FnOnce(&mut profile::Profile) -> R,
 ) -> Result<R, String> {
     let name = pane_name(class_id, this_val).ok_or("pane object missing its name")?;
-    let panes = sys::JS_GetContextOpaque(ctx) as *mut std::collections::HashMap<String, std::rc::Rc<std::cell::RefCell<profile::Profile>>>;
+    let panes = sys::JS_GetContextOpaque(ctx)
+        as *mut std::collections::HashMap<
+            String,
+            std::rc::Rc<std::cell::RefCell<profile::Profile>>,
+        >;
     if panes.is_null() {
         return Err("automation engine not initialized".to_string());
     }
@@ -97,7 +105,10 @@ unsafe extern "C" fn pane_fill(
     argv: *mut sys::JSValue,
 ) -> sys::JSValue {
     if argc < 2 {
-        return throw(ctx, "pane.fill(selector, value) requires a selector and a value");
+        return throw(
+            ctx,
+            "pane.fill(selector, value) requires a selector and a value",
+        );
     }
     let Some(selector) = read_js_string(ctx, *argv) else {
         return throw(ctx, "pane.fill(selector, value): selector must be a string");
@@ -109,7 +120,9 @@ unsafe extern "C" fn pane_fill(
     // Only `#id` selectors and a `textContent` assignment, not a real
     // `HTMLInputElement.value` — see `profile-worker`'s own doc on the
     // `FILL` command for why.
-    match with_pane(ctx, class_id, this_val, |profile| profile.fill(&selector, &value)) {
+    match with_pane(ctx, class_id, this_val, |profile| {
+        profile.fill(&selector, &value)
+    }) {
         Ok(Ok(Ok(()))) => sys::js_undefined(),
         Ok(Ok(Err(message))) => throw(ctx, &format!("pane.fill failed: {message}")),
         Ok(Err(io_err)) => throw(ctx, &format!("pane.fill: worker unreachable: {io_err}")),
@@ -164,7 +177,13 @@ unsafe fn ensure_pane_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
     class_id
 }
 
-unsafe fn add_method(ctx: *mut sys::JSContext, proto: sys::JSValue, name: &str, func: sys::JSCFunction, length: c_int) {
+unsafe fn add_method(
+    ctx: *mut sys::JSContext,
+    proto: sys::JSValue,
+    name: &str,
+    func: sys::JSCFunction,
+    length: c_int,
+) {
     let name_c = CString::new(name).unwrap();
     let f = sys::JS_NewCFunction2(ctx, func, name_c.as_ptr(), length, sys::JS_CFUNC_GENERIC, 0);
     sys::JS_SetPropertyStr(ctx, proto, name_c.as_ptr(), f);
@@ -200,14 +219,24 @@ unsafe extern "C" fn pane_constructor(
 /// never `with_dom`/`with_storage`.
 pub(crate) unsafe fn register(
     ctx: *mut sys::JSContext,
-    panes: *mut std::collections::HashMap<String, std::rc::Rc<std::cell::RefCell<profile::Profile>>>,
+    panes: *mut std::collections::HashMap<
+        String,
+        std::rc::Rc<std::cell::RefCell<profile::Profile>>,
+    >,
 ) {
     sys::JS_SetContextOpaque(ctx, panes as *mut c_void);
     ensure_pane_class(ctx);
 
     let global = sys::JS_GetGlobalObject(ctx);
     let name_c = CString::new("pane").unwrap();
-    let f = sys::JS_NewCFunction2(ctx, pane_constructor, name_c.as_ptr(), 1, sys::JS_CFUNC_GENERIC, 0);
+    let f = sys::JS_NewCFunction2(
+        ctx,
+        pane_constructor,
+        name_c.as_ptr(),
+        1,
+        sys::JS_CFUNC_GENERIC,
+        0,
+    );
     sys::JS_SetPropertyStr(ctx, global, name_c.as_ptr(), f);
     sys::JS_FreeValue(ctx, global);
 }

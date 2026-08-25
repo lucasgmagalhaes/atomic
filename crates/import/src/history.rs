@@ -59,22 +59,33 @@ fn webkit_time_to_system_time(webkit_micros: i64) -> std::time::SystemTime {
 /// point-in-time snapshot instead, the same workaround real browser-import
 /// tools use.
 pub fn import_history(path: &Path) -> Result<Vec<HistoryEntry>, ImportError> {
-    let temp_path = std::env::temp_dir().join(format!("nimble-import-history-{}.sqlite", std::process::id()));
+    let temp_path = std::env::temp_dir().join(format!(
+        "nimble-import-history-{}.sqlite",
+        std::process::id()
+    ));
     std::fs::copy(path, &temp_path).map_err(ImportError::Io)?;
 
     let result = (|| {
         let conn = rusqlite::Connection::open(&temp_path).map_err(ImportError::Sqlite)?;
-        let mut stmt = conn.prepare("SELECT url, title, visit_count, last_visit_time FROM urls").map_err(ImportError::Sqlite)?;
+        let mut stmt = conn
+            .prepare("SELECT url, title, visit_count, last_visit_time FROM urls")
+            .map_err(ImportError::Sqlite)?;
         let rows = stmt
             .query_map([], |row| {
                 let url: String = row.get(0)?;
                 let title: String = row.get(1)?;
                 let visit_count: i64 = row.get(2)?;
                 let last_visit_time: i64 = row.get(3)?;
-                Ok(HistoryEntry { url, title, visit_count, last_visit_time: webkit_time_to_system_time(last_visit_time) })
+                Ok(HistoryEntry {
+                    url,
+                    title,
+                    visit_count,
+                    last_visit_time: webkit_time_to_system_time(last_visit_time),
+                })
             })
             .map_err(ImportError::Sqlite)?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(ImportError::Sqlite)
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(ImportError::Sqlite)
     })();
 
     let _ = std::fs::remove_file(&temp_path);

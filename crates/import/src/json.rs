@@ -77,7 +77,10 @@ impl<'a> Parser<'a> {
             self.pos += 1;
             Ok(())
         } else {
-            Err(JsonParseError(format!("expected '{}' at byte {}", b as char, self.pos)))
+            Err(JsonParseError(format!(
+                "expected '{}' at byte {}",
+                b as char, self.pos
+            )))
         }
     }
 
@@ -91,7 +94,10 @@ impl<'a> Parser<'a> {
             Some(b'f') => self.parse_literal("false", Json::Bool(false)),
             Some(b'n') => self.parse_literal("null", Json::Null),
             Some(c) if c == b'-' || c.is_ascii_digit() => self.parse_number(),
-            other => Err(JsonParseError(format!("unexpected byte {other:?} at {}", self.pos))),
+            other => Err(JsonParseError(format!(
+                "unexpected byte {other:?} at {}",
+                self.pos
+            ))),
         }
     }
 
@@ -100,7 +106,10 @@ impl<'a> Parser<'a> {
             self.pos += literal.len();
             Ok(value)
         } else {
-            Err(JsonParseError(format!("expected literal {literal} at {}", self.pos)))
+            Err(JsonParseError(format!(
+                "expected literal {literal} at {}",
+                self.pos
+            )))
         }
     }
 
@@ -109,11 +118,16 @@ impl<'a> Parser<'a> {
         if self.peek() == Some(b'-') {
             self.pos += 1;
         }
-        while self.peek().is_some_and(|b| b.is_ascii_digit() || b == b'.' || b == b'e' || b == b'E' || b == b'+' || b == b'-') {
+        while self.peek().is_some_and(|b| {
+            b.is_ascii_digit() || b == b'.' || b == b'e' || b == b'E' || b == b'+' || b == b'-'
+        }) {
             self.pos += 1;
         }
-        let text = std::str::from_utf8(&self.bytes[start..self.pos]).map_err(|e| JsonParseError(e.to_string()))?;
-        text.parse::<f64>().map(Json::Number).map_err(|e| JsonParseError(e.to_string()))
+        let text = std::str::from_utf8(&self.bytes[start..self.pos])
+            .map_err(|e| JsonParseError(e.to_string()))?;
+        text.parse::<f64>()
+            .map(Json::Number)
+            .map_err(|e| JsonParseError(e.to_string()))
     }
 
     fn parse_string(&mut self) -> Result<String, JsonParseError> {
@@ -163,8 +177,10 @@ impl<'a> Parser<'a> {
                         }
                         Some(b'u') => {
                             self.pos += 1;
-                            let hex = std::str::from_utf8(&self.bytes[self.pos..self.pos + 4]).map_err(|e| JsonParseError(e.to_string()))?;
-                            let code = u32::from_str_radix(hex, 16).map_err(|e| JsonParseError(e.to_string()))?;
+                            let hex = std::str::from_utf8(&self.bytes[self.pos..self.pos + 4])
+                                .map_err(|e| JsonParseError(e.to_string()))?;
+                            let code = u32::from_str_radix(hex, 16)
+                                .map_err(|e| JsonParseError(e.to_string()))?;
                             out.push(char::from_u32(code).unwrap_or('\u{FFFD}'));
                             self.pos += 4;
                         }
@@ -174,7 +190,8 @@ impl<'a> Parser<'a> {
                 Some(_) => {
                     // Real UTF-8 decode, not byte-at-a-time - a multi-byte
                     // character must advance by its own real length.
-                    let rest = std::str::from_utf8(&self.bytes[self.pos..]).map_err(|e| JsonParseError(e.to_string()))?;
+                    let rest = std::str::from_utf8(&self.bytes[self.pos..])
+                        .map_err(|e| JsonParseError(e.to_string()))?;
                     let ch = rest.chars().next().expect("checked non-empty above");
                     out.push(ch);
                     self.pos += ch.len_utf8();
@@ -202,7 +219,12 @@ impl<'a> Parser<'a> {
                     self.pos += 1;
                     return Ok(Json::Array(items));
                 }
-                other => return Err(JsonParseError(format!("expected ',' or ']' at {}, got {other:?}", self.pos))),
+                other => {
+                    return Err(JsonParseError(format!(
+                        "expected ',' or ']' at {}, got {other:?}",
+                        self.pos
+                    )))
+                }
             }
         }
     }
@@ -231,14 +253,22 @@ impl<'a> Parser<'a> {
                     self.pos += 1;
                     return Ok(Json::Object(map));
                 }
-                other => return Err(JsonParseError(format!("expected ',' or '}}' at {}, got {other:?}", self.pos))),
+                other => {
+                    return Err(JsonParseError(format!(
+                        "expected ',' or '}}' at {}, got {other:?}",
+                        self.pos
+                    )))
+                }
             }
         }
     }
 }
 
 pub fn parse(source: &str) -> Result<Json, JsonParseError> {
-    let mut parser = Parser { bytes: source.as_bytes(), pos: 0 };
+    let mut parser = Parser {
+        bytes: source.as_bytes(),
+        pos: 0,
+    };
     let value = parser.parse_value()?;
     parser.skip_ws();
     Ok(value)

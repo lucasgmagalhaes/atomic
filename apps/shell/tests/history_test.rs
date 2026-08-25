@@ -1,7 +1,9 @@
 use shell::history::History;
 
 fn temp_path(name: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join("nimble-shell-history-test").join(name)
+    std::env::temp_dir()
+        .join("nimble-shell-history-test")
+        .join(name)
 }
 
 #[test]
@@ -25,7 +27,11 @@ fn record_persists_to_disk_and_a_reopen_sees_it() {
 
     let reopened = History::open(&path);
     let urls: Vec<&str> = reopened.entries().map(|e| e.url.as_str()).collect();
-    assert_eq!(urls, vec!["https://example.org/", "https://example.com/"], "a reopened history should see real entries from the previous open, most recent first");
+    assert_eq!(
+        urls,
+        vec!["https://example.org/", "https://example.com/"],
+        "a reopened history should see real entries from the previous open, most recent first"
+    );
 
     let _ = std::fs::remove_file(&path);
 }

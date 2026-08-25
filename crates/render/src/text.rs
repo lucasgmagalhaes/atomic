@@ -17,7 +17,12 @@ use crate::display_list::{ClipRect, ClippedGlyph};
 /// `ClippedGlyph::opacity` (real `opacity`, see `display_list`'s own doc
 /// on its per-primitive scope).
 pub fn composite_glyphs(pixels: &mut [u8], width: u32, height: u32, glyphs: &[ClippedGlyph]) {
-    for ClippedGlyph { glyph, clip, opacity } in glyphs {
+    for ClippedGlyph {
+        glyph,
+        clip,
+        opacity,
+    } in glyphs
+    {
         if *opacity <= 0.0 {
             continue;
         }
@@ -48,7 +53,9 @@ pub fn composite_glyphs(pixels: &mut [u8], width: u32, height: u32, glyphs: &[Cl
                 if coverage == 0 {
                     continue;
                 }
-                let alpha = (coverage as f64 * glyph.color.a as f64 * opacity / 255.0).round().clamp(0.0, 255.0) as u8;
+                let alpha = (coverage as f64 * glyph.color.a as f64 * opacity / 255.0)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
                 if alpha == 0 {
                     continue;
                 }

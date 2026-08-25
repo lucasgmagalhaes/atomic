@@ -3,7 +3,12 @@ use render::Canvas2D;
 
 fn pixel(pixels: &[u8], width: u32, x: u32, y: u32) -> [u8; 4] {
     let idx = ((y * width + x) * 4) as usize;
-    [pixels[idx], pixels[idx + 1], pixels[idx + 2], pixels[idx + 3]]
+    [
+        pixels[idx],
+        pixels[idx + 1],
+        pixels[idx + 2],
+        pixels[idx + 3],
+    ]
 }
 
 #[test]
@@ -17,7 +22,12 @@ fn starts_fully_transparent() {
 #[test]
 fn fill_rect_paints_the_given_region_only() {
     let mut canvas = Canvas2D::new(8, 8);
-    canvas.set_fill_style(Color { r: 255, g: 0, b: 0, a: 255 });
+    canvas.set_fill_style(Color {
+        r: 255,
+        g: 0,
+        b: 0,
+        a: 255,
+    });
     canvas.fill_rect(2.0, 2.0, 4.0, 4.0);
 
     let pixels = canvas.get_image_data();
@@ -29,9 +39,19 @@ fn fill_rect_paints_the_given_region_only() {
 #[test]
 fn draws_accumulate_across_calls() {
     let mut canvas = Canvas2D::new(8, 8);
-    canvas.set_fill_style(Color { r: 0, g: 0, b: 255, a: 255 });
+    canvas.set_fill_style(Color {
+        r: 0,
+        g: 0,
+        b: 255,
+        a: 255,
+    });
     canvas.fill_rect(0.0, 0.0, 8.0, 8.0);
-    canvas.set_fill_style(Color { r: 255, g: 0, b: 0, a: 255 });
+    canvas.set_fill_style(Color {
+        r: 255,
+        g: 0,
+        b: 0,
+        a: 255,
+    });
     canvas.fill_rect(0.0, 0.0, 4.0, 4.0);
 
     let pixels = canvas.get_image_data();
@@ -44,7 +64,12 @@ fn draws_accumulate_across_calls() {
 #[test]
 fn clear_rect_erases_to_transparent_regardless_of_fill_style() {
     let mut canvas = Canvas2D::new(8, 8);
-    canvas.set_fill_style(Color { r: 255, g: 0, b: 0, a: 255 });
+    canvas.set_fill_style(Color {
+        r: 255,
+        g: 0,
+        b: 0,
+        a: 255,
+    });
     canvas.fill_rect(0.0, 0.0, 8.0, 8.0);
     canvas.clear_rect(2.0, 2.0, 4.0, 4.0);
 
@@ -57,9 +82,19 @@ fn clear_rect_erases_to_transparent_regardless_of_fill_style() {
 #[test]
 fn fill_style_change_only_affects_subsequent_fill_rects() {
     let mut canvas = Canvas2D::new(4, 4);
-    canvas.set_fill_style(Color { r: 0, g: 255, b: 0, a: 255 });
+    canvas.set_fill_style(Color {
+        r: 0,
+        g: 255,
+        b: 0,
+        a: 255,
+    });
     canvas.fill_rect(0.0, 0.0, 2.0, 2.0);
-    canvas.set_fill_style(Color { r: 0, g: 0, b: 255, a: 255 });
+    canvas.set_fill_style(Color {
+        r: 0,
+        g: 0,
+        b: 255,
+        a: 255,
+    });
     canvas.fill_rect(2.0, 2.0, 2.0, 2.0);
 
     let pixels = canvas.get_image_data();

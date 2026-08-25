@@ -29,11 +29,18 @@ pub struct History {
 fn parse_line(line: &str) -> Option<HistoryEntry> {
     let (secs, url) = line.split_once('\t')?;
     let secs: u64 = secs.parse().ok()?;
-    Some(HistoryEntry { url: url.to_string(), at: UNIX_EPOCH + std::time::Duration::from_secs(secs) })
+    Some(HistoryEntry {
+        url: url.to_string(),
+        at: UNIX_EPOCH + std::time::Duration::from_secs(secs),
+    })
 }
 
 fn format_line(entry: &HistoryEntry) -> String {
-    let secs = entry.at.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    let secs = entry
+        .at
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
     format!("{secs}\t{}", entry.url)
 }
 
@@ -49,8 +56,13 @@ impl History {
     /// failing the whole load.
     pub fn open(path: impl Into<PathBuf>) -> Self {
         let path = path.into();
-        let entries = std::fs::read_to_string(&path).map(|text| text.lines().filter_map(parse_line).collect()).unwrap_or_default();
-        History { entries, path: Some(path) }
+        let entries = std::fs::read_to_string(&path)
+            .map(|text| text.lines().filter_map(parse_line).collect())
+            .unwrap_or_default();
+        History {
+            entries,
+            path: Some(path),
+        }
     }
 
     /// Records `url` as just-visited. Called from every real navigation
@@ -61,12 +73,19 @@ impl History {
     /// full disk) degrades to "keep the in-memory entry, don't persist it"
     /// rather than losing the record or panicking.
     pub fn record(&mut self, url: impl Into<String>) {
-        let entry = HistoryEntry { url: url.into(), at: SystemTime::now() };
+        let entry = HistoryEntry {
+            url: url.into(),
+            at: SystemTime::now(),
+        };
         if let Some(path) = &self.path {
             if let Some(parent) = path.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
-            if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+            if let Ok(mut file) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+            {
                 let _ = writeln!(file, "{}", format_line(&entry));
             }
         }

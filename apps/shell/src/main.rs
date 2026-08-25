@@ -152,12 +152,25 @@ const SPARKLINE_MARGIN: f32 = 6.0;
 /// arrives (see `PaneMonitor::tick`'s throttling) rather than showing
 /// stale zeros.
 fn draw_resource_overlay(ui: &egui::Ui, cell_rect: egui::Rect, monitor: &PaneMonitor) {
-    let text = match (monitor.latest_cpu_percent(), monitor.latest_memory_bytes(), monitor.latest_fps()) {
-        (Some(cpu), Some(mem), Some(fps)) => format!("CPU {cpu:.0}% · RAM {:.0} MB · FPS {fps:.0}", mem as f64 / 1_000_000.0),
+    let text = match (
+        monitor.latest_cpu_percent(),
+        monitor.latest_memory_bytes(),
+        monitor.latest_fps(),
+    ) {
+        (Some(cpu), Some(mem), Some(fps)) => format!(
+            "CPU {cpu:.0}% · RAM {:.0} MB · FPS {fps:.0}",
+            mem as f64 / 1_000_000.0
+        ),
         _ => "CPU ... · RAM ... · FPS ...".to_string(),
     };
     let text_pos = cell_rect.min + egui::vec2(SPARKLINE_MARGIN, SPARKLINE_MARGIN);
-    ui.painter().text(text_pos, egui::Align2::LEFT_TOP, text, egui::FontId::monospace(11.0), egui::Color32::WHITE);
+    ui.painter().text(
+        text_pos,
+        egui::Align2::LEFT_TOP,
+        text,
+        egui::FontId::monospace(11.0),
+        egui::Color32::WHITE,
+    );
 
     let history: Vec<f64> = monitor.cpu_history().collect();
     if history.len() < 2 {
@@ -165,20 +178,28 @@ fn draw_resource_overlay(ui: &egui::Ui, cell_rect: egui::Rect, monitor: &PaneMon
     }
     let sparkline_rect = egui::Rect::from_min_size(
         text_pos + egui::vec2(0.0, 16.0),
-        egui::vec2((cell_rect.width() - SPARKLINE_MARGIN * 2.0).max(0.0), SPARKLINE_HEIGHT),
+        egui::vec2(
+            (cell_rect.width() - SPARKLINE_MARGIN * 2.0).max(0.0),
+            SPARKLINE_HEIGHT,
+        ),
     );
-    ui.painter().rect_filled(sparkline_rect, 0.0, egui::Color32::from_black_alpha(120));
+    ui.painter()
+        .rect_filled(sparkline_rect, 0.0, egui::Color32::from_black_alpha(120));
     let max = history.iter().cloned().fold(1.0_f64, f64::max); // at least 1.0 so an all-zero window doesn't divide by zero
     let points: Vec<egui::Pos2> = history
         .iter()
         .enumerate()
         .map(|(i, &cpu)| {
-            let x = sparkline_rect.min.x + (i as f32 / (history.len() - 1) as f32) * sparkline_rect.width();
+            let x = sparkline_rect.min.x
+                + (i as f32 / (history.len() - 1) as f32) * sparkline_rect.width();
             let y = sparkline_rect.max.y - (cpu / max) as f32 * sparkline_rect.height();
             egui::pos2(x, y)
         })
         .collect();
-    ui.painter().add(egui::Shape::line(points, egui::Stroke::new(1.5_f32, egui::Color32::LIGHT_GREEN)));
+    ui.painter().add(egui::Shape::line(
+        points,
+        egui::Stroke::new(1.5_f32, egui::Color32::LIGHT_GREEN),
+    ));
 }
 
 /// Spawns one pane with `id` and registers it into the active workspace -
@@ -195,11 +216,17 @@ fn spawn_pane(workspace: &mut WorkspaceManager, id: String) -> Pane {
 /// `NimbleApp::next_pane_id`) - since [`BrowserView::spawn_with_identity`]
 /// derives the shared-memory name directly from it, two live panes with
 /// the same id would fight over the same region and storage directory.
-fn spawn_pane_with_proxy(workspace: &mut WorkspaceManager, id: String, proxy: Option<&str>) -> Pane {
+fn spawn_pane_with_proxy(
+    workspace: &mut WorkspaceManager,
+    id: String,
+    proxy: Option<&str>,
+) -> Pane {
     let active = workspace.active_index();
     workspace.add_profile(active, id.clone());
     let downloads_dir = std::env::temp_dir().join("nimble-downloads").join(&id);
-    let history_path = std::env::temp_dir().join("nimble-shell-history").join(format!("{id}.txt"));
+    let history_path = std::env::temp_dir()
+        .join("nimble-shell-history")
+        .join(format!("{id}.txt"));
     let browser = BrowserView::spawn_with_identity(&id, PANE_WIDTH, PANE_HEIGHT, proxy);
     Pane {
         browser,
@@ -218,8 +245,10 @@ impl Default for NimbleApp {
         // See `automation_engine`'s own doc for why this leak is
         // deliberate: the runtime must outlive an app-lifetime engine,
         // and `NimbleApp` isn't guaranteed a stable address of its own.
-        let automation_runtime: &'static js_runtime::Runtime = Box::leak(Box::new(js_runtime::Runtime::new()));
-        let automation_engine = automation::AutomationEngine::new(automation_runtime, std::collections::HashMap::new());
+        let automation_runtime: &'static js_runtime::Runtime =
+            Box::leak(Box::new(js_runtime::Runtime::new()));
+        let automation_engine =
+            automation::AutomationEngine::new(automation_runtime, std::collections::HashMap::new());
 
         NimbleApp {
             panes,
@@ -258,7 +287,12 @@ impl NimbleApp {
     /// respawn.
     fn active_workspace_pane_indices(&self) -> Vec<usize> {
         let active_ids = self.workspace.active().profiles();
-        self.panes.iter().enumerate().filter(|(_, p)| active_ids.iter().any(|id| id == &p.id)).map(|(i, _)| i).collect()
+        self.panes
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| active_ids.iter().any(|id| id == &p.id))
+            .map(|(i, _)| i)
+            .collect()
     }
 
     /// The next `"pane-N"` id not already held by a *currently-live* pane
@@ -273,7 +307,10 @@ impl NimbleApp {
         let next = self
             .panes
             .iter()
-            .filter_map(|p| p.id.strip_prefix("pane-").and_then(|n| n.parse::<u32>().ok()))
+            .filter_map(|p| {
+                p.id.strip_prefix("pane-")
+                    .and_then(|n| n.parse::<u32>().ok())
+            })
             .max()
             .unwrap_or(0)
             + 1;
@@ -285,7 +322,10 @@ impl NimbleApp {
     /// so a user who doesn't care about naming can just hit Create.
     fn open_add_profile_modal(&mut self) {
         self.add_profile_error = None;
-        self.add_profile_form = Some(AddProfileForm { name: self.next_pane_id(), ..Default::default() });
+        self.add_profile_form = Some(AddProfileForm {
+            name: self.next_pane_id(),
+            ..Default::default()
+        });
     }
 
     /// The mockup's "Add profile modal" Create button - a real, named
@@ -301,7 +341,9 @@ impl NimbleApp {
     /// storage with an existing pane. Leaves the modal open on failure (so
     /// the user's typed values aren't lost) and closes it on success.
     fn create_profile(&mut self) {
-        let Some(form) = &self.add_profile_form else { return };
+        let Some(form) = &self.add_profile_form else {
+            return;
+        };
         let name = form.name.trim().to_string();
         if name.is_empty() {
             self.add_profile_error = Some("Name is required.".to_string());
@@ -312,7 +354,11 @@ impl NimbleApp {
             return;
         }
 
-        let proxy = if form.proxy.trim().is_empty() { None } else { Some(form.proxy.trim()) };
+        let proxy = if form.proxy.trim().is_empty() {
+            None
+        } else {
+            Some(form.proxy.trim())
+        };
         let start_url = form.start_url.trim().to_string();
         let email = form.email.trim().to_string();
         let password = form.password.clone();
@@ -375,7 +421,9 @@ impl NimbleApp {
     /// there's no `profile-worker` command to explicitly clear one back to
     /// its default).
     fn apply_fps_cap_to_all_panes(&mut self) {
-        let Some(fps) = self.performance.fps_cap else { return };
+        let Some(fps) = self.performance.fps_cap else {
+            return;
+        };
         for pane in &self.panes {
             if let Some(profile) = pane.browser.profile_handle() {
                 match profile.borrow_mut().set_fps_cap(fps) {
@@ -396,7 +444,13 @@ impl NimbleApp {
     fn apply_gpu_adapter_to_all_panes(&mut self) {
         let adapter = self.performance.gpu_adapter;
         for pane in &mut self.panes {
-            pane.browser = BrowserView::spawn_with_identity_and_gpu(&pane.id, PANE_WIDTH, PANE_HEIGHT, None, adapter);
+            pane.browser = BrowserView::spawn_with_identity_and_gpu(
+                &pane.id,
+                PANE_WIDTH,
+                PANE_HEIGHT,
+                None,
+                adapter,
+            );
             pane.monitor = PaneMonitor::new();
         }
         self.apply_visibility_throttling();
@@ -422,7 +476,8 @@ impl NimbleApp {
         let proxy = self.proxy_text.trim();
         let proxy = if proxy.is_empty() { None } else { Some(proxy) };
         let id = self.panes[self.selected].id.clone();
-        self.panes[self.selected].browser = BrowserView::spawn_with_identity(&id, PANE_WIDTH, PANE_HEIGHT, proxy);
+        self.panes[self.selected].browser =
+            BrowserView::spawn_with_identity(&id, PANE_WIDTH, PANE_HEIGHT, proxy);
         // A respawn is a new OS process (see this method's own doc) - a
         // stale monitor would diff the new process's first sample against
         // the old process's last one, reading a nonsense CPU/FPS spike.
@@ -442,7 +497,11 @@ impl NimbleApp {
     /// points genuinely need to stay different tools.
     fn run_automation_script(&mut self) {
         self.rebind_automation_engine();
-        self.automation_result = Some(self.automation_engine.run(&self.automation_script, "shell-script.js").map_err(|e| e.to_string()));
+        self.automation_result = Some(
+            self.automation_engine
+                .run(&self.automation_script, "shell-script.js")
+                .map_err(|e| e.to_string()),
+        );
     }
 
     /// Refreshes which real profiles `pane(...)` resolves to inside
@@ -453,7 +512,10 @@ impl NimbleApp {
     /// (registered callbacks, globals a script set) a fresh `AutomationEngine`
     /// would have lost.
     fn rebind_automation_engine(&mut self) {
-        let panes = automation_bridge::scoped_panes(&self.workspace, self.panes.iter().map(|p| (p.id.as_str(), &p.browser)));
+        let panes = automation_bridge::scoped_panes(
+            &self.workspace,
+            self.panes.iter().map(|p| (p.id.as_str(), &p.browser)),
+        );
         self.automation_engine.rebind(panes);
     }
 
@@ -495,7 +557,11 @@ impl NimbleApp {
             return;
         }
         let dir = vault_ui::default_vault_dir();
-        let opened = if self.vault_use_keychain { vault_ui::open_with_keychain(&dir) } else { vault_ui::open(&dir) };
+        let opened = if self.vault_use_keychain {
+            vault_ui::open_with_keychain(&dir)
+        } else {
+            vault_ui::open(&dir)
+        };
         match opened {
             Ok(vault) => {
                 self.vault = Some(vault);
@@ -528,7 +594,9 @@ impl NimbleApp {
         if key.is_empty() {
             return;
         }
-        let Some(vault) = self.vault.as_mut() else { return };
+        let Some(vault) = self.vault.as_mut() else {
+            return;
+        };
         match vault.set(&key, &self.vault_value_text) {
             Ok(()) => {
                 self.vault_key_text.clear();
@@ -546,7 +614,9 @@ impl NimbleApp {
     /// selected pane's own (now-persisted) `History`.
     fn import_chrome_history_to_selected_pane(&mut self) {
         let Some(dir) = chrome_import::default_profile_dir() else {
-            self.import_result = Some(Err("Chrome profile discovery isn't implemented on this platform yet".to_string()));
+            self.import_result = Some(Err(
+                "Chrome profile discovery isn't implemented on this platform yet".to_string(),
+            ));
             return;
         };
         match chrome_import::import_history_urls(&dir) {
@@ -556,7 +626,10 @@ impl NimbleApp {
                 for url in urls {
                     pane.history.record(url);
                 }
-                self.import_result = Some(Ok(format!("Imported {count} history entries into {}", pane.id)));
+                self.import_result = Some(Ok(format!(
+                    "Imported {count} history entries into {}",
+                    pane.id
+                )));
             }
             Err(e) => self.import_result = Some(Err(e)),
         }
@@ -568,7 +641,9 @@ impl NimbleApp {
     /// read-only (see `imported_bookmarks`'s own doc).
     fn import_chrome_bookmarks(&mut self) {
         let Some(dir) = chrome_import::default_profile_dir() else {
-            self.import_result = Some(Err("Chrome profile discovery isn't implemented on this platform yet".to_string()));
+            self.import_result = Some(Err(
+                "Chrome profile discovery isn't implemented on this platform yet".to_string(),
+            ));
             return;
         };
         match chrome_import::import_bookmarks(&dir) {
@@ -587,8 +662,13 @@ impl NimbleApp {
     /// - genuinely visible to that pane's pages on their next
     /// request/`document.cookie` read, not just logged.
     fn import_chrome_cookies_to_selected_pane(&mut self) {
-        let (Some(user_data_dir), Some(profile_dir)) = (chrome_import::default_user_data_dir(), chrome_import::default_profile_dir()) else {
-            self.import_result = Some(Err("Chrome profile discovery isn't implemented on this platform yet".to_string()));
+        let (Some(user_data_dir), Some(profile_dir)) = (
+            chrome_import::default_user_data_dir(),
+            chrome_import::default_profile_dir(),
+        ) else {
+            self.import_result = Some(Err(
+                "Chrome profile discovery isn't implemented on this platform yet".to_string(),
+            ));
             return;
         };
         let master_key = match chrome_import::recover_master_key(&user_data_dir) {
@@ -607,7 +687,10 @@ impl NimbleApp {
                         written += 1;
                     }
                 }
-                self.import_result = Some(Ok(format!("Imported {written}/{} cookies into {pane_id}", cookies.len())));
+                self.import_result = Some(Ok(format!(
+                    "Imported {written}/{} cookies into {pane_id}",
+                    cookies.len()
+                )));
             }
             Err(e) => self.import_result = Some(Err(e)),
         }
@@ -619,8 +702,13 @@ impl NimbleApp {
     /// section itself opens it) under `chrome-import:<origin>#username`/
     /// `#password` keys.
     fn import_chrome_passwords(&mut self) {
-        let (Some(user_data_dir), Some(profile_dir)) = (chrome_import::default_user_data_dir(), chrome_import::default_profile_dir()) else {
-            self.import_result = Some(Err("Chrome profile discovery isn't implemented on this platform yet".to_string()));
+        let (Some(user_data_dir), Some(profile_dir)) = (
+            chrome_import::default_user_data_dir(),
+            chrome_import::default_profile_dir(),
+        ) else {
+            self.import_result = Some(Err(
+                "Chrome profile discovery isn't implemented on this platform yet".to_string(),
+            ));
             return;
         };
         let master_key = match chrome_import::recover_master_key(&user_data_dir) {
@@ -634,25 +722,42 @@ impl NimbleApp {
             Ok(passwords) => {
                 self.ensure_vault_open();
                 let Some(vault) = self.vault.as_mut() else {
-                    self.import_result = Some(Err("vault isn't open - see the Credentials section's own error".to_string()));
+                    self.import_result = Some(Err(
+                        "vault isn't open - see the Credentials section's own error".to_string(),
+                    ));
                     return;
                 };
                 let mut written = 0usize;
                 for password in &passwords {
-                    let username_ok = vault.set(&format!("chrome-import:{}#username", password.origin_url), &password.username).is_ok();
-                    let password_ok = vault.set(&format!("chrome-import:{}#password", password.origin_url), &password.password).is_ok();
+                    let username_ok = vault
+                        .set(
+                            &format!("chrome-import:{}#username", password.origin_url),
+                            &password.username,
+                        )
+                        .is_ok();
+                    let password_ok = vault
+                        .set(
+                            &format!("chrome-import:{}#password", password.origin_url),
+                            &password.password,
+                        )
+                        .is_ok();
                     if username_ok && password_ok {
                         written += 1;
                     }
                 }
-                self.import_result = Some(Ok(format!("Imported {written}/{} passwords into the credential vault", passwords.len())));
+                self.import_result = Some(Ok(format!(
+                    "Imported {written}/{} passwords into the credential vault",
+                    passwords.len()
+                )));
             }
             Err(e) => self.import_result = Some(Err(e)),
         }
     }
 
     fn remove_credential(&mut self, key: &str) {
-        let Some(vault) = self.vault.as_mut() else { return };
+        let Some(vault) = self.vault.as_mut() else {
+            return;
+        };
         if let Err(e) = vault.remove(key) {
             self.vault_error = Some(e.to_string());
         }
@@ -670,7 +775,11 @@ impl NimbleApp {
     fn run_automation_script_for_pane(&mut self, index: usize) {
         let pane = &self.panes[index];
         let panes = std::iter::once((pane.id.as_str(), &pane.browser));
-        self.automation_result = Some(automation_bridge::run_script(&self.workspace, panes, &self.automation_script));
+        self.automation_result = Some(automation_bridge::run_script(
+            &self.workspace,
+            panes,
+            &self.automation_script,
+        ));
     }
 
     /// Removes exactly `self.panes[index]` (not just the trailing pane -
@@ -724,7 +833,8 @@ impl NimbleApp {
     /// `automation_bridge::run_script`'s "only what the active workspace
     /// lists" scoping).
     fn move_pane_to_workspace(&mut self, index: usize, workspace_index: usize) {
-        self.workspace.move_profile(&self.panes[index].id, workspace_index);
+        self.workspace
+            .move_profile(&self.panes[index].id, workspace_index);
         self.apply_visibility_throttling();
     }
 
@@ -764,7 +874,9 @@ impl NimbleApp {
     fn apply_visibility_throttling(&mut self) {
         let visible = self.active_workspace_pane_indices();
         for (index, pane) in self.panes.iter().enumerate() {
-            let Some(profile) = pane.browser.profile_handle() else { continue };
+            let Some(profile) = pane.browser.profile_handle() else {
+                continue;
+            };
             let mut profile = profile.borrow_mut();
             if visible.contains(&index) {
                 let _ = profile.resume();
@@ -884,8 +996,16 @@ impl eframe::App for NimbleApp {
         });
 
         egui::TopBottomPanel::bottom("automation").show(ctx, |ui| {
-            let pane_ids = self.panes.iter().map(|p| p.id.as_str()).collect::<Vec<_>>().join(", ");
-            ui.label(i18n::fill(i18n::t(i18n::AUTOMATION_HEADER, self.locale), &[&self.workspace.active().name, &pane_ids]));
+            let pane_ids = self
+                .panes
+                .iter()
+                .map(|p| p.id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            ui.label(i18n::fill(
+                i18n::t(i18n::AUTOMATION_HEADER, self.locale),
+                &[&self.workspace.active().name, &pane_ids],
+            ));
             ui.add(
                 egui::TextEdit::multiline(&mut self.automation_script)
                     .hint_text(i18n::t(i18n::AUTOMATION_SCRIPT_HINT, self.locale))
@@ -1087,56 +1207,77 @@ impl eframe::App for NimbleApp {
             self.settings_open = open;
         }
 
-        egui::SidePanel::right("downloads_history").resizable(true).default_width(260.0).show(ctx, |ui| {
-            let visible = self.active_workspace_pane_indices();
-            if visible.is_empty() {
-                ui.label("No panes in this workspace.");
-                return;
-            }
-            ui.heading(format!("Downloads & History — {}", self.panes[self.selected].id));
-
-            ui.horizontal(|ui| {
-                let url_box = ui.add_sized(
-                    [ui.available_width() - 70.0, ui.spacing().interact_size.y],
-                    egui::TextEdit::singleline(&mut self.download_url_text).hint_text("URL to download"),
-                );
-                let clicked = ui.button("Download").clicked();
-                if clicked || (url_box.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
-                    self.download_to_selected_pane();
+        egui::SidePanel::right("downloads_history")
+            .resizable(true)
+            .default_width(260.0)
+            .show(ctx, |ui| {
+                let visible = self.active_workspace_pane_indices();
+                if visible.is_empty() {
+                    ui.label("No panes in this workspace.");
+                    return;
                 }
-            });
+                ui.heading(format!(
+                    "Downloads & History — {}",
+                    self.panes[self.selected].id
+                ));
 
-            ui.separator();
-            ui.label("Downloads");
-            egui::ScrollArea::vertical().id_source("downloads_list").max_height(160.0).show(ui, |ui| {
-                let pane = &self.panes[self.selected];
-                if pane.downloads.is_empty() {
-                    ui.weak("No downloads yet.");
-                }
-                for record in pane.downloads.entries() {
-                    match &record.result {
-                        Ok(bytes) => {
-                            ui.label(format!("{} ({bytes} bytes) <- {}", record.dest.display(), record.url));
-                        }
-                        Err(error) => {
-                            ui.colored_label(egui::Color32::RED, format!("{} failed: {error}", record.url));
-                        }
+                ui.horizontal(|ui| {
+                    let url_box = ui.add_sized(
+                        [ui.available_width() - 70.0, ui.spacing().interact_size.y],
+                        egui::TextEdit::singleline(&mut self.download_url_text)
+                            .hint_text("URL to download"),
+                    );
+                    let clicked = ui.button("Download").clicked();
+                    if clicked
+                        || (url_box.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+                    {
+                        self.download_to_selected_pane();
                     }
-                }
-            });
+                });
 
-            ui.separator();
-            ui.label("History");
-            egui::ScrollArea::vertical().id_source("history_list").show(ui, |ui| {
-                let pane = &self.panes[self.selected];
-                if pane.history.is_empty() {
-                    ui.weak("No history yet.");
-                }
-                for entry in pane.history.entries() {
-                    ui.label(&entry.url);
-                }
+                ui.separator();
+                ui.label("Downloads");
+                egui::ScrollArea::vertical()
+                    .id_source("downloads_list")
+                    .max_height(160.0)
+                    .show(ui, |ui| {
+                        let pane = &self.panes[self.selected];
+                        if pane.downloads.is_empty() {
+                            ui.weak("No downloads yet.");
+                        }
+                        for record in pane.downloads.entries() {
+                            match &record.result {
+                                Ok(bytes) => {
+                                    ui.label(format!(
+                                        "{} ({bytes} bytes) <- {}",
+                                        record.dest.display(),
+                                        record.url
+                                    ));
+                                }
+                                Err(error) => {
+                                    ui.colored_label(
+                                        egui::Color32::RED,
+                                        format!("{} failed: {error}", record.url),
+                                    );
+                                }
+                            }
+                        }
+                    });
+
+                ui.separator();
+                ui.label("History");
+                egui::ScrollArea::vertical()
+                    .id_source("history_list")
+                    .show(ui, |ui| {
+                        let pane = &self.panes[self.selected];
+                        if pane.history.is_empty() {
+                            ui.weak("No history yet.");
+                        }
+                        for entry in pane.history.entries() {
+                            ui.label(&entry.url);
+                        }
+                    });
             });
-        });
 
         egui::CentralPanel::default().show(ctx, |ui| {
             let available = ui.available_rect_before_wrap();
@@ -1357,5 +1498,9 @@ impl eframe::App for NimbleApp {
 }
 
 fn main() -> eframe::Result<()> {
-    eframe::run_native("Nimble", eframe::NativeOptions::default(), Box::new(|_cc| Ok(Box::new(NimbleApp::default()))))
+    eframe::run_native(
+        "Nimble",
+        eframe::NativeOptions::default(),
+        Box::new(|_cc| Ok(Box::new(NimbleApp::default()))),
+    )
 }

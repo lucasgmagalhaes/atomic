@@ -72,7 +72,9 @@ unsafe extern "C" fn fetch_sync(
     };
 
     let page_origin = crate::cors::page_origin(ctx);
-    if crate::cors::is_mixed_content_blocked(page_origin.as_deref(), &url) || crate::csp::is_request_blocked(ctx, &url) {
+    if crate::cors::is_mixed_content_blocked(page_origin.as_deref(), &url)
+        || crate::csp::is_request_blocked(ctx, &url)
+    {
         set_bool(ctx, result, "ok", false);
         set_num(ctx, result, "status", 0.0);
         set_str(ctx, result, "body", "");
@@ -80,9 +82,18 @@ unsafe extern "C" fn fetch_sync(
     }
 
     let referrer = crate::cors::referrer_header(ctx, &url);
-    let headers: Vec<(&str, &str)> = referrer.as_deref().map(|r| vec![("Referer", r)]).unwrap_or_default();
+    let headers: Vec<(&str, &str)> = referrer
+        .as_deref()
+        .map(|r| vec![("Referer", r)])
+        .unwrap_or_default();
     match net::get_with_headers(&url, &headers) {
-        Ok(response) if crate::cors::is_response_allowed(page_origin.as_deref(), &url, &response.headers) => {
+        Ok(response)
+            if crate::cors::is_response_allowed(
+                page_origin.as_deref(),
+                &url,
+                &response.headers,
+            ) =>
+        {
             let body = String::from_utf8_lossy(&response.body).into_owned();
             set_bool(ctx, result, "ok", (200..300).contains(&response.status));
             set_num(ctx, result, "status", response.status as f64);

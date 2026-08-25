@@ -39,7 +39,12 @@ pub fn grid_layout(container: Rect, pane_count: usize) -> Vec<Rect> {
 fn columns(container: Rect, n: usize) -> Vec<Rect> {
     let width = container.width / n as f32;
     (0..n)
-        .map(|i| Rect { x: container.x + width * i as f32, y: container.y, width, height: container.height })
+        .map(|i| Rect {
+            x: container.x + width * i as f32,
+            y: container.y,
+            width,
+            height: container.height,
+        })
         .collect()
 }
 
@@ -49,7 +54,12 @@ fn rows_of_columns(container: Rect, rows: usize, cols: usize) -> Vec<Rect> {
     let mut out = Vec::with_capacity(rows * cols);
     for r in 0..rows {
         for c in 0..cols {
-            out.push(Rect { x: container.x + width * c as f32, y: container.y + height * r as f32, width, height });
+            out.push(Rect {
+                x: container.x + width * c as f32,
+                y: container.y + height * r as f32,
+                width,
+                height,
+            });
         }
     }
     out

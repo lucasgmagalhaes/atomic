@@ -50,9 +50,12 @@ impl CredentialVault {
 
         let key = match std::fs::read(key_path) {
             Ok(bytes) => {
-                let arr: [u8; KEY_LEN] = bytes
-                    .try_into()
-                    .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "vault key file has the wrong length"))?;
+                let arr: [u8; KEY_LEN] = bytes.try_into().map_err(|_| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "vault key file has the wrong length",
+                    )
+                })?;
                 arr
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
@@ -69,7 +72,10 @@ impl CredentialVault {
         let entries = match std::fs::read(&path) {
             Ok(blob) if !blob.is_empty() => {
                 let plaintext = decrypt(&key, &blob).map_err(|Error::DecryptionFailed| {
-                    io::Error::new(io::ErrorKind::InvalidData, "vault file failed to decrypt (wrong key or corrupted)")
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "vault file failed to decrypt (wrong key or corrupted)",
+                    )
                 })?;
                 parse_entries(&plaintext)
             }
@@ -99,9 +105,12 @@ impl CredentialVault {
         let target = keychain_target_for(&path);
 
         let key = match keychain::read_credential(&target) {
-            Ok(bytes) => bytes
-                .try_into()
-                .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "keychain credential has the wrong length for a vault key"))?,
+            Ok(bytes) => bytes.try_into().map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "keychain credential has the wrong length for a vault key",
+                )
+            })?,
             Err(e) if is_not_found(&e) => {
                 let key = generate_key();
                 keychain::write_credential(&target, &key).map_err(keychain_io_error)?;
@@ -113,7 +122,10 @@ impl CredentialVault {
         let entries = match std::fs::read(&path) {
             Ok(blob) if !blob.is_empty() => {
                 let plaintext = decrypt(&key, &blob).map_err(|Error::DecryptionFailed| {
-                    io::Error::new(io::ErrorKind::InvalidData, "vault file failed to decrypt (wrong key or corrupted)")
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "vault file failed to decrypt (wrong key or corrupted)",
+                    )
                 })?;
                 parse_entries(&plaintext)
             }
@@ -198,9 +210,15 @@ fn parse_entries(plaintext: &[u8]) -> BTreeMap<String, String> {
     let text = String::from_utf8_lossy(plaintext);
     let mut map = BTreeMap::new();
     for line in text.lines() {
-        let Some((k, v)) = line.split_once(' ') else { continue };
-        let (Ok(k), Ok(v)) = (engine.decode(k), engine.decode(v)) else { continue };
-        let (Ok(k), Ok(v)) = (String::from_utf8(k), String::from_utf8(v)) else { continue };
+        let Some((k, v)) = line.split_once(' ') else {
+            continue;
+        };
+        let (Ok(k), Ok(v)) = (engine.decode(k), engine.decode(v)) else {
+            continue;
+        };
+        let (Ok(k), Ok(v)) = (String::from_utf8(k), String::from_utf8(v)) else {
+            continue;
+        };
         map.insert(k, v);
     }
     map

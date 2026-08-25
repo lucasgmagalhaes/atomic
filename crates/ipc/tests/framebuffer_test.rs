@@ -22,7 +22,9 @@ fn reader_sees_the_published_frame() {
     let mut writer = FrameWriter::new(&name, 2, 2).unwrap();
     let reader = FrameReader::new(&name, 2, 2).unwrap();
 
-    let frame = vec![255u8, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 128, 128, 128, 255];
+    let frame = vec![
+        255u8, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 128, 128, 128, 255,
+    ];
     writer.publish(&frame);
 
     assert_eq!(reader.generation(), 1);

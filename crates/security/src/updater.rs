@@ -115,7 +115,8 @@ impl Manifest {
         }
         let mut sha256 = [0u8; 32];
         for (i, byte) in sha256.iter_mut().enumerate() {
-            *byte = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).map_err(|_| Error::MalformedManifest)?;
+            *byte = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16)
+                .map_err(|_| Error::MalformedManifest)?;
         }
         Ok(Manifest { version, sha256 })
     }
@@ -138,16 +139,29 @@ pub fn hash_file(path: impl AsRef<Path>) -> io::Result<[u8; 32]> {
 }
 
 /// Builds and signs a manifest for the artifact at `artifact_path`.
-pub fn sign_artifact(signing_key: &SigningKey, version: &str, artifact_path: impl AsRef<Path>) -> io::Result<(Manifest, Signature)> {
+pub fn sign_artifact(
+    signing_key: &SigningKey,
+    version: &str,
+    artifact_path: impl AsRef<Path>,
+) -> io::Result<(Manifest, Signature)> {
     let sha256 = hash_file(artifact_path)?;
-    let manifest = Manifest { version: version.to_string(), sha256 };
+    let manifest = Manifest {
+        version: version.to_string(),
+        sha256,
+    };
     let signature = signing_key.sign(&manifest.to_bytes());
     Ok((manifest, signature))
 }
 
 /// Verifies `manifest` was signed by the holder of `verifying_key`.
-pub fn verify_manifest(verifying_key: &VerifyingKey, manifest: &Manifest, signature: &Signature) -> Result<(), Error> {
-    verifying_key.verify(&manifest.to_bytes(), signature).map_err(|_| Error::BadSignature)
+pub fn verify_manifest(
+    verifying_key: &VerifyingKey,
+    manifest: &Manifest,
+    signature: &Signature,
+) -> Result<(), Error> {
+    verifying_key
+        .verify(&manifest.to_bytes(), signature)
+        .map_err(|_| Error::BadSignature)
 }
 
 /// The full update flow: verify `manifest`'s signature, verify

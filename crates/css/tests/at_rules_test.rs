@@ -1,7 +1,10 @@
 use css::{matching_declarations, parse_stylesheet, ElementSnapshot};
 
 fn el(tag: &str) -> ElementSnapshot {
-    ElementSnapshot { tag: tag.to_string(), ..Default::default() }
+    ElementSnapshot {
+        tag: tag.to_string(),
+        ..Default::default()
+    }
 }
 
 #[test]
@@ -25,7 +28,9 @@ fn media_max_width_rule_only_applies_at_or_below_the_breakpoint() {
 
 #[test]
 fn media_query_combines_min_and_max_with_and() {
-    let sheet = parse_stylesheet("@media (min-width: 400px) and (max-width: 800px) { div { color: green; } }");
+    let sheet = parse_stylesheet(
+        "@media (min-width: 400px) and (max-width: 800px) { div { color: green; } }",
+    );
     let chain = [el("div")];
 
     assert!(matching_declarations(&sheet, &chain, 399.0).is_empty());
@@ -43,12 +48,17 @@ fn media_type_screen_and_all_match_but_print_never_does() {
 
     assert_eq!(matching_declarations(&screen, &chain, 1024.0).len(), 1);
     assert_eq!(matching_declarations(&all, &chain, 1024.0).len(), 1);
-    assert!(matching_declarations(&print, &chain, 1024.0).is_empty(), "this engine never renders print, so @media print should never match");
+    assert!(
+        matching_declarations(&print, &chain, 1024.0).is_empty(),
+        "this engine never renders print, so @media print should never match"
+    );
 }
 
 #[test]
 fn rules_outside_any_media_block_are_unaffected() {
-    let sheet = parse_stylesheet("div { color: black; } @media (min-width: 9999px) { div { color: red; } }");
+    let sheet = parse_stylesheet(
+        "div { color: black; } @media (min-width: 9999px) { div { color: red; } }",
+    );
     let chain = [el("div")];
 
     // Only the unconditional rule should match at a narrow viewport.

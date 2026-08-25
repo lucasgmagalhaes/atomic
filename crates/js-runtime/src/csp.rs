@@ -55,7 +55,10 @@ pub(crate) unsafe fn is_request_blocked(ctx: *mut sys::JSContext, request_url: &
         return false;
     }
     let page_origin = crate::cors::page_origin(ctx);
-    (*state).csp.iter().any(|policy| !is_connect_allowed(policy, request_url, page_origin.as_deref()))
+    (*state)
+        .csp
+        .iter()
+        .any(|policy| !is_connect_allowed(policy, request_url, page_origin.as_deref()))
 }
 
 /// Whether any delivered policy declares `require-trusted-types-for
@@ -72,8 +75,11 @@ pub(crate) unsafe fn is_trusted_types_required(ctx: *mut sys::JSContext) -> bool
         return false;
     }
     (*state).csp.iter().any(|policy| {
-        find_directive(policy, "require-trusted-types-for")
-            .is_some_and(|values| values.iter().any(|value| value.eq_ignore_ascii_case("'script'")))
+        find_directive(policy, "require-trusted-types-for").is_some_and(|values| {
+            values
+                .iter()
+                .any(|value| value.eq_ignore_ascii_case("'script'"))
+        })
     })
 }
 
@@ -81,7 +87,9 @@ fn find_directive<'a>(policy: &'a str, name: &str) -> Option<Vec<&'a str>> {
     policy.split(';').find_map(|part| {
         let mut tokens = part.split_whitespace();
         let directive = tokens.next()?;
-        directive.eq_ignore_ascii_case(name).then(|| tokens.collect())
+        directive
+            .eq_ignore_ascii_case(name)
+            .then(|| tokens.collect())
     })
 }
 
@@ -90,8 +98,14 @@ fn find_directive<'a>(policy: &'a str, name: &str) -> Option<Vec<&'a str>> {
 /// A policy with no `connect-src`/`default-src` directive at all allows
 /// everything (nothing restricts it) — matches real CSP's "unspecified
 /// directive falls through to allow" default.
-pub(crate) fn is_connect_allowed(policy: &str, request_url: &str, page_origin: Option<&str>) -> bool {
-    let Some(sources) = find_directive(policy, "connect-src").or_else(|| find_directive(policy, "default-src")) else {
+pub(crate) fn is_connect_allowed(
+    policy: &str,
+    request_url: &str,
+    page_origin: Option<&str>,
+) -> bool {
+    let Some(sources) =
+        find_directive(policy, "connect-src").or_else(|| find_directive(policy, "default-src"))
+    else {
         return true;
     };
     let Ok(request) = url::Url::parse(request_url) else {
@@ -103,12 +117,16 @@ pub(crate) fn is_connect_allowed(policy: &str, request_url: &str, page_origin: O
             "none" => {}
             "*" => return true,
             "self" => {
-                if page_origin.is_some_and(|origin| origin == request.origin().ascii_serialization()) {
+                if page_origin
+                    .is_some_and(|origin| origin == request.origin().ascii_serialization())
+                {
                     return true;
                 }
             }
             other => {
-                if other == request.origin().ascii_serialization() || request.host_str() == Some(other) {
+                if other == request.origin().ascii_serialization()
+                    || request.host_str() == Some(other)
+                {
                     return true;
                 }
             }

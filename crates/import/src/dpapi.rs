@@ -29,8 +29,14 @@ pub fn unprotect(encrypted: &[u8]) -> Result<Vec<u8>, DpapiError> {
 
     // `CryptUnprotectData` writes through these output pointers - both
     // start zeroed/null so a failure path never frees or reads garbage.
-    let mut in_blob = CRYPT_INTEGER_BLOB { cbData: encrypted.len() as u32, pbData: encrypted.as_ptr() as *mut u8 };
-    let mut out_blob = CRYPT_INTEGER_BLOB { cbData: 0, pbData: std::ptr::null_mut() };
+    let mut in_blob = CRYPT_INTEGER_BLOB {
+        cbData: encrypted.len() as u32,
+        pbData: encrypted.as_ptr() as *mut u8,
+    };
+    let mut out_blob = CRYPT_INTEGER_BLOB {
+        cbData: 0,
+        pbData: std::ptr::null_mut(),
+    };
 
     // Safety: `in_blob` points at `encrypted`, alive for this whole call;
     // `out_blob` is an out-parameter the OS allocates into via `LocalAlloc`
@@ -38,12 +44,23 @@ pub fn unprotect(encrypted: &[u8]) -> Result<Vec<u8>, DpapiError> {
     // contract for this API's output blob (same "OS owns this until we
     // free it" shape as `CredReadW`'s `CREDENTIALW*` in
     // `security::keychain`).
-    let ok = unsafe { CryptUnprotectData(&mut in_blob, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), 0, &mut out_blob) };
+    let ok = unsafe {
+        CryptUnprotectData(
+            &mut in_blob,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            0,
+            &mut out_blob,
+        )
+    };
     if ok == 0 {
         return Err(DpapiError::Unwrap(std::io::Error::last_os_error()));
     }
 
-    let bytes = unsafe { std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize) }.to_vec();
+    let bytes =
+        unsafe { std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize) }.to_vec();
     unsafe {
         windows_sys::Win32::Foundation::LocalFree(out_blob.pbData as *mut core::ffi::c_void);
     }

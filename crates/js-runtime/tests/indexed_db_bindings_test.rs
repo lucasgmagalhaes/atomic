@@ -1,7 +1,10 @@
 use js_runtime::{Context, Runtime};
 
 fn temp_dir(tag: &str) -> std::path::PathBuf {
-    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     std::env::temp_dir().join(format!("nimble-idb-binding-test-{tag}-{nanos}"))
 }
 
@@ -9,13 +12,18 @@ fn temp_dir(tag: &str) -> std::path::PathBuf {
 fn without_storage_open_returns_null() {
     let rt = Runtime::new();
     let ctx = Context::with_dom(&rt, dom::Dom::new());
-    assert_eq!(ctx.eval("indexedDB.open('mydb') === null", "<test>").unwrap(), "true");
+    assert_eq!(
+        ctx.eval("indexedDB.open('mydb') === null", "<test>")
+            .unwrap(),
+        "true"
+    );
 }
 
 #[test]
 fn put_and_get_a_string() {
     let rt = Runtime::new();
-    let ctx = Context::with_storage(&rt, dom::Dom::new(), "example.com", temp_dir("string")).unwrap();
+    let ctx =
+        Context::with_storage(&rt, dom::Dom::new(), "example.com", temp_dir("string")).unwrap();
 
     let result = ctx
         .eval(
@@ -34,7 +42,8 @@ fn put_and_get_a_string() {
 #[test]
 fn get_on_a_missing_key_returns_null() {
     let rt = Runtime::new();
-    let ctx = Context::with_storage(&rt, dom::Dom::new(), "example.com", temp_dir("missing")).unwrap();
+    let ctx =
+        Context::with_storage(&rt, dom::Dom::new(), "example.com", temp_dir("missing")).unwrap();
 
     let result = ctx
         .eval(
@@ -52,7 +61,8 @@ fn get_on_a_missing_key_returns_null() {
 #[test]
 fn put_and_get_a_real_structured_object() {
     let rt = Runtime::new();
-    let ctx = Context::with_storage(&rt, dom::Dom::new(), "example.com", temp_dir("structured")).unwrap();
+    let ctx =
+        Context::with_storage(&rt, dom::Dom::new(), "example.com", temp_dir("structured")).unwrap();
 
     let result = ctx
         .eval(
@@ -72,7 +82,8 @@ fn put_and_get_a_real_structured_object() {
 #[test]
 fn delete_removes_a_key() {
     let rt = Runtime::new();
-    let ctx = Context::with_storage(&rt, dom::Dom::new(), "example.com", temp_dir("delete")).unwrap();
+    let ctx =
+        Context::with_storage(&rt, dom::Dom::new(), "example.com", temp_dir("delete")).unwrap();
 
     let result = ctx
         .eval(
@@ -92,7 +103,8 @@ fn delete_removes_a_key() {
 #[test]
 fn clear_empties_the_store() {
     let rt = Runtime::new();
-    let ctx = Context::with_storage(&rt, dom::Dom::new(), "example.com", temp_dir("clear")).unwrap();
+    let ctx =
+        Context::with_storage(&rt, dom::Dom::new(), "example.com", temp_dir("clear")).unwrap();
 
     let result = ctx
         .eval(
@@ -128,14 +140,17 @@ fn data_persists_across_separate_context_and_open_calls() {
     }
 
     let ctx2 = Context::with_storage(&rt, dom::Dom::new(), "example.com", &dir).unwrap();
-    let result = ctx2.eval("indexedDB.open('mydb').get('s', 'k')", "<test>").unwrap();
+    let result = ctx2
+        .eval("indexedDB.open('mydb').get('s', 'k')", "<test>")
+        .unwrap();
     assert_eq!(result, "persisted-value");
 }
 
 #[test]
 fn different_database_names_are_independent() {
     let rt = Runtime::new();
-    let ctx = Context::with_storage(&rt, dom::Dom::new(), "example.com", temp_dir("multi-db")).unwrap();
+    let ctx =
+        Context::with_storage(&rt, dom::Dom::new(), "example.com", temp_dir("multi-db")).unwrap();
 
     let result = ctx
         .eval(

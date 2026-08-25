@@ -39,8 +39,15 @@ const MAX_GRAPH_DEPTH: u32 = 32;
 
 enum NodeKind {
     Destination,
-    Oscillator { frequency: f64, wave_type: String, start: Option<f64>, stop: Option<f64> },
-    Gain { gain: f64 },
+    Oscillator {
+        frequency: f64,
+        wave_type: String,
+        start: Option<f64>,
+        stop: Option<f64>,
+    },
+    Gain {
+        gain: f64,
+    },
 }
 
 struct GraphState {
@@ -62,7 +69,12 @@ fn node_output(graph: &GraphState, idx: usize, t: f64, depth: u32) -> f64 {
         return 0.0;
     }
     match &graph.nodes[idx] {
-        NodeKind::Oscillator { frequency, start, stop, .. } => {
+        NodeKind::Oscillator {
+            frequency,
+            start,
+            stop,
+            ..
+        } => {
             let started = start.map(|s| t >= s).unwrap_or(true);
             let stopped = stop.map(|s| t >= s).unwrap_or(false);
             if started && !stopped {
@@ -72,10 +84,20 @@ fn node_output(graph: &GraphState, idx: usize, t: f64, depth: u32) -> f64 {
             }
         }
         NodeKind::Gain { gain } => {
-            let sum: f64 = graph.edges.iter().filter(|(_, to)| *to == idx).map(|(from, _)| node_output(graph, *from, t, depth + 1)).sum();
+            let sum: f64 = graph
+                .edges
+                .iter()
+                .filter(|(_, to)| *to == idx)
+                .map(|(from, _)| node_output(graph, *from, t, depth + 1))
+                .sum();
             sum * gain
         }
-        NodeKind::Destination => graph.edges.iter().filter(|(_, to)| *to == idx).map(|(from, _)| node_output(graph, *from, t, depth + 1)).sum(),
+        NodeKind::Destination => graph
+            .edges
+            .iter()
+            .filter(|(_, to)| *to == idx)
+            .map(|(from, _)| node_output(graph, *from, t, depth + 1))
+            .sum(),
     }
 }
 
@@ -108,21 +130,62 @@ unsafe fn set_num(ctx: *mut sys::JSContext, obj: sys::JSValue, key: &str, val: f
     sys::JS_SetPropertyStr(ctx, obj, name.as_ptr(), sys::js_float64(val));
 }
 
-unsafe fn define_method(ctx: *mut sys::JSContext, proto: sys::JSValue, name: &str, func: sys::JSCFunction, length: c_int) {
+unsafe fn define_method(
+    ctx: *mut sys::JSContext,
+    proto: sys::JSValue,
+    name: &str,
+    func: sys::JSCFunction,
+    length: c_int,
+) {
     let name_c = CString::new(name).unwrap();
     let f = sys::JS_NewCFunction2(ctx, func, name_c.as_ptr(), length, sys::JS_CFUNC_GENERIC, 0);
     sys::JS_SetPropertyStr(ctx, proto, name_c.as_ptr(), f);
 }
 
-type Getter = unsafe extern "C" fn(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue;
-type Setter = unsafe extern "C" fn(ctx: *mut sys::JSContext, this_val: sys::JSValue, val: sys::JSValue) -> sys::JSValue;
+type Getter =
+    unsafe extern "C" fn(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue;
+type Setter = unsafe extern "C" fn(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    val: sys::JSValue,
+) -> sys::JSValue;
 
-unsafe fn define_accessor(ctx: *mut sys::JSContext, proto: sys::JSValue, name: &str, getter: Getter, setter: Setter) {
+unsafe fn define_accessor(
+    ctx: *mut sys::JSContext,
+    proto: sys::JSValue,
+    name: &str,
+    getter: Getter,
+    setter: Setter,
+) {
     let name_c = CString::new(name).unwrap();
-    let g = sys::JS_NewCFunction2(ctx, std::mem::transmute::<Getter, sys::JSCFunction>(getter), name_c.as_ptr(), 0, sys::JS_CFUNC_GETTER, 0);
-    let s = sys::JS_NewCFunction2(ctx, std::mem::transmute::<Setter, sys::JSCFunction>(setter), name_c.as_ptr(), 1, sys::JS_CFUNC_SETTER, 0);
+    let g = sys::JS_NewCFunction2(
+        ctx,
+        std::mem::transmute::<Getter, sys::JSCFunction>(getter),
+        name_c.as_ptr(),
+        0,
+        sys::JS_CFUNC_GETTER,
+        0,
+    );
+    let s = sys::JS_NewCFunction2(
+        ctx,
+        std::mem::transmute::<Setter, sys::JSCFunction>(setter),
+        name_c.as_ptr(),
+        1,
+        sys::JS_CFUNC_SETTER,
+        0,
+    );
     let atom = sys::JS_NewAtom(ctx, name_c.as_ptr());
-    sys::JS_DefinePropertyGetSet(ctx, proto, atom, g, s, sys::JS_PROP_HAS_GET | sys::JS_PROP_HAS_SET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE);
+    sys::JS_DefinePropertyGetSet(
+        ctx,
+        proto,
+        atom,
+        g,
+        s,
+        sys::JS_PROP_HAS_GET
+            | sys::JS_PROP_HAS_SET
+            | sys::JS_PROP_CONFIGURABLE
+            | sys::JS_PROP_ENUMERABLE,
+    );
     sys::JS_FreeAtom(ctx, atom);
 }
 
@@ -134,7 +197,10 @@ struct AudioNodeData {
 }
 
 unsafe fn node_opaque(rt: *mut sys::JSRuntime, this_val: sys::JSValue) -> *mut AudioNodeData {
-    sys::JS_GetOpaque(this_val, crate::class_registry::class_id_for(rt, NODE_CLASS_KIND)) as *mut AudioNodeData
+    sys::JS_GetOpaque(
+        this_val,
+        crate::class_registry::class_id_for(rt, NODE_CLASS_KIND),
+    ) as *mut AudioNodeData
 }
 
 unsafe extern "C" fn node_finalizer(rt: *mut sys::JSRuntime, val: sys::JSValue) {
@@ -144,17 +210,29 @@ unsafe extern "C" fn node_finalizer(rt: *mut sys::JSRuntime, val: sys::JSValue) 
     }
 }
 
-unsafe fn make_node_object(ctx: *mut sys::JSContext, graph: Rc<RefCell<GraphState>>, index: usize) -> sys::JSValue {
+unsafe fn make_node_object(
+    ctx: *mut sys::JSContext,
+    graph: Rc<RefCell<GraphState>>,
+    index: usize,
+) -> sys::JSValue {
     let class_id = crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NODE_CLASS_KIND);
     let obj = sys::JS_NewObjectClass(ctx, class_id);
     if sys::js_is_exception(&obj) {
         return obj;
     }
-    sys::JS_SetOpaque(obj, Box::into_raw(Box::new(AudioNodeData { graph, index })) as *mut c_void);
+    sys::JS_SetOpaque(
+        obj,
+        Box::into_raw(Box::new(AudioNodeData { graph, index })) as *mut c_void,
+    );
     obj
 }
 
-unsafe extern "C" fn node_connect(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn node_connect(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
     let rt = sys::JS_GetRuntime(ctx);
     let src = node_opaque(rt, this_val);
     if src.is_null() || argc < 1 {
@@ -164,35 +242,60 @@ unsafe extern "C" fn node_connect(ctx: *mut sys::JSContext, this_val: sys::JSVal
     if dest.is_null() {
         return sys::js_undefined();
     }
-    (*src).graph.borrow_mut().edges.push(((*src).index, (*dest).index));
+    (*src)
+        .graph
+        .borrow_mut()
+        .edges
+        .push(((*src).index, (*dest).index));
     sys::js_undefined()
 }
 
-unsafe extern "C" fn node_start(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn node_start(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
     let ptr = node_opaque(sys::JS_GetRuntime(ctx), this_val);
     if ptr.is_null() {
         return sys::js_undefined();
     }
-    let when = if argc >= 1 { read_js_number(*argv).unwrap_or(0.0) } else { 0.0 };
+    let when = if argc >= 1 {
+        read_js_number(*argv).unwrap_or(0.0)
+    } else {
+        0.0
+    };
     if let NodeKind::Oscillator { start, .. } = &mut (*ptr).graph.borrow_mut().nodes[(*ptr).index] {
         *start = Some(when);
     }
     sys::js_undefined()
 }
 
-unsafe extern "C" fn node_stop(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn node_stop(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
     let ptr = node_opaque(sys::JS_GetRuntime(ctx), this_val);
     if ptr.is_null() {
         return sys::js_undefined();
     }
-    let when = if argc >= 1 { read_js_number(*argv).unwrap_or(0.0) } else { 0.0 };
+    let when = if argc >= 1 {
+        read_js_number(*argv).unwrap_or(0.0)
+    } else {
+        0.0
+    };
     if let NodeKind::Oscillator { stop, .. } = &mut (*ptr).graph.borrow_mut().nodes[(*ptr).index] {
         *stop = Some(when);
     }
     sys::js_undefined()
 }
 
-unsafe extern "C" fn frequency_get(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn frequency_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
     let ptr = node_opaque(sys::JS_GetRuntime(ctx), this_val);
     if ptr.is_null() {
         return sys::js_float64(0.0);
@@ -203,18 +306,29 @@ unsafe extern "C" fn frequency_get(ctx: *mut sys::JSContext, this_val: sys::JSVa
     }
 }
 
-unsafe extern "C" fn frequency_set(ctx: *mut sys::JSContext, this_val: sys::JSValue, val: sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn frequency_set(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    val: sys::JSValue,
+) -> sys::JSValue {
     let ptr = node_opaque(sys::JS_GetRuntime(ctx), this_val);
-    let Some(freq) = read_js_number(val) else { return sys::js_undefined() };
+    let Some(freq) = read_js_number(val) else {
+        return sys::js_undefined();
+    };
     if !ptr.is_null() {
-        if let NodeKind::Oscillator { frequency, .. } = &mut (*ptr).graph.borrow_mut().nodes[(*ptr).index] {
+        if let NodeKind::Oscillator { frequency, .. } =
+            &mut (*ptr).graph.borrow_mut().nodes[(*ptr).index]
+        {
             *frequency = freq;
         }
     }
     sys::js_undefined()
 }
 
-unsafe extern "C" fn wave_type_get(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn wave_type_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
     let ptr = node_opaque(sys::JS_GetRuntime(ctx), this_val);
     if ptr.is_null() {
         return new_js_string(ctx, "sine");
@@ -225,11 +339,19 @@ unsafe extern "C" fn wave_type_get(ctx: *mut sys::JSContext, this_val: sys::JSVa
     }
 }
 
-unsafe extern "C" fn wave_type_set(ctx: *mut sys::JSContext, this_val: sys::JSValue, val: sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn wave_type_set(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    val: sys::JSValue,
+) -> sys::JSValue {
     let ptr = node_opaque(sys::JS_GetRuntime(ctx), this_val);
-    let Some(t) = read_js_string(ctx, val) else { return sys::js_undefined() };
+    let Some(t) = read_js_string(ctx, val) else {
+        return sys::js_undefined();
+    };
     if !ptr.is_null() {
-        if let NodeKind::Oscillator { wave_type, .. } = &mut (*ptr).graph.borrow_mut().nodes[(*ptr).index] {
+        if let NodeKind::Oscillator { wave_type, .. } =
+            &mut (*ptr).graph.borrow_mut().nodes[(*ptr).index]
+        {
             *wave_type = t;
         }
     }
@@ -247,9 +369,15 @@ unsafe extern "C" fn gain_get(ctx: *mut sys::JSContext, this_val: sys::JSValue) 
     }
 }
 
-unsafe extern "C" fn gain_set(ctx: *mut sys::JSContext, this_val: sys::JSValue, val: sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn gain_set(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    val: sys::JSValue,
+) -> sys::JSValue {
     let ptr = node_opaque(sys::JS_GetRuntime(ctx), this_val);
-    let Some(g) = read_js_number(val) else { return sys::js_undefined() };
+    let Some(g) = read_js_number(val) else {
+        return sys::js_undefined();
+    };
     if !ptr.is_null() {
         if let NodeKind::Gain { gain } = &mut (*ptr).graph.borrow_mut().nodes[(*ptr).index] {
             *gain = g;
@@ -261,7 +389,13 @@ unsafe extern "C" fn gain_set(ctx: *mut sys::JSContext, this_val: sys::JSValue, 
 unsafe fn ensure_node_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
     let rt = sys::JS_GetRuntime(ctx);
     let class_name = CString::new("AudioNode").unwrap();
-    let def = sys::JSClassDef { class_name: class_name.as_ptr(), finalizer: Some(node_finalizer), gc_mark: std::ptr::null_mut(), call: std::ptr::null_mut(), exotic: std::ptr::null_mut() };
+    let def = sys::JSClassDef {
+        class_name: class_name.as_ptr(),
+        finalizer: Some(node_finalizer),
+        gc_mark: std::ptr::null_mut(),
+        call: std::ptr::null_mut(),
+        exotic: std::ptr::null_mut(),
+    };
     let class_id = crate::class_registry::ensure_class(rt, NODE_CLASS_KIND, &def);
 
     let proto = sys::JS_NewObject(ctx);
@@ -282,7 +416,10 @@ struct AudioBufferData {
 }
 
 unsafe fn buffer_opaque(rt: *mut sys::JSRuntime, this_val: sys::JSValue) -> *mut AudioBufferData {
-    sys::JS_GetOpaque(this_val, crate::class_registry::class_id_for(rt, BUFFER_CLASS_KIND)) as *mut AudioBufferData
+    sys::JS_GetOpaque(
+        this_val,
+        crate::class_registry::class_id_for(rt, BUFFER_CLASS_KIND),
+    ) as *mut AudioBufferData
 }
 
 unsafe extern "C" fn buffer_finalizer(rt: *mut sys::JSRuntime, val: sys::JSValue) {
@@ -292,13 +429,24 @@ unsafe extern "C" fn buffer_finalizer(rt: *mut sys::JSRuntime, val: sys::JSValue
     }
 }
 
-unsafe extern "C" fn get_channel_data(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn get_channel_data(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
     let ptr = buffer_opaque(sys::JS_GetRuntime(ctx), this_val);
     if ptr.is_null() {
         return sys::JS_NewArray(ctx);
     }
-    let channel = if argc >= 1 { read_js_number(*argv).unwrap_or(0.0) as usize } else { 0 };
-    let Some(samples) = (&(*ptr).channels).get(channel) else { return sys::JS_NewArray(ctx) };
+    let channel = if argc >= 1 {
+        read_js_number(*argv).unwrap_or(0.0) as usize
+    } else {
+        0
+    };
+    let Some(samples) = (&(*ptr).channels).get(channel) else {
+        return sys::JS_NewArray(ctx);
+    };
 
     let arr = sys::JS_NewArray(ctx);
     for (i, sample) in samples.iter().enumerate() {
@@ -310,7 +458,13 @@ unsafe extern "C" fn get_channel_data(ctx: *mut sys::JSContext, this_val: sys::J
 unsafe fn ensure_buffer_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
     let rt = sys::JS_GetRuntime(ctx);
     let class_name = CString::new("AudioBuffer").unwrap();
-    let def = sys::JSClassDef { class_name: class_name.as_ptr(), finalizer: Some(buffer_finalizer), gc_mark: std::ptr::null_mut(), call: std::ptr::null_mut(), exotic: std::ptr::null_mut() };
+    let def = sys::JSClassDef {
+        class_name: class_name.as_ptr(),
+        finalizer: Some(buffer_finalizer),
+        gc_mark: std::ptr::null_mut(),
+        call: std::ptr::null_mut(),
+        exotic: std::ptr::null_mut(),
+    };
     let class_id = crate::class_registry::ensure_class(rt, BUFFER_CLASS_KIND, &def);
 
     let proto = sys::JS_NewObject(ctx);
@@ -321,8 +475,14 @@ unsafe fn ensure_buffer_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
 
 // ---- OfflineAudioContext ----
 
-unsafe fn context_opaque(rt: *mut sys::JSRuntime, this_val: sys::JSValue) -> *mut Rc<RefCell<GraphState>> {
-    sys::JS_GetOpaque(this_val, crate::class_registry::class_id_for(rt, CONTEXT_CLASS_KIND)) as *mut Rc<RefCell<GraphState>>
+unsafe fn context_opaque(
+    rt: *mut sys::JSRuntime,
+    this_val: sys::JSValue,
+) -> *mut Rc<RefCell<GraphState>> {
+    sys::JS_GetOpaque(
+        this_val,
+        crate::class_registry::class_id_for(rt, CONTEXT_CLASS_KIND),
+    ) as *mut Rc<RefCell<GraphState>>
 }
 
 unsafe extern "C" fn context_finalizer(rt: *mut sys::JSRuntime, val: sys::JSValue) {
@@ -332,12 +492,35 @@ unsafe extern "C" fn context_finalizer(rt: *mut sys::JSRuntime, val: sys::JSValu
     }
 }
 
-unsafe extern "C" fn offline_audio_context_constructor(ctx: *mut sys::JSContext, new_target: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
-    let channels = if argc >= 1 { read_js_number(*argv).unwrap_or(1.0) as usize } else { 1 };
-    let length = if argc >= 2 { read_js_number(*argv.add(1)).unwrap_or(0.0) as usize } else { 0 };
-    let sample_rate = if argc >= 3 { read_js_number(*argv.add(2)).unwrap_or(44100.0) } else { 44100.0 };
+unsafe extern "C" fn offline_audio_context_constructor(
+    ctx: *mut sys::JSContext,
+    new_target: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let channels = if argc >= 1 {
+        read_js_number(*argv).unwrap_or(1.0) as usize
+    } else {
+        1
+    };
+    let length = if argc >= 2 {
+        read_js_number(*argv.add(1)).unwrap_or(0.0) as usize
+    } else {
+        0
+    };
+    let sample_rate = if argc >= 3 {
+        read_js_number(*argv.add(2)).unwrap_or(44100.0)
+    } else {
+        44100.0
+    };
 
-    let graph = Rc::new(RefCell::new(GraphState { sample_rate, length, channels: channels.max(1), nodes: vec![NodeKind::Destination], edges: Vec::new() }));
+    let graph = Rc::new(RefCell::new(GraphState {
+        sample_rate,
+        length,
+        channels: channels.max(1),
+        nodes: vec![NodeKind::Destination],
+        edges: Vec::new(),
+    }));
 
     let class_id = crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), CONTEXT_CLASS_KIND);
     let obj = sys::JS_NewObjectClass(ctx, class_id);
@@ -363,7 +546,12 @@ unsafe extern "C" fn offline_audio_context_constructor(ctx: *mut sys::JSContext,
     obj
 }
 
-unsafe extern "C" fn create_oscillator(ctx: *mut sys::JSContext, this_val: sys::JSValue, _argc: c_int, _argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn create_oscillator(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
+) -> sys::JSValue {
     let ptr = context_opaque(sys::JS_GetRuntime(ctx), this_val);
     if ptr.is_null() {
         return sys::js_undefined();
@@ -371,13 +559,23 @@ unsafe extern "C" fn create_oscillator(ctx: *mut sys::JSContext, this_val: sys::
     let graph = (*ptr).clone();
     let index = {
         let mut g = graph.borrow_mut();
-        g.nodes.push(NodeKind::Oscillator { frequency: 440.0, wave_type: "sine".to_string(), start: None, stop: None });
+        g.nodes.push(NodeKind::Oscillator {
+            frequency: 440.0,
+            wave_type: "sine".to_string(),
+            start: None,
+            stop: None,
+        });
         g.nodes.len() - 1
     };
     make_node_object(ctx, graph, index)
 }
 
-unsafe extern "C" fn create_gain(ctx: *mut sys::JSContext, this_val: sys::JSValue, _argc: c_int, _argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn create_gain(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
+) -> sys::JSValue {
     let ptr = context_opaque(sys::JS_GetRuntime(ctx), this_val);
     if ptr.is_null() {
         return sys::js_undefined();
@@ -404,7 +602,12 @@ unsafe fn resolved_promise(ctx: *mut sys::JSContext, value: sys::JSValue) -> sys
     promise
 }
 
-unsafe extern "C" fn start_rendering(ctx: *mut sys::JSContext, this_val: sys::JSValue, _argc: c_int, _argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn start_rendering(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
+) -> sys::JSValue {
     let rt = sys::JS_GetRuntime(ctx);
     let ptr = context_opaque(rt, this_val);
     if ptr.is_null() {
@@ -422,13 +625,19 @@ unsafe extern "C" fn start_rendering(ctx: *mut sys::JSContext, this_val: sys::JS
     let sample_rate = graph.sample_rate;
     drop(graph);
 
-    let buffer_obj = sys::JS_NewObjectClass(ctx, crate::class_registry::class_id_for(rt, BUFFER_CLASS_KIND));
+    let buffer_obj = sys::JS_NewObjectClass(
+        ctx,
+        crate::class_registry::class_id_for(rt, BUFFER_CLASS_KIND),
+    );
     if sys::js_is_exception(&buffer_obj) {
         return buffer_obj;
     }
     let numchannels = channels.len();
     let length = channels.first().map(|c| c.len()).unwrap_or(0);
-    sys::JS_SetOpaque(buffer_obj, Box::into_raw(Box::new(AudioBufferData { channels })) as *mut c_void);
+    sys::JS_SetOpaque(
+        buffer_obj,
+        Box::into_raw(Box::new(AudioBufferData { channels })) as *mut c_void,
+    );
     set_num(ctx, buffer_obj, "sampleRate", sample_rate);
     set_num(ctx, buffer_obj, "length", length as f64);
     set_num(ctx, buffer_obj, "numberOfChannels", numchannels as f64);
@@ -443,7 +652,13 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
 
     let rt = sys::JS_GetRuntime(ctx);
     let class_name = CString::new("OfflineAudioContext").unwrap();
-    let def = sys::JSClassDef { class_name: class_name.as_ptr(), finalizer: Some(context_finalizer), gc_mark: std::ptr::null_mut(), call: std::ptr::null_mut(), exotic: std::ptr::null_mut() };
+    let def = sys::JSClassDef {
+        class_name: class_name.as_ptr(),
+        finalizer: Some(context_finalizer),
+        gc_mark: std::ptr::null_mut(),
+        call: std::ptr::null_mut(),
+        exotic: std::ptr::null_mut(),
+    };
     let class_id = crate::class_registry::ensure_class(rt, CONTEXT_CLASS_KIND, &def);
 
     let proto = sys::JS_NewObject(ctx);
@@ -453,7 +668,14 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     sys::JS_SetClassProto(ctx, class_id, proto);
 
     let ctor_name = CString::new("OfflineAudioContext").unwrap();
-    let ctor = sys::JS_NewCFunction2(ctx, offline_audio_context_constructor, ctor_name.as_ptr(), 3, sys::JS_CFUNC_CONSTRUCTOR_OR_FUNC, 0);
+    let ctor = sys::JS_NewCFunction2(
+        ctx,
+        offline_audio_context_constructor,
+        ctor_name.as_ptr(),
+        3,
+        sys::JS_CFUNC_CONSTRUCTOR_OR_FUNC,
+        0,
+    );
     let proto_name = CString::new("prototype").unwrap();
     sys::JS_SetPropertyStr(ctx, ctor, proto_name.as_ptr(), sys::JS_DupValue(ctx, proto));
 

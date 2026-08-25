@@ -1,7 +1,10 @@
 use security::updater::{self, Manifest};
 
 fn temp_file(tag: &str, contents: &[u8]) -> std::path::PathBuf {
-    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     let path = std::env::temp_dir().join(format!("nimble-updater-test-{tag}-{nanos}.bin"));
     std::fs::write(&path, contents).unwrap();
     path
@@ -28,7 +31,10 @@ fn hash_file_matches_a_known_sha256() {
 
 #[test]
 fn manifest_round_trips_through_bytes() {
-    let manifest = Manifest { version: "1.2.3".to_string(), sha256: [7u8; 32] };
+    let manifest = Manifest {
+        version: "1.2.3".to_string(),
+        sha256: [7u8; 32],
+    };
     let bytes = manifest.to_bytes();
     let parsed = Manifest::parse(&bytes).unwrap();
     assert_eq!(parsed, manifest);
@@ -40,7 +46,10 @@ fn full_update_flow_verifies_and_swaps_the_file() {
     let artifact = temp_file("artifact", b"new browser binary bytes");
     let install = std::env::temp_dir().join(format!(
         "nimble-updater-test-install-{}.bin",
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
     ));
     std::fs::write(&install, b"old browser binary bytes").unwrap();
 
@@ -48,8 +57,14 @@ fn full_update_flow_verifies_and_swaps_the_file() {
 
     updater::apply_update(&verifying_key, &manifest, &signature, &artifact, &install).unwrap();
 
-    assert_eq!(std::fs::read(&install).unwrap(), b"new browser binary bytes");
-    assert!(!artifact.exists(), "rename should have moved the artifact, not copied it");
+    assert_eq!(
+        std::fs::read(&install).unwrap(),
+        b"new browser binary bytes"
+    );
+    assert!(
+        !artifact.exists(),
+        "rename should have moved the artifact, not copied it"
+    );
 }
 
 #[test]
@@ -62,9 +77,19 @@ fn apply_update_rejects_a_signature_from_the_wrong_key() {
 
     let (manifest, signature) = updater::sign_artifact(&signing_key, "1.0.0", &artifact).unwrap();
 
-    let result = updater::apply_update(&wrong_verifying_key, &manifest, &signature, &artifact, &install);
+    let result = updater::apply_update(
+        &wrong_verifying_key,
+        &manifest,
+        &signature,
+        &artifact,
+        &install,
+    );
     assert!(matches!(result, Err(updater::Error::BadSignature)));
-    assert_eq!(std::fs::read(&install).unwrap(), b"old", "install path should be untouched on a failed verify");
+    assert_eq!(
+        std::fs::read(&install).unwrap(),
+        b"old",
+        "install path should be untouched on a failed verify"
+    );
 }
 
 #[test]
@@ -73,7 +98,8 @@ fn apply_update_rejects_a_tampered_manifest() {
     let artifact = temp_file("tamper-artifact", b"payload");
     let install = temp_file("tamper-install", b"old");
 
-    let (mut manifest, signature) = updater::sign_artifact(&signing_key, "1.0.0", &artifact).unwrap();
+    let (mut manifest, signature) =
+        updater::sign_artifact(&signing_key, "1.0.0", &artifact).unwrap();
     manifest.version = "9.9.9".to_string();
 
     let result = updater::apply_update(&verifying_key, &manifest, &signature, &artifact, &install);
@@ -94,12 +120,25 @@ fn apply_update_rejects_an_artifact_that_does_not_match_the_signed_hash() {
 
     let result = updater::apply_update(&verifying_key, &manifest, &signature, &artifact, &install);
     assert!(matches!(result, Err(updater::Error::HashMismatch)));
-    assert_eq!(std::fs::read(&install).unwrap(), b"old", "install path should be untouched on a hash mismatch");
+    assert_eq!(
+        std::fs::read(&install).unwrap(),
+        b"old",
+        "install path should be untouched on a hash mismatch"
+    );
 }
 
 #[test]
 fn parse_rejects_malformed_manifests() {
-    assert!(matches!(Manifest::parse(b"only-one-line\n"), Err(updater::Error::MalformedManifest)));
-    assert!(matches!(Manifest::parse(b"1.0.0\nnothex\n"), Err(updater::Error::MalformedManifest)));
-    assert!(matches!(Manifest::parse(b""), Err(updater::Error::MalformedManifest)));
+    assert!(matches!(
+        Manifest::parse(b"only-one-line\n"),
+        Err(updater::Error::MalformedManifest)
+    ));
+    assert!(matches!(
+        Manifest::parse(b"1.0.0\nnothex\n"),
+        Err(updater::Error::MalformedManifest)
+    ));
+    assert!(matches!(
+        Manifest::parse(b""),
+        Err(updater::Error::MalformedManifest)
+    ));
 }

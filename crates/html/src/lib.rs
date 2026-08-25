@@ -2,8 +2,8 @@ pub mod sink;
 
 use dom::{Dom, NodeId};
 use html5ever::driver::ParseOpts;
-use html5ever::tendril::TendrilSink;
 use html5ever::parse_document;
+use html5ever::tendril::TendrilSink;
 
 pub use sink::Sink;
 
@@ -30,7 +30,12 @@ pub fn parse_to_html_element(html: &str) -> (Dom, dom::NodeId) {
     let root = dom.root();
     let html_el = dom
         .get(root)
-        .and_then(|n| n.children.iter().find(|&&c| is_element_named(&dom, c, "html")).copied())
+        .and_then(|n| {
+            n.children
+                .iter()
+                .find(|&&c| is_element_named(&dom, c, "html"))
+                .copied()
+        })
         .unwrap_or(root);
     (dom, html_el)
 }
@@ -54,12 +59,18 @@ pub fn parse_to_html_element(html: &str) -> (Dom, dom::NodeId) {
 pub fn parse_fragment(html: &str) -> (Dom, Vec<NodeId>) {
     let dom = parse(html);
     let root = dom.root();
-    let html_el = dom
-        .get(root)
-        .and_then(|n| n.children.iter().find(|&&c| is_element_named(&dom, c, "html")).copied());
-    let body_el = html_el
-        .and_then(|html_el| dom.get(html_el))
-        .and_then(|n| n.children.iter().find(|&&c| is_element_named(&dom, c, "body")).copied());
+    let html_el = dom.get(root).and_then(|n| {
+        n.children
+            .iter()
+            .find(|&&c| is_element_named(&dom, c, "html"))
+            .copied()
+    });
+    let body_el = html_el.and_then(|html_el| dom.get(html_el)).and_then(|n| {
+        n.children
+            .iter()
+            .find(|&&c| is_element_named(&dom, c, "body"))
+            .copied()
+    });
     let children = body_el
         .or(html_el)
         .or(Some(root))

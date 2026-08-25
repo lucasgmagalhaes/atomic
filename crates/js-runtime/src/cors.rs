@@ -34,7 +34,11 @@ pub(crate) unsafe fn page_origin(ctx: *mut sys::JSContext) -> Option<String> {
 /// An unparseable `request_url` allows too, since malformed-URL handling
 /// already happens earlier in the fetch path (a request that never made it
 /// this far can't be a CORS bypass).
-pub(crate) fn is_response_allowed(page_origin: Option<&str>, request_url: &str, response_headers: &[(String, String)]) -> bool {
+pub(crate) fn is_response_allowed(
+    page_origin: Option<&str>,
+    request_url: &str,
+    response_headers: &[(String, String)],
+) -> bool {
     let Some(page_origin) = page_origin else {
         return true;
     };
@@ -75,7 +79,9 @@ pub(crate) fn is_mixed_content_blocked(page_origin: Option<&str>, request_url: &
     if !page_origin.starts_with("https://") {
         return false;
     }
-    url::Url::parse(request_url).map(|u| u.scheme() == "http").unwrap_or(false)
+    url::Url::parse(request_url)
+        .map(|u| u.scheme() == "http")
+        .unwrap_or(false)
 }
 
 /// The `Referer` header value a real browser's default `strict-origin-
@@ -91,7 +97,10 @@ pub(crate) fn is_mixed_content_blocked(page_origin: Option<&str>, request_url: &
 /// name="referrer">`, a `Referrer-Policy` response header, or a `fetch()`
 /// `referrerPolicy` option) — this engine has none of those wired in
 /// anywhere, so the browser default is the only policy that exists here.
-pub(crate) unsafe fn referrer_header(ctx: *mut sys::JSContext, request_url: &str) -> Option<String> {
+pub(crate) unsafe fn referrer_header(
+    ctx: *mut sys::JSContext,
+    request_url: &str,
+) -> Option<String> {
     let page_url = crate::location::current_url(ctx)?;
     if !page_url.origin().is_tuple() {
         // Opaque origin (a `data:`/`blob:` page, or any URL the `url`

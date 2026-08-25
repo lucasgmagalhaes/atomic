@@ -107,7 +107,9 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 }
 
 fn now_civil() -> Civil {
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
     let total_minutes = now.as_secs() as i64 / 60;
     let days = total_minutes.div_euclid(24 * 60);
     let minute_of_day = total_minutes.rem_euclid(24 * 60);
@@ -174,7 +176,8 @@ unsafe extern "C" fn cron_fn(
         Ok(s) => s,
         Err(e) => {
             let msg = e.to_string();
-            let js_msg = sys::JS_NewStringLen(ctx, msg.as_ptr() as *const std::os::raw::c_char, msg.len());
+            let js_msg =
+                sys::JS_NewStringLen(ctx, msg.as_ptr() as *const std::os::raw::c_char, msg.len());
             return sys::JS_Throw(ctx, js_msg);
         }
     };

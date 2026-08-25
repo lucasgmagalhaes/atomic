@@ -57,7 +57,9 @@ impl PaneMonitor {
             return;
         }
 
-        let Ok(curr) = process_stats::sample(pid) else { return };
+        let Ok(curr) = process_stats::sample(pid) else {
+            return;
+        };
         self.latest_memory_bytes = curr.memory_bytes;
 
         if let Some(prev) = self.last_stats {

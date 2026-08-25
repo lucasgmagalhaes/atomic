@@ -13,7 +13,10 @@ fn restrictive_policy_blocks_clipboard_before_accessing_the_os_clipboard() {
         .unwrap();
     context.run_pending_timers();
 
-    assert_eq!(context.eval("write_error", "<test>").unwrap(), "clipboard write is blocked by Permissions Policy");
+    assert_eq!(
+        context.eval("write_error", "<test>").unwrap(),
+        "clipboard write is blocked by Permissions Policy"
+    );
 }
 
 #[test]
@@ -30,8 +33,13 @@ fn restrictive_policy_blocks_notifications_and_does_not_grant_permission() {
     context.run_pending_timers();
 
     assert_eq!(context.eval("result", "<test>").unwrap(), "denied");
-    assert_eq!(context.eval("Notification.permission", "<test>").unwrap(), "default");
-    assert!(context.eval("new Notification('blocked')", "<test>").is_err());
+    assert_eq!(
+        context.eval("Notification.permission", "<test>").unwrap(),
+        "default"
+    );
+    assert!(context
+        .eval("new Notification('blocked')", "<test>")
+        .is_err());
 }
 
 #[test]
@@ -48,5 +56,10 @@ fn self_and_wildcard_allow_the_top_level_document_capabilities() {
     context.run_pending_timers();
 
     assert_eq!(context.eval("result", "<test>").unwrap(), "granted");
-    assert_eq!(context.eval("new Notification('allowed').title", "<test>").unwrap(), "allowed");
+    assert_eq!(
+        context
+            .eval("new Notification('allowed').title", "<test>")
+            .unwrap(),
+        "allowed"
+    );
 }

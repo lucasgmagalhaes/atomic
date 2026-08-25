@@ -54,7 +54,9 @@ impl std::error::Error for Error {}
 /// `100 / core_count`, matching how a real resource monitor scales CPU
 /// time against wall-clock time across multiple cores.
 pub fn logical_core_count() -> usize {
-    std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
 }
 
 /// Percentage of one logical CPU's worth of time `curr` consumed more
@@ -63,7 +65,12 @@ pub fn logical_core_count() -> usize {
 /// not `100 * core_count`). Returns `0.0` for a zero or negative elapsed
 /// duration (can't divide by it) rather than panicking or returning
 /// infinity/NaN.
-pub fn cpu_percent(prev: &ProcessStats, curr: &ProcessStats, wall_elapsed: Duration, core_count: usize) -> f64 {
+pub fn cpu_percent(
+    prev: &ProcessStats,
+    curr: &ProcessStats,
+    wall_elapsed: Duration,
+    core_count: usize,
+) -> f64 {
     if wall_elapsed.is_zero() || core_count == 0 {
         return 0.0;
     }
@@ -75,8 +82,12 @@ pub fn cpu_percent(prev: &ProcessStats, curr: &ProcessStats, wall_elapsed: Durat
 #[cfg(windows)]
 pub fn sample(pid: u32) -> Result<ProcessStats, Error> {
     use windows_sys::Win32::Foundation::{CloseHandle, FILETIME};
-    use windows_sys::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
-    use windows_sys::Win32::System::Threading::{GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ};
+    use windows_sys::Win32::System::ProcessStatus::{
+        GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+    };
+    use windows_sys::Win32::System::Threading::{
+        GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
+    };
 
     unsafe {
         let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, 0, pid);
@@ -90,7 +101,8 @@ pub fn sample(pid: u32) -> Result<ProcessStats, Error> {
             std::mem::zeroed::<FILETIME>(),
             std::mem::zeroed::<FILETIME>(),
         );
-        let times_ok = GetProcessTimes(handle, &mut creation, &mut exit, &mut kernel, &mut user) != 0;
+        let times_ok =
+            GetProcessTimes(handle, &mut creation, &mut exit, &mut kernel, &mut user) != 0;
         if !times_ok {
             let err = windows_sys::Win32::Foundation::GetLastError();
             CloseHandle(handle);
@@ -100,7 +112,11 @@ pub fn sample(pid: u32) -> Result<ProcessStats, Error> {
         let mut counters = std::mem::zeroed::<PROCESS_MEMORY_COUNTERS>();
         counters.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
         let mem_ok = GetProcessMemoryInfo(handle, &mut counters, counters.cb) != 0;
-        let mem_err = if !mem_ok { Some(windows_sys::Win32::Foundation::GetLastError()) } else { None };
+        let mem_err = if !mem_ok {
+            Some(windows_sys::Win32::Foundation::GetLastError())
+        } else {
+            None
+        };
 
         CloseHandle(handle);
 

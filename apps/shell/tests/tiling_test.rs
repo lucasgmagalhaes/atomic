@@ -1,6 +1,11 @@
 use shell::tiling::{grid_layout, Rect};
 
-const CONTAINER: Rect = Rect { x: 0.0, y: 0.0, width: 1200.0, height: 800.0 };
+const CONTAINER: Rect = Rect {
+    x: 0.0,
+    y: 0.0,
+    width: 1200.0,
+    height: 800.0,
+};
 
 fn assert_tiles_container(cells: &[Rect], container: Rect) {
     assert!(!cells.is_empty());
@@ -9,7 +14,10 @@ fn assert_tiles_container(cells: &[Rect], container: Rect) {
     // check than asserting every edge coordinate).
     let total_area: f32 = cells.iter().map(|c| c.width * c.height).sum();
     let container_area = container.width * container.height;
-    assert!((total_area - container_area).abs() < 0.01, "cells should exactly tile the container area");
+    assert!(
+        (total_area - container_area).abs() < 0.01,
+        "cells should exactly tile the container area"
+    );
 
     for cell in cells {
         assert!(cell.x >= container.x - 0.01);

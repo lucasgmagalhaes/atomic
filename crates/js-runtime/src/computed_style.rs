@@ -64,7 +64,9 @@ unsafe extern "C" fn get_property_value(
     if c_str.is_null() {
         return empty_string(ctx);
     }
-    let name = std::ffi::CStr::from_ptr(c_str).to_string_lossy().into_owned();
+    let name = std::ffi::CStr::from_ptr(c_str)
+        .to_string_lossy()
+        .into_owned();
     sys::JS_FreeCString(ctx, c_str);
     let camel = CString::new(kebab_to_camel(&name)).unwrap_or_default();
     let value = sys::JS_GetPropertyStr(ctx, this_val, camel.as_ptr());
@@ -99,7 +101,11 @@ unsafe extern "C" fn get_computed_style(
         for name in names {
             let value = &properties[name];
             let camel = CString::new(kebab_to_camel(name)).unwrap_or_default();
-            let js_value = sys::JS_NewStringLen(ctx, value.as_ptr() as *const std::os::raw::c_char, value.len());
+            let js_value = sys::JS_NewStringLen(
+                ctx,
+                value.as_ptr() as *const std::os::raw::c_char,
+                value.len(),
+            );
             sys::JS_SetPropertyStr(ctx, object, camel.as_ptr(), js_value);
             css_text.push_str(name);
             css_text.push_str(": ");
@@ -108,14 +114,25 @@ unsafe extern "C" fn get_computed_style(
         }
     }
     let css_text_key = CString::new("cssText").unwrap();
-    let css_text_value = sys::JS_NewStringLen(ctx, css_text.as_ptr() as *const std::os::raw::c_char, css_text.len());
+    let css_text_value = sys::JS_NewStringLen(
+        ctx,
+        css_text.as_ptr() as *const std::os::raw::c_char,
+        css_text.len(),
+    );
     sys::JS_SetPropertyStr(ctx, object, css_text_key.as_ptr(), css_text_value);
     let method_name = CString::new("getPropertyValue").unwrap();
     sys::JS_SetPropertyStr(
         ctx,
         object,
         method_name.as_ptr(),
-        sys::JS_NewCFunction2(ctx, get_property_value, method_name.as_ptr(), 1, sys::JS_CFUNC_GENERIC, 0),
+        sys::JS_NewCFunction2(
+            ctx,
+            get_property_value,
+            method_name.as_ptr(),
+            1,
+            sys::JS_CFUNC_GENERIC,
+            0,
+        ),
     );
     object
 }
@@ -123,7 +140,14 @@ unsafe extern "C" fn get_computed_style(
 pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     let global = sys::JS_GetGlobalObject(ctx);
     let name = CString::new("getComputedStyle").unwrap();
-    let function = sys::JS_NewCFunction2(ctx, get_computed_style, name.as_ptr(), 1, sys::JS_CFUNC_GENERIC, 0);
+    let function = sys::JS_NewCFunction2(
+        ctx,
+        get_computed_style,
+        name.as_ptr(),
+        1,
+        sys::JS_CFUNC_GENERIC,
+        0,
+    );
     sys::JS_SetPropertyStr(ctx, global, name.as_ptr(), function);
     sys::JS_FreeValue(ctx, global);
 }

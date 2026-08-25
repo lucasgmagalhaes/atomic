@@ -82,7 +82,12 @@ unsafe fn entry_field(ctx: *mut sys::JSContext, entry: sys::JSValue, name: &str)
     sys::JS_GetPropertyStr(ctx, entry, cname.as_ptr())
 }
 
-unsafe fn make_entry(ctx: *mut sys::JSContext, state: sys::JSValue, url: sys::JSValue, title: &str) -> sys::JSValue {
+unsafe fn make_entry(
+    ctx: *mut sys::JSContext,
+    state: sys::JSValue,
+    url: sys::JSValue,
+    title: &str,
+) -> sys::JSValue {
     let entry = sys::JS_NewObject(ctx);
     let state_name = CString::new("state").unwrap();
     sys::JS_SetPropertyStr(ctx, entry, state_name.as_ptr(), state);
@@ -132,7 +137,11 @@ unsafe fn read_state_args(
     } else {
         sys::js_null()
     };
-    let url_arg = if argc >= 3 { read_string(ctx, *argv.add(2)) } else { None };
+    let url_arg = if argc >= 3 {
+        read_string(ctx, *argv.add(2))
+    } else {
+        None
+    };
     (state_arg, url_arg)
 }
 
@@ -152,12 +161,20 @@ unsafe extern "C" fn push_state(
     let current = index(ctx, this);
     let (state_arg, url_arg) = read_state_args(ctx, argc, argv);
     let resolved = resolve_url(ctx, url_arg);
-    let url_value = resolved.as_deref().map(|u| new_string(ctx, u)).unwrap_or_else(sys::js_null);
+    let url_value = resolved
+        .as_deref()
+        .map(|u| new_string(ctx, u))
+        .unwrap_or_else(sys::js_null);
     let entry = make_entry(ctx, state_arg, url_value, "");
 
     let new_list = sys::JS_NewArray(ctx);
     for i in 0..=current {
-        sys::JS_SetPropertyUint32(ctx, new_list, i as u32, sys::JS_GetPropertyUint32(ctx, list, i as u32));
+        sys::JS_SetPropertyUint32(
+            ctx,
+            new_list,
+            i as u32,
+            sys::JS_GetPropertyUint32(ctx, list, i as u32),
+        );
     }
     sys::JS_FreeValue(ctx, list);
     let new_index = current + 1;
@@ -177,7 +194,10 @@ unsafe extern "C" fn replace_state(
     let current = index(ctx, this);
     let (state_arg, url_arg) = read_state_args(ctx, argc, argv);
     let resolved = resolve_url(ctx, url_arg);
-    let url_value = resolved.as_deref().map(|u| new_string(ctx, u)).unwrap_or_else(sys::js_null);
+    let url_value = resolved
+        .as_deref()
+        .map(|u| new_string(ctx, u))
+        .unwrap_or_else(sys::js_null);
     let entry = make_entry(ctx, state_arg, url_value, "");
 
     let list = entries(ctx, this);

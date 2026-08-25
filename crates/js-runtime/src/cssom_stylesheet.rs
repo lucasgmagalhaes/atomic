@@ -85,7 +85,8 @@ unsafe extern "C" fn stylesheet_constructor(
     _argc: c_int,
     _argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-    let class_id = crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), STYLESHEET_CLASS_KIND);
+    let class_id =
+        crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), STYLESHEET_CLASS_KIND);
     let obj = sys::JS_NewObjectClass(ctx, class_id);
     if sys::js_is_exception(&obj) {
         return obj;
@@ -98,7 +99,10 @@ unsafe extern "C" fn stylesheet_constructor(
         }
         sys::JS_FreeValue(ctx, proto);
     }
-    sys::JS_SetOpaque(obj, Box::into_raw(Box::<Vec<String>>::default()) as *mut std::os::raw::c_void);
+    sys::JS_SetOpaque(
+        obj,
+        Box::into_raw(Box::<Vec<String>>::default()) as *mut std::os::raw::c_void,
+    );
     obj
 }
 
@@ -110,7 +114,12 @@ fn is_single_valid_rule(text: &str) -> bool {
     !text.trim().is_empty() && css::parse_stylesheet(text).rules.len() == 1
 }
 
-unsafe extern "C" fn insert_rule(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn insert_rule(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
     let ptr = sheet_opaque(sys::JS_GetRuntime(ctx), this_val);
     if ptr.is_null() {
         return throw_type_error(ctx, "invalid CSSStyleSheet receiver");
@@ -141,13 +150,22 @@ unsafe extern "C" fn insert_rule(ctx: *mut sys::JSContext, this_val: sys::JSValu
     sys::js_float64(index as f64)
 }
 
-unsafe extern "C" fn delete_rule(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn delete_rule(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
     let ptr = sheet_opaque(sys::JS_GetRuntime(ctx), this_val);
     if ptr.is_null() {
         return throw_type_error(ctx, "invalid CSSStyleSheet receiver");
     }
     let rules = &mut *ptr;
-    let index = if argc >= 1 { read_js_number(*argv).unwrap_or(-1.0) as i64 } else { -1 };
+    let index = if argc >= 1 {
+        read_js_number(*argv).unwrap_or(-1.0) as i64
+    } else {
+        -1
+    };
     if index < 0 || index as usize >= rules.len() {
         return throw_type_error(ctx, "rule index out of range");
     }
@@ -155,7 +173,10 @@ unsafe extern "C" fn delete_rule(ctx: *mut sys::JSContext, this_val: sys::JSValu
     sys::js_undefined()
 }
 
-unsafe extern "C" fn css_rules_get(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn css_rules_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
     let array = sys::JS_NewArray(ctx);
     let ptr = sheet_opaque(sys::JS_GetRuntime(ctx), this_val);
     if ptr.is_null() {
@@ -170,16 +191,42 @@ unsafe extern "C" fn css_rules_get(ctx: *mut sys::JSContext, this_val: sys::JSVa
     array
 }
 
-unsafe fn define_getter(ctx: *mut sys::JSContext, proto: sys::JSValue, name: &str, getter: unsafe extern "C" fn(*mut sys::JSContext, sys::JSValue) -> sys::JSValue) {
+unsafe fn define_getter(
+    ctx: *mut sys::JSContext,
+    proto: sys::JSValue,
+    name: &str,
+    getter: unsafe extern "C" fn(*mut sys::JSContext, sys::JSValue) -> sys::JSValue,
+) {
     let name_c = CString::new(name).unwrap();
-    type Getter = unsafe extern "C" fn(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue;
-    let f = sys::JS_NewCFunction2(ctx, std::mem::transmute::<Getter, sys::JSCFunction>(getter), name_c.as_ptr(), 0, sys::JS_CFUNC_GETTER, 0);
+    type Getter =
+        unsafe extern "C" fn(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue;
+    let f = sys::JS_NewCFunction2(
+        ctx,
+        std::mem::transmute::<Getter, sys::JSCFunction>(getter),
+        name_c.as_ptr(),
+        0,
+        sys::JS_CFUNC_GETTER,
+        0,
+    );
     let atom = sys::JS_NewAtom(ctx, name_c.as_ptr());
-    sys::JS_DefinePropertyGetSet(ctx, proto, atom, f, sys::js_undefined(), sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE);
+    sys::JS_DefinePropertyGetSet(
+        ctx,
+        proto,
+        atom,
+        f,
+        sys::js_undefined(),
+        sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE,
+    );
     sys::JS_FreeAtom(ctx, atom);
 }
 
-unsafe fn define_method(ctx: *mut sys::JSContext, proto: sys::JSValue, name: &str, func: sys::JSCFunction, length: c_int) {
+unsafe fn define_method(
+    ctx: *mut sys::JSContext,
+    proto: sys::JSValue,
+    name: &str,
+    func: sys::JSCFunction,
+    length: c_int,
+) {
     let name_c = CString::new(name).unwrap();
     let f = sys::JS_NewCFunction2(ctx, func, name_c.as_ptr(), length, sys::JS_CFUNC_GENERIC, 0);
     sys::JS_SetPropertyStr(ctx, proto, name_c.as_ptr(), f);
@@ -190,7 +237,10 @@ unsafe fn define_method(ctx: *mut sys::JSContext, proto: sys::JSValue, name: &st
 /// used by [`crate::Context::adopted_stylesheet_text`] to tell a real
 /// sheet apart from any other value a page might have put into
 /// `document.adoptedStyleSheets`.
-pub(crate) unsafe fn rules_of(ctx: *mut sys::JSContext, value: sys::JSValue) -> Option<Vec<String>> {
+pub(crate) unsafe fn rules_of(
+    ctx: *mut sys::JSContext,
+    value: sys::JSValue,
+) -> Option<Vec<String>> {
     let ptr = sheet_opaque(sys::JS_GetRuntime(ctx), value);
     (!ptr.is_null()).then(|| (*ptr).clone())
 }
@@ -213,9 +263,21 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     define_method(ctx, proto, "deleteRule", delete_rule, 1);
 
     let ctor_name = CString::new("CSSStyleSheet").unwrap();
-    let ctor_fn = sys::JS_NewCFunction2(ctx, stylesheet_constructor, ctor_name.as_ptr(), 0, sys::JS_CFUNC_CONSTRUCTOR_OR_FUNC, 0);
+    let ctor_fn = sys::JS_NewCFunction2(
+        ctx,
+        stylesheet_constructor,
+        ctor_name.as_ptr(),
+        0,
+        sys::JS_CFUNC_CONSTRUCTOR_OR_FUNC,
+        0,
+    );
     let proto_name = CString::new("prototype").unwrap();
-    sys::JS_SetPropertyStr(ctx, ctor_fn, proto_name.as_ptr(), sys::JS_DupValue(ctx, proto));
+    sys::JS_SetPropertyStr(
+        ctx,
+        ctor_fn,
+        proto_name.as_ptr(),
+        sys::JS_DupValue(ctx, proto),
+    );
     sys::JS_SetClassProto(ctx, class_id, proto);
 
     let global = sys::JS_GetGlobalObject(ctx);

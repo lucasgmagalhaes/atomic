@@ -13,5 +13,11 @@ pub use style::{
     resolve_style, AlignItems, BorderStyle, BoxShadow, Clear, Color, ComputedStyle, Display,
     EdgeSizes, FlexDirection, Float, JustifyContent, Length, Overflow, Position,
 };
-pub use text::{layout_inline, layout_text, rasterize_glyph, GlyphBitmap, InlineSpan, PositionedGlyph, TextLayout};
-pub use tree::{apply_image_sizes, build_box_tree, build_box_tree_with_viewport, Dimensions, InlineSpanSource, LayoutBox, ResolvedBorder, DEFAULT_VIEWPORT_WIDTH};
+pub use text::{
+    layout_inline, layout_text, rasterize_glyph, GlyphBitmap, InlineSpan, PositionedGlyph,
+    TextLayout,
+};
+pub use tree::{
+    apply_image_sizes, build_box_tree, build_box_tree_with_viewport, Dimensions, InlineSpanSource,
+    LayoutBox, ResolvedBorder, DEFAULT_VIEWPORT_WIDTH,
+};

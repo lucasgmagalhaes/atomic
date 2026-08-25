@@ -1395,17 +1395,19 @@ fn click_at_then_type_key_types_into_a_real_focused_input() {
         "clicking the real <input> should succeed: {click_result:?}"
     );
 
-    let frame_before = profile.latest_frame().unwrap();
     let type_result = profile.type_key("h").expect("protocol should not fail");
     assert!(
         type_result.is_ok(),
         "typing into the real focused input should succeed: {type_result:?}"
     );
 
-    let frame_after = profile.latest_frame().unwrap();
-    assert_ne!(
-        frame_before, frame_after,
-        "typing a real character should visibly change rendered pixels"
+    assert_eq!(
+        profile
+            .evaluate("document.getElementById('field').value")
+            .expect("protocol should not fail")
+            .expect("field value should be readable"),
+        "h",
+        "typing a real character should update the focused input's value"
     );
 
     profile.quit();

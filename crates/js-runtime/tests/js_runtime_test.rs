@@ -189,6 +189,40 @@ fn constructed_events_are_dispatched_by_identity() {
 }
 
 #[test]
+fn element_event_methods_are_reinstalled_for_each_context() {
+    let rt = Runtime::new();
+
+    {
+        let mut first_dom = dom::Dom::new();
+        let button = first_dom.create_element("button");
+        first_dom.set_attribute(button, "id", "button");
+        first_dom.append_child(first_dom.root(), button);
+        let first = Context::with_dom(&rt, first_dom);
+        assert_eq!(
+            first
+                .eval(
+                    "typeof document.getElementById('button').addEventListener",
+                    "<test>"
+                )
+                .unwrap(),
+            "function"
+        );
+    }
+
+    let mut second_dom = dom::Dom::new();
+    let button = second_dom.create_element("button");
+    second_dom.set_attribute(button, "id", "button");
+    second_dom.append_child(second_dom.root(), button);
+    let second = Context::with_dom(&rt, second_dom);
+    assert_eq!(
+        second
+            .eval("(() => { const button = document.getElementById('button'); let called = false; button.addEventListener('click', () => { called = true; }); button.dispatchEvent('click'); return called; })()", "<test>")
+            .unwrap(),
+        "true"
+    );
+}
+
+#[test]
 fn constructed_event_options_control_bubbling_and_cancellation() {
     let mut d = dom::Dom::new();
     let root = d.root();

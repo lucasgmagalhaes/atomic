@@ -4233,10 +4233,6 @@ unsafe extern "C" fn element_scroll_into_view_noop(
 /// Registers the `Element` class with prototype chained to `Node.prototype`.
 unsafe fn ensure_element_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
     let rt = sys::JS_GetRuntime(ctx);
-    let existing = crate::class_registry::class_id_for(rt, ELEMENT_CLASS_KIND);
-    if existing != 0 {
-        return existing;
-    }
     let class_name = CString::new("Element").unwrap();
     let def = sys::JSClassDef {
         class_name: class_name.as_ptr(),
@@ -4260,10 +4256,6 @@ unsafe fn ensure_element_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
 /// Registers the `HTMLElement` class with prototype chained to `Element.prototype`.
 unsafe fn ensure_html_element_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
     let rt = sys::JS_GetRuntime(ctx);
-    let existing = crate::class_registry::class_id_for(rt, HTML_ELEMENT_CLASS_KIND);
-    if existing != 0 {
-        return existing;
-    }
     let class_name = CString::new("HTMLElement").unwrap();
     let def = sys::JSClassDef {
         class_name: class_name.as_ptr(),
@@ -4287,10 +4279,6 @@ unsafe fn ensure_html_element_class(ctx: *mut sys::JSContext) -> sys::JSClassID 
 /// prototype chained to `HTMLElement.prototype`.
 unsafe fn ensure_html_subclass(ctx: *mut sys::JSContext, kind: &'static str) -> sys::JSClassID {
     let rt = sys::JS_GetRuntime(ctx);
-    let existing = crate::class_registry::class_id_for(rt, kind);
-    if existing != 0 {
-        return existing;
-    }
     let class_name = CString::new(kind).unwrap();
     let def = sys::JSClassDef {
         class_name: class_name.as_ptr(),

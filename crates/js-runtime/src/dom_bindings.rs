@@ -1056,6 +1056,35 @@ unsafe extern "C" fn node_name_get(
         .unwrap_or_else(sys::js_undefined)
 }
 
+/// Real `Node.prototype.isConnected`: whether this node is still attached
+/// to the document tree. `false` for a stale/detached node or a `this`
+/// that isn't a node at all — same permissive style every other read-only
+/// accessor here uses for a malformed `this`.
+unsafe extern "C" fn node_is_connected_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_bool(false);
+    };
+    let dom = dom_opaque(ctx);
+    sys::js_bool(!dom.is_null() && (*dom).is_connected(id))
+}
+
+/// Real `Node.prototype.ownerDocument`: this engine has exactly one
+/// `Document` per context (no iframes, see `window.rs`'s own doc comment),
+/// so every node's owner is the same shared `document` object every other
+/// binding in this crate (`window`, `location`, ...) already hands back —
+/// not a `Node`-class wrapper around the DOM's own root, which would be a
+/// different, unrelated object identity from `document.getElementById`
+/// callers already hold.
+unsafe extern "C" fn node_owner_document_get(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+) -> sys::JSValue {
+    crate::document::get_or_create(ctx)
+}
+
 unsafe fn define_navigation(ctx: *mut sys::JSContext, proto: sys::JSValue) {
     for (name, getter) in [
         ("parentNode", node_parent_get as Getter),
@@ -1066,6 +1095,8 @@ unsafe fn define_navigation(ctx: *mut sys::JSContext, proto: sys::JSValue) {
         ("childNodes", node_children_get as Getter),
         ("nodeType", node_type_get as Getter),
         ("nodeName", node_name_get as Getter),
+        ("isConnected", node_is_connected_get as Getter),
+        ("ownerDocument", node_owner_document_get as Getter),
     ] {
         let name = CString::new(name).unwrap();
         let getter = sys::JS_NewCFunction2(
@@ -1656,6 +1687,107 @@ unsafe extern "C" fn node_remove_child(
     sys::JS_DupValue(ctx, child_value)
 }
 
+/// Real `Node.prototype.contains(other)`: `true` when `other` is this node
+/// itself or a descendant of it. A non-`Node` (or missing) argument, or a
+/// `this` that isn't attached to a live document, is `false` rather than a
+/// thrown error — same permissive style `matches`/`closest` already use for
+/// a malformed `this`/argument.
+unsafe extern "C" fn node_contains(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_bool(false);
+    };
+    if argc < 1 {
+        return sys::js_bool(false);
+    }
+    let Some(other) = node_id(ctx, *argv) else {
+        return sys::js_bool(false);
+    };
+    let dom = dom_opaque(ctx);
+    sys::js_bool(!dom.is_null() && (*dom).contains(id, other))
+}
+
+/// Real `Node.prototype.cloneNode(deep)`. Returns a brand-new `Node` object
+/// via [`node_object`], establishing its own object identity in the cache —
+/// same as `document.createElement`/`createTextNode` do for a freshly
+/// created id, not the identity of the node it was cloned from.
+unsafe extern "C" fn node_clone_node(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return throw_type_error(ctx, "cloneNode target must be a node");
+    };
+    let deep = argc > 0 && sys::JS_ToBool(ctx, *argv) != 0;
+    let dom = dom_opaque(ctx);
+    if dom.is_null() || (*dom).get(id).is_none() {
+        return throw_type_error(ctx, "node is no longer attached to this document");
+    }
+    let new_id = (*dom).clone_node(id, deep);
+    node_object(
+        ctx,
+        crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NODE_CLASS_KIND),
+        new_id,
+    )
+}
+
+/// Real `Node.prototype.replaceChild(newChild, oldChild)`. Evicts
+/// `oldChild`'s cached JS state (identity, listeners, `classList`/`dataset`/
+/// `attributes` objects) first — same convention `removeChild`/`remove`
+/// already use before a subtree stops existing — but only once membership
+/// is confirmed, so a rejected call (old child not actually a child) never
+/// evicts a node that's still fully attached elsewhere. Rejects `newChild`
+/// being this node's own ancestor, same `HierarchyRequestError`-style check
+/// `appendChild`/`insertBefore` already make.
+unsafe extern "C" fn node_replace_child(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 2 {
+        return throw_type_error(ctx, "new child and old child are required");
+    }
+    let Some(parent) = node_id(ctx, this_val) else {
+        return throw_type_error(ctx, "replace target must be a node");
+    };
+    let new_value = *argv;
+    let old_value = *argv.add(1);
+    let (Some(new_child), Some(old_child)) = (node_id(ctx, new_value), node_id(ctx, old_value))
+    else {
+        return throw_type_error(ctx, "replaceChild arguments must be nodes");
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null()
+        || (*dom).get(parent).is_none()
+        || (*dom).get(new_child).is_none()
+        || (*dom).get(old_child).is_none()
+    {
+        return throw_type_error(ctx, "node is no longer attached to this document");
+    }
+    if is_ancestor(&*dom, new_child, parent) {
+        return throw_type_error(ctx, "cannot insert an ancestor into its descendant");
+    }
+    let old_child_is_member = (*dom)
+        .get(parent)
+        .map(|node| node.children.contains(&old_child))
+        .unwrap_or(false);
+    if !old_child_is_member {
+        return throw_type_error(ctx, "old child is not a child of this parent");
+    }
+    if old_child != new_child {
+        evict_subtree(ctx, &*dom, old_child);
+    }
+    (*dom).replace_child(parent, new_child, old_child);
+    sys::JS_DupValue(ctx, old_value)
+}
+
 unsafe fn define_mutation_methods(ctx: *mut sys::JSContext, proto: sys::JSValue) {
     for (name, function, arity) in [
         ("appendChild", node_append_child as sys::JSCFunction, 1),
@@ -1671,6 +1803,9 @@ unsafe fn define_mutation_methods(ctx: *mut sys::JSContext, proto: sys::JSValue)
         ("insertBefore", node_insert_before as sys::JSCFunction, 2),
         ("removeChild", node_remove_child as sys::JSCFunction, 1),
         ("remove", node_remove as sys::JSCFunction, 0),
+        ("contains", node_contains as sys::JSCFunction, 1),
+        ("cloneNode", node_clone_node as sys::JSCFunction, 0),
+        ("replaceChild", node_replace_child as sys::JSCFunction, 2),
     ] {
         let name = CString::new(name).unwrap();
         let value = sys::JS_NewCFunction2(

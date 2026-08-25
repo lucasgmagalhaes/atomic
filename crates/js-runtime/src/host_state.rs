@@ -68,6 +68,12 @@ pub(crate) struct HostState {
     /// enforces nothing — same degrade-gracefully pattern as
     /// `url`/`layout_rects`.
     pub csp: Vec<String>,
+    /// Every `trustedTypes.createPolicy` name already created in this
+    /// context — real Trusted Types policy names must be unique per
+    /// document, so a duplicate creation is rejected. Empty on a bare
+    /// `Context::new` (no host state behind the sink checks), where the
+    /// uniqueness check degrades to accepting duplicates.
+    pub trusted_type_policy_names: Vec<String>,
     /// Raw `Permissions-Policy` response-policy text. Native capability
     /// bindings consult it immediately before performing their privileged
     /// operation; `None` means the host did not provide a policy and leaves

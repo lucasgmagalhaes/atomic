@@ -35,6 +35,7 @@ mod page_visibility;
 mod performance;
 mod permissions_policy;
 mod timers;
+mod trusted_types;
 mod value_bridge;
 mod web_audio;
 mod window;
@@ -112,6 +113,7 @@ impl<'rt> Context<'rt> {
             timers::register(ptr);
             document_cookie::register(ptr);
             cssom_stylesheet::register(ptr);
+            trusted_types::register(ptr);
             indexed_db_bindings::register(ptr);
             local_storage_bindings::register(ptr);
             blob::register(ptr);
@@ -147,6 +149,7 @@ impl<'rt> Context<'rt> {
             layout_rects: std::collections::HashMap::new(),
             computed_styles: std::collections::HashMap::new(),
             csp: Vec::new(),
+            trusted_type_policy_names: Vec::new(),
             permissions_policy: None,
         });
         let raw = state.as_mut() as *mut host_state::HostState as *mut std::os::raw::c_void;

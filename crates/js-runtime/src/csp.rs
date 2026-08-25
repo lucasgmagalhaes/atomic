@@ -31,6 +31,11 @@
 //! `connect-src *` alongside `default-src 'none'`). A host that wants to
 //! set one policy itself can still call [`crate::Context::set_csp`]
 //! directly.
+//!
+//! The one non-network directive enforced here is
+//! `require-trusted-types-for 'script'` ([`is_trusted_types_required`]),
+//! which switches [`crate::trusted_types`]'s DOM injection-sink gate on —
+//! same delivery channels, same multiple-policy intersection semantics.
 
 use quickjs_sys as sys;
 
@@ -51,6 +56,25 @@ pub(crate) unsafe fn is_request_blocked(ctx: *mut sys::JSContext, request_url: &
     }
     let page_origin = crate::cors::page_origin(ctx);
     (*state).csp.iter().any(|policy| !is_connect_allowed(policy, request_url, page_origin.as_deref()))
+}
+
+/// Whether any delivered policy declares `require-trusted-types-for
+/// 'script'` — the Trusted Types enforcement switch the
+/// `innerHTML`/`outerHTML` setters consult via
+/// [`crate::trusted_types::sink_html_string`] before accepting a plain
+/// string. Multiple delivered policies behave like everywhere else in
+/// this module (policies intersect rather than merge): enforcement is on
+/// if *any* entry requires it, so appending a policy can tighten but
+/// never loosen. A context with no policies at all never enforces.
+pub(crate) unsafe fn is_trusted_types_required(ctx: *mut sys::JSContext) -> bool {
+    let state = crate::host_state::get(ctx);
+    if state.is_null() {
+        return false;
+    }
+    (*state).csp.iter().any(|policy| {
+        find_directive(policy, "require-trusted-types-for")
+            .is_some_and(|values| values.iter().any(|value| value.eq_ignore_ascii_case("'script'")))
+    })
 }
 
 fn find_directive<'a>(policy: &'a str, name: &str) -> Option<Vec<&'a str>> {

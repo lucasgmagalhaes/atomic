@@ -1205,8 +1205,13 @@ unsafe extern "C" fn node_inner_html_set(
     this_val: sys::JSValue,
     val: sys::JSValue,
 ) -> sys::JSValue {
-    let Some(html) = read_js_string(ctx, val) else {
-        return throw_type_error(ctx, "innerHTML must be a string");
+    // Trusted Types gate (`trusted_types::sink_html_string`): a policy-
+    // produced `TrustedHTML` is always accepted; under a delivered
+    // `require-trusted-types-for 'script'` CSP directive every plain
+    // string throws instead of parsing.
+    let html = match crate::trusted_types::sink_html_string(ctx, val, "innerHTML") {
+        Ok(html) => html,
+        Err(thrown) => return thrown,
     };
     if html.len() > MAX_HTML_LENGTH {
         return throw_type_error(ctx, "innerHTML value exceeds the maximum length");
@@ -1245,8 +1250,11 @@ unsafe extern "C" fn node_outer_html_set(
     this_val: sys::JSValue,
     val: sys::JSValue,
 ) -> sys::JSValue {
-    let Some(html) = read_js_string(ctx, val) else {
-        return throw_type_error(ctx, "outerHTML must be a string");
+    // Same Trusted Types gate as `node_inner_html_set` — `outerHTML` is
+    // the other real HTML injection sink this engine exposes.
+    let html = match crate::trusted_types::sink_html_string(ctx, val, "outerHTML") {
+        Ok(html) => html,
+        Err(thrown) => return thrown,
     };
     if html.len() > MAX_HTML_LENGTH {
         return throw_type_error(ctx, "outerHTML value exceeds the maximum length");

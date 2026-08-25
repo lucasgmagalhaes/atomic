@@ -418,6 +418,29 @@ impl Dom {
         }
     }
 
+    /// Per-spec `Node.nodeValue` getter — returns text data for Text/Comment
+    /// nodes, `None` for everything else (Element, Document, DocumentFragment).
+    pub fn node_value(&self, id: NodeId) -> Option<String> {
+        match self.get(id).map(|n| &n.data) {
+            Some(NodeData::Text(t)) => Some(t.clone()),
+            Some(NodeData::Comment(t)) => Some(t.clone()),
+            _ => None,
+        }
+    }
+
+    /// Per-spec `Node.nodeValue` setter — updates text data for Text/Comment
+    /// nodes, no-op for everything else.
+    pub fn set_node_value(&mut self, id: NodeId, value: &str) {
+        self.mutations = self.mutations.wrapping_add(1);
+        if let Some(Node { data, .. }) = self.get_mut(id) {
+            match data {
+                NodeData::Text(t) => *t = value.to_string(),
+                NodeData::Comment(t) => *t = value.to_string(),
+                _ => {}
+            }
+        }
+    }
+
     /// Real `Node.prototype.focus()` — becomes `document.activeElement`
     /// (see [`Dom::active_element`]). No-op if `id` doesn't exist. This
     /// only records *which* node is focused; a caller (JS `.focus()`,

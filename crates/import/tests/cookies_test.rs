@@ -13,7 +13,9 @@ use base64::Engine;
 use import::{import_cookies, recover_master_key};
 
 fn temp_dir(name: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join("nimble-import-crypto-test").join(name)
+    std::env::temp_dir()
+        .join("nimble-import-crypto-test")
+        .join(name)
 }
 
 /// Real `CryptProtectData` - the encrypt-side counterpart of
@@ -22,11 +24,33 @@ fn temp_dir(name: &str) -> std::path::PathBuf {
 /// wraps, only unwraps - Chrome is always the one that wraps in reality).
 fn dpapi_protect(data: &[u8]) -> Vec<u8> {
     use windows_sys::Win32::Security::Cryptography::{CryptProtectData, CRYPT_INTEGER_BLOB};
-    let mut in_blob = CRYPT_INTEGER_BLOB { cbData: data.len() as u32, pbData: data.as_ptr() as *mut u8 };
-    let mut out_blob = CRYPT_INTEGER_BLOB { cbData: 0, pbData: std::ptr::null_mut() };
-    let ok = unsafe { CryptProtectData(&mut in_blob, std::ptr::null(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), 0, &mut out_blob) };
-    assert_ne!(ok, 0, "CryptProtectData should succeed on this machine: {}", std::io::Error::last_os_error());
-    let bytes = unsafe { std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize) }.to_vec();
+    let mut in_blob = CRYPT_INTEGER_BLOB {
+        cbData: data.len() as u32,
+        pbData: data.as_ptr() as *mut u8,
+    };
+    let mut out_blob = CRYPT_INTEGER_BLOB {
+        cbData: 0,
+        pbData: std::ptr::null_mut(),
+    };
+    let ok = unsafe {
+        CryptProtectData(
+            &mut in_blob,
+            std::ptr::null(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            0,
+            &mut out_blob,
+        )
+    };
+    assert_ne!(
+        ok,
+        0,
+        "CryptProtectData should succeed on this machine: {}",
+        std::io::Error::last_os_error()
+    );
+    let bytes =
+        unsafe { std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize) }.to_vec();
     unsafe { windows_sys::Win32::Foundation::LocalFree(out_blob.pbData as *mut core::ffi::c_void) };
     bytes
 }
@@ -44,7 +68,9 @@ fn write_real_local_state(user_data_dir: &std::path::Path, raw_key: &[u8; 32]) {
 fn encrypt_cookie_value(raw_key: &[u8; 32], plaintext: &str) -> Vec<u8> {
     let cipher = Aes256Gcm::new_from_slice(raw_key).unwrap();
     let nonce_bytes: [u8; 12] = *b"nimble-nonce"; // 12 real bytes, fixed for test determinism
-    let ciphertext = cipher.encrypt((&nonce_bytes).into(), plaintext.as_bytes()).unwrap();
+    let ciphertext = cipher
+        .encrypt((&nonce_bytes).into(), plaintext.as_bytes())
+        .unwrap();
     let mut blob = b"v10".to_vec();
     blob.extend_from_slice(&nonce_bytes);
     blob.extend_from_slice(&ciphertext);
@@ -77,17 +103,28 @@ fn recovers_the_real_master_key_and_decrypts_a_real_cookie_end_to_end() {
     std::fs::create_dir_all(profile_dir.join("Network")).unwrap();
     write_real_cookies_db(&profile_dir.join("Network").join("Cookies"), &raw_key);
 
-    let recovered_key = recover_master_key(&dir).expect("a real Local State with a genuinely DPAPI-wrapped key should recover");
-    assert_eq!(recovered_key, raw_key, "the real CryptUnprotectData round trip must recover the exact original key");
+    let recovered_key = recover_master_key(&dir)
+        .expect("a real Local State with a genuinely DPAPI-wrapped key should recover");
+    assert_eq!(
+        recovered_key, raw_key,
+        "the real CryptUnprotectData round trip must recover the exact original key"
+    );
 
-    let cookies = import_cookies(&profile_dir.join("Network").join("Cookies"), &recovered_key).expect("cookies should decrypt with the real recovered key");
+    let cookies = import_cookies(&profile_dir.join("Network").join("Cookies"), &recovered_key)
+        .expect("cookies should decrypt with the real recovered key");
     assert_eq!(cookies.len(), 1);
     assert_eq!(cookies[0].host, ".example.com");
     assert_eq!(cookies[0].name, "session");
-    assert_eq!(cookies[0].value, "the-real-session-value", "AES-256-GCM decryption should recover the exact real plaintext");
+    assert_eq!(
+        cookies[0].value, "the-real-session-value",
+        "AES-256-GCM decryption should recover the exact real plaintext"
+    );
     assert!(cookies[0].is_secure);
     assert!(cookies[0].is_http_only);
-    assert_eq!(cookies[0].expires, None, "expires_utc of 0 is Chrome's own session-cookie sentinel");
+    assert_eq!(
+        cookies[0].expires, None,
+        "expires_utc of 0 is Chrome's own session-cookie sentinel"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -103,7 +140,8 @@ fn a_cookie_encrypted_under_a_different_key_is_skipped_not_returned_as_garbage()
     std::fs::create_dir_all(profile_dir.join("Network")).unwrap();
     write_real_cookies_db(&profile_dir.join("Network").join("Cookies"), &real_key);
 
-    let cookies = import_cookies(&profile_dir.join("Network").join("Cookies"), &wrong_key).expect("import itself should still succeed");
+    let cookies = import_cookies(&profile_dir.join("Network").join("Cookies"), &wrong_key)
+        .expect("import itself should still succeed");
     assert!(cookies.is_empty(), "a row that fails real GCM authentication must be skipped, not returned with garbage plaintext");
 
     let _ = std::fs::remove_dir_all(&dir);

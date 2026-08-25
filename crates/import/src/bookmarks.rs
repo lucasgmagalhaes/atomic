@@ -33,7 +33,10 @@ impl std::fmt::Display for ImportError {
         match self {
             ImportError::Io(e) => write!(f, "failed to read bookmarks file: {e}"),
             ImportError::Parse(e) => write!(f, "failed to parse bookmarks file: {e}"),
-            ImportError::UnexpectedShape(s) => write!(f, "bookmarks file doesn't look like a real Chrome export: {s}"),
+            ImportError::UnexpectedShape(s) => write!(
+                f,
+                "bookmarks file doesn't look like a real Chrome export: {s}"
+            ),
         }
     }
 }
@@ -41,18 +44,36 @@ impl std::fmt::Display for ImportError {
 impl std::error::Error for ImportError {}
 
 fn walk(node: &Json, folder: &str, out: &mut Vec<Bookmark>) {
-    let Some(node_type) = node.get("type").and_then(Json::as_str) else { return };
+    let Some(node_type) = node.get("type").and_then(Json::as_str) else {
+        return;
+    };
     match node_type {
         "url" => {
-            let name = node.get("name").and_then(Json::as_str).unwrap_or("").to_string();
-            let url = node.get("url").and_then(Json::as_str).unwrap_or("").to_string();
+            let name = node
+                .get("name")
+                .and_then(Json::as_str)
+                .unwrap_or("")
+                .to_string();
+            let url = node
+                .get("url")
+                .and_then(Json::as_str)
+                .unwrap_or("")
+                .to_string();
             if !url.is_empty() {
-                out.push(Bookmark { name, url, folder: folder.to_string() });
+                out.push(Bookmark {
+                    name,
+                    url,
+                    folder: folder.to_string(),
+                });
             }
         }
         "folder" => {
             let name = node.get("name").and_then(Json::as_str).unwrap_or("");
-            let child_folder = if folder.is_empty() { name.to_string() } else { format!("{folder}/{name}") };
+            let child_folder = if folder.is_empty() {
+                name.to_string()
+            } else {
+                format!("{folder}/{name}")
+            };
             if let Some(children) = node.get("children").and_then(Json::as_array) {
                 for child in children {
                     walk(child, &child_folder, out);
@@ -69,9 +90,13 @@ fn walk(node: &Json, folder: &str, out: &mut Vec<Bookmark>) {
 pub fn import_bookmarks(path: &Path) -> Result<Vec<Bookmark>, ImportError> {
     let text = std::fs::read_to_string(path).map_err(ImportError::Io)?;
     let root = parse(&text).map_err(ImportError::Parse)?;
-    let roots = root.get("roots").ok_or_else(|| ImportError::UnexpectedShape("missing top-level \"roots\" object".to_string()))?;
+    let roots = root.get("roots").ok_or_else(|| {
+        ImportError::UnexpectedShape("missing top-level \"roots\" object".to_string())
+    })?;
     let Json::Object(roots_map) = roots else {
-        return Err(ImportError::UnexpectedShape("\"roots\" is not an object".to_string()));
+        return Err(ImportError::UnexpectedShape(
+            "\"roots\" is not an object".to_string(),
+        ));
     };
 
     // Root keys ("bookmark_bar", "other", "synced") are Chrome's internal

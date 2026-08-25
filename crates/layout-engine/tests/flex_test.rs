@@ -18,9 +18,7 @@ fn build(html_css: &str, children_tags: &[&str]) -> (Dom, dom::NodeId) {
 #[test]
 fn row_flex_places_children_side_by_side() {
     let (d, container) = build("", &["span", "span"]);
-    let sheet = parse_stylesheet(
-        "div { display: flex; } span { flex-basis: 50px; flex-grow: 0; }",
-    );
+    let sheet = parse_stylesheet("div { display: flex; } span { flex-basis: 50px; flex-grow: 0; }");
     let mut tree = build_box_tree(&d, container, &sheet).unwrap();
     layout_block(&mut tree, 800.0, 0.0, 0.0);
 
@@ -77,8 +75,9 @@ fn flex_shrink_reduces_items_below_basis_when_overflowing() {
 #[test]
 fn justify_content_center_centers_items_with_leftover_space() {
     let (d, container) = build("", &["span"]);
-    let sheet =
-        parse_stylesheet("div { display: flex; justify-content: center; } span { flex-basis: 100px; }");
+    let sheet = parse_stylesheet(
+        "div { display: flex; justify-content: center; } span { flex-basis: 100px; }",
+    );
     let mut tree = build_box_tree(&d, container, &sheet).unwrap();
     layout_block(&mut tree, 800.0, 0.0, 0.0);
 
@@ -105,7 +104,8 @@ fn justify_content_space_between_spreads_items() {
 #[test]
 fn align_items_stretch_fills_container_height_by_default() {
     let (d, container) = build("", &["span"]);
-    let sheet = parse_stylesheet("div { display: flex; height: 200px; } span { flex-basis: 50px; }");
+    let sheet =
+        parse_stylesheet("div { display: flex; height: 200px; } span { flex-basis: 50px; }");
     let mut tree = build_box_tree(&d, container, &sheet).unwrap();
     layout_block(&mut tree, 800.0, 0.0, 0.0);
 

@@ -13,16 +13,16 @@ mod class_registry;
 mod clipboard;
 mod computed_style;
 pub mod console;
-mod crypto;
 mod cors;
+mod crypto;
 mod csp;
 mod css_style;
 mod cssom_stylesheet;
 mod document;
 mod document_cookie;
 mod dom_bindings;
-mod events;
 mod event_subclasses;
+mod events;
 mod fetch;
 mod fetch_async;
 mod history;
@@ -177,7 +177,12 @@ impl<'rt> Context<'rt> {
     /// `indexedDB.open(name)` resolves each database under
     /// `storage_dir/idb/<name>`, and `localStorage`/`sessionStorage` live
     /// in `storage_dir/local_storage.txt`/`session_storage.txt`.
-    pub fn with_storage(runtime: &'rt Runtime, dom: dom::Dom, host: &str, storage_dir: impl AsRef<Path>) -> std::io::Result<Self> {
+    pub fn with_storage(
+        runtime: &'rt Runtime,
+        dom: dom::Dom,
+        host: &str,
+        storage_dir: impl AsRef<Path>,
+    ) -> std::io::Result<Self> {
         let storage_dir = storage_dir.as_ref().to_path_buf();
         let cookies = storage::cookies::CookieJar::open(storage_dir.join("cookies.txt"))?;
         let local_storage = storage::LocalStorage::open(storage_dir.join("local_storage.txt"))?;
@@ -206,13 +211,13 @@ impl<'rt> Context<'rt> {
     /// `Err`.
     pub fn eval(&self, code: &str, filename: &str) -> Result<String, EvalError> {
         let code_c = CString::new(code).expect("script source must not contain NUL bytes");
-        let filename_c =
-            CString::new(filename).expect("filename must not contain NUL bytes");
+        let filename_c = CString::new(filename).expect("filename must not contain NUL bytes");
 
         let result = unsafe {
             script_limits::set_deadline(
                 self.ptr,
-                self._time_budget.map(|budget| std::time::Instant::now() + budget),
+                self._time_budget
+                    .map(|budget| std::time::Instant::now() + budget),
             );
             let r = sys::JS_Eval(
                 self.ptr,
@@ -236,8 +241,7 @@ impl<'rt> Context<'rt> {
         }
 
         let mut len: usize = 0;
-        let c_str_ptr =
-            unsafe { sys::JS_ToCStringLen2(self.ptr, &mut len, result, false) };
+        let c_str_ptr = unsafe { sys::JS_ToCStringLen2(self.ptr, &mut len, result, false) };
         unsafe { sys::JS_FreeValue(self.ptr, result) };
 
         if c_str_ptr.is_null() {
@@ -295,13 +299,20 @@ impl<'rt> Context<'rt> {
         unsafe {
             console::push_message(
                 self.ptr,
-                console::ConsoleMessage { level: console::ConsoleLevel::Error, text: format!("Uncaught {text}") },
+                console::ConsoleMessage {
+                    level: console::ConsoleLevel::Error,
+                    text: format!("Uncaught {text}"),
+                },
             );
             let global = sys::JS_GetGlobalObject(self.ptr);
             let event = events::create_event(self.ptr, "error", false, false);
             if !sys::js_is_exception(&event) {
                 let name = CString::new("message").unwrap();
-                let message = sys::JS_NewStringLen(self.ptr, text.as_ptr() as *const std::os::raw::c_char, text.len());
+                let message = sys::JS_NewStringLen(
+                    self.ptr,
+                    text.as_ptr() as *const std::os::raw::c_char,
+                    text.len(),
+                );
                 sys::JS_SetPropertyStr(self.ptr, event, name.as_ptr(), message);
                 events::dispatch_event_object(self.ptr, global, event);
                 // A listener throwing must not leave its exception pending
@@ -451,7 +462,10 @@ impl<'rt> Context<'rt> {
     /// against the current DOM) calls this once per render pass, same
     /// shape as [`Context::set_layout_rects`]. No-op on a plain
     /// [`Context::new`]/`with_dom` that never calls it.
-    pub fn set_computed_styles(&mut self, styles: std::collections::HashMap<dom::NodeId, std::collections::HashMap<String, String>>) {
+    pub fn set_computed_styles(
+        &mut self,
+        styles: std::collections::HashMap<dom::NodeId, std::collections::HashMap<String, String>>,
+    ) {
         if let Some(state) = self._host_state.as_mut() {
             state.computed_styles = styles;
         }

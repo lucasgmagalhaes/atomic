@@ -89,7 +89,9 @@ impl WorkspaceManager {
 
     /// Finds which workspace (if any) currently holds `profile_id`.
     pub fn find_profile(&self, profile_id: &str) -> Option<usize> {
-        self.workspaces.iter().position(|w| w.profiles.iter().any(|p| p == profile_id))
+        self.workspaces
+            .iter()
+            .position(|w| w.profiles.iter().any(|p| p == profile_id))
     }
 
     /// Adds `profile_id` to the workspace at `index`. A no-op (returns

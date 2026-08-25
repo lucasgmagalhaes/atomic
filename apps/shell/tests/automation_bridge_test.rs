@@ -20,10 +20,20 @@ fn workspace_with_one_pane_registered() -> WorkspaceManager {
 fn pane_goto_reaches_the_real_running_profile() {
     let workspace = workspace_with_one_pane_registered();
     let browser = BrowserView::spawn(200, 150);
-    assert!(browser.error().is_none(), "spawn should succeed against the real workspace build");
+    assert!(
+        browser.error().is_none(),
+        "spawn should succeed against the real workspace build"
+    );
 
-    let result = run_script(&workspace, [(PANE_ID, &browser)], &format!(r#"pane("{PANE_ID}").goto("https://example.com")"#));
-    assert!(result.is_ok(), "goto against a real live pane should succeed: {result:?}");
+    let result = run_script(
+        &workspace,
+        [(PANE_ID, &browser)],
+        &format!(r#"pane("{PANE_ID}").goto("https://example.com")"#),
+    );
+    assert!(
+        result.is_ok(),
+        "goto against a real live pane should succeed: {result:?}"
+    );
 }
 
 #[test]
@@ -31,8 +41,15 @@ fn pane_goto_with_a_bad_url_surfaces_as_an_error_string() {
     let workspace = workspace_with_one_pane_registered();
     let browser = BrowserView::spawn(200, 150);
 
-    let result = run_script(&workspace, [(PANE_ID, &browser)], &format!(r#"pane("{PANE_ID}").goto("not-a-real-url")"#));
-    assert!(result.is_err(), "a bad URL should raise a JS exception surfaced as Err, not silently succeed");
+    let result = run_script(
+        &workspace,
+        [(PANE_ID, &browser)],
+        &format!(r#"pane("{PANE_ID}").goto("not-a-real-url")"#),
+    );
+    assert!(
+        result.is_err(),
+        "a bad URL should raise a JS exception surfaced as Err, not silently succeed"
+    );
 }
 
 #[test]
@@ -49,7 +66,11 @@ fn pane_name_not_in_the_active_workspace_throws_no_pane_named() {
     // placeholder - what's asserted is that it threw *at all* (`pane.goto`
     // throwing "no pane named ..." is what causes that), not the message
     // text itself.
-    let result = run_script(&workspace, [(PANE_ID, &browser)], &format!(r#"pane("{PANE_ID}").goto("https://example.com")"#));
+    let result = run_script(
+        &workspace,
+        [(PANE_ID, &browser)],
+        &format!(r#"pane("{PANE_ID}").goto("https://example.com")"#),
+    );
     assert!(result.is_err(), "an unregistered pane name should throw");
 }
 
@@ -60,9 +81,24 @@ fn fill_and_click_reach_the_real_demo_page_through_the_bridge() {
 
     // BrowserView's freshly spawned profile is showing profile-worker's
     // built-in demo page, which has a real `#counter` element.
-    assert!(run_script(&workspace, [(PANE_ID, &browser)], &format!(r##"pane("{PANE_ID}").fill("#counter", "x")"##)).is_ok());
-    assert!(run_script(&workspace, [(PANE_ID, &browser)], &format!(r##"pane("{PANE_ID}").click("#counter")"##)).is_ok());
-    assert!(run_script(&workspace, [(PANE_ID, &browser)], &format!(r##"pane("{PANE_ID}").fill("#does-not-exist", "x")"##)).is_err());
+    assert!(run_script(
+        &workspace,
+        [(PANE_ID, &browser)],
+        &format!(r##"pane("{PANE_ID}").fill("#counter", "x")"##)
+    )
+    .is_ok());
+    assert!(run_script(
+        &workspace,
+        [(PANE_ID, &browser)],
+        &format!(r##"pane("{PANE_ID}").click("#counter")"##)
+    )
+    .is_ok());
+    assert!(run_script(
+        &workspace,
+        [(PANE_ID, &browser)],
+        &format!(r##"pane("{PANE_ID}").fill("#does-not-exist", "x")"##)
+    )
+    .is_err());
 }
 
 #[test]
@@ -89,5 +125,8 @@ fn a_script_can_address_two_different_live_panes() {
         [("pane-1", &browser_a), ("pane-2", &browser_b)],
         r##"pane("pane-1").fill("#counter", "a"); pane("pane-2").fill("#counter", "b");"##,
     );
-    assert!(result.is_ok(), "a script should be able to address multiple live panes by id: {result:?}");
+    assert!(
+        result.is_ok(),
+        "a script should be able to address multiple live panes by id: {result:?}"
+    );
 }

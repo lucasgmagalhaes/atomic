@@ -59,7 +59,10 @@ unsafe fn throw_type_error(ctx: *mut sys::JSContext, message: &str) -> sys::JSVa
 /// Reads the data behind a real `TrustedHTML` instance, or `None` for any
 /// other value — the one check both the sink gate ([`sink_html_string`])
 /// and anything else that needs a typed value's contents go through.
-pub(crate) unsafe fn trusted_html_data(ctx: *mut sys::JSContext, val: sys::JSValue) -> Option<String> {
+pub(crate) unsafe fn trusted_html_data(
+    ctx: *mut sys::JSContext,
+    val: sys::JSValue,
+) -> Option<String> {
     let class_id = crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), TRUSTED_HTML_KIND);
     let ptr = sys::JS_GetOpaque(val, class_id) as *mut String;
     (!ptr.is_null()).then(|| (*ptr).clone())
@@ -72,7 +75,11 @@ pub(crate) unsafe fn trusted_html_data(ctx: *mut sys::JSContext, val: sys::JSVal
 /// TypeError a real browser raises for a string assigned to an enforced
 /// sink. `Err` carries an already-thrown exception value the setter
 /// returns directly.
-pub(crate) unsafe fn sink_html_string(ctx: *mut sys::JSContext, val: sys::JSValue, sink_name: &str) -> Result<String, sys::JSValue> {
+pub(crate) unsafe fn sink_html_string(
+    ctx: *mut sys::JSContext,
+    val: sys::JSValue,
+    sink_name: &str,
+) -> Result<String, sys::JSValue> {
     if let Some(data) = trusted_html_data(ctx, val) {
         return Ok(data);
     }
@@ -87,7 +94,10 @@ pub(crate) unsafe fn sink_html_string(ctx: *mut sys::JSContext, val: sys::JSValu
                 Ok(html)
             }
         }
-        None => Err(throw_type_error(ctx, &format!("{sink_name} must be a string or TrustedHTML"))),
+        None => Err(throw_type_error(
+            ctx,
+            &format!("{sink_name} must be a string or TrustedHTML"),
+        )),
     }
 }
 
@@ -102,7 +112,12 @@ unsafe extern "C" fn trusted_html_finalizer(rt: *mut sys::JSRuntime, val: sys::J
 /// `String(trustedHtml)` / template / concatenation paths — the typed
 /// wrapper's data, so a policy-wrapped value reads back exactly what the
 /// policy approved.
-unsafe extern "C" fn trusted_html_to_string(ctx: *mut sys::JSContext, this_val: sys::JSValue, _argc: c_int, _argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn trusted_html_to_string(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
+) -> sys::JSValue {
     match trusted_html_data(ctx, this_val) {
         Some(data) => new_js_string(ctx, &data),
         None => throw_type_error(ctx, "invalid TrustedHTML receiver"),
@@ -117,7 +132,10 @@ fn make_trusted_html(ctx: *mut sys::JSContext, data: String) -> sys::JSValue {
         if sys::js_is_exception(&obj) {
             return obj;
         }
-        sys::JS_SetOpaque(obj, Box::into_raw(Box::new(data)) as *mut std::os::raw::c_void);
+        sys::JS_SetOpaque(
+            obj,
+            Box::into_raw(Box::new(data)) as *mut std::os::raw::c_void,
+        );
         obj
     }
 }
@@ -128,14 +146,23 @@ fn make_trusted_html(ctx: *mut sys::JSContext, data: String) -> sys::JSValue {
 /// wraps it in a fresh opaque `TrustedHTML`. A policy created without a
 /// `createHTML` handler throws, matching the real API's behavior for a
 /// missing handler with no default policy installed.
-unsafe extern "C" fn policy_create_html(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn policy_create_html(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
     let handler_name = CString::new("_createHTML").unwrap();
     let handler = sys::JS_GetPropertyStr(ctx, this_val, handler_name.as_ptr());
     if !sys::JS_IsFunction(ctx, handler) {
         sys::JS_FreeValue(ctx, handler);
         return throw_type_error(ctx, "This policy does not include a createHTML handler");
     }
-    let input = if argc >= 1 { sys::JS_DupValue(ctx, *argv) } else { sys::js_undefined() };
+    let input = if argc >= 1 {
+        sys::JS_DupValue(ctx, *argv)
+    } else {
+        sys::js_undefined()
+    };
     let mut args = [input];
     let result = sys::JS_Call(ctx, handler, sys::js_undefined(), 1, args.as_mut_ptr());
     sys::JS_FreeValue(ctx, args[0]);
@@ -145,7 +172,10 @@ unsafe extern "C" fn policy_create_html(ctx: *mut sys::JSContext, this_val: sys:
     }
     let Some(text) = read_js_string(ctx, result) else {
         sys::JS_FreeValue(ctx, result);
-        return throw_type_error(ctx, "createHTML handler did not return a stringifiable value");
+        return throw_type_error(
+            ctx,
+            "createHTML handler did not return a stringifiable value",
+        );
     };
     sys::JS_FreeValue(ctx, result);
     make_trusted_html(ctx, text)
@@ -158,7 +188,12 @@ unsafe extern "C" fn policy_create_html(ctx: *mut sys::JSContext, this_val: sys:
 /// object carrying `name` plus the live `createHTML` method. Only
 /// `createHTML` is recognized in `handlers`; other keys are ignored (no
 /// sinks exist for their types — see the module docs).
-unsafe extern "C" fn create_policy(ctx: *mut sys::JSContext, _this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn create_policy(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
     if argc < 1 {
         return throw_type_error(ctx, "createPolicy requires a policy name");
     }
@@ -204,7 +239,14 @@ unsafe extern "C" fn create_policy(ctx: *mut sys::JSContext, _this_val: sys::JSV
     let handler_key = CString::new("_createHTML").unwrap();
     sys::JS_SetPropertyStr(ctx, policy, handler_key.as_ptr(), handler);
     let method_name = CString::new("createHTML").unwrap();
-    let method = sys::JS_NewCFunction2(ctx, policy_create_html, method_name.as_ptr(), 1, sys::JS_CFUNC_GENERIC, 0);
+    let method = sys::JS_NewCFunction2(
+        ctx,
+        policy_create_html,
+        method_name.as_ptr(),
+        1,
+        sys::JS_CFUNC_GENERIC,
+        0,
+    );
     sys::JS_SetPropertyStr(ctx, policy, method_name.as_ptr(), method);
     policy
 }
@@ -212,7 +254,10 @@ unsafe extern "C" fn create_policy(ctx: *mut sys::JSContext, _this_val: sys::JSV
 /// `trustedTypes.defaultPolicy` — always null here; no default-policy
 /// constructor concept exists (a real one comes from a
 /// `'allow-duplicates'`-style declaration this engine doesn't parse).
-unsafe extern "C" fn default_policy_get(_ctx: *mut sys::JSContext, _this_val: sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn default_policy_get(
+    _ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+) -> sys::JSValue {
     sys::js_null()
 }
 
@@ -232,14 +277,28 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     let class_id = crate::class_registry::ensure_class(rt, TRUSTED_HTML_KIND, &def);
     let proto = sys::JS_NewObject(ctx);
     let to_string_name = CString::new("toString").unwrap();
-    let to_string = sys::JS_NewCFunction2(ctx, trusted_html_to_string, to_string_name.as_ptr(), 0, sys::JS_CFUNC_GENERIC, 0);
+    let to_string = sys::JS_NewCFunction2(
+        ctx,
+        trusted_html_to_string,
+        to_string_name.as_ptr(),
+        0,
+        sys::JS_CFUNC_GENERIC,
+        0,
+    );
     sys::JS_SetPropertyStr(ctx, proto, to_string_name.as_ptr(), to_string);
     sys::JS_SetClassProto(ctx, class_id, proto);
 
     let factory = sys::JS_NewObject(ctx);
 
     let create_name = CString::new("createPolicy").unwrap();
-    let create_fn = sys::JS_NewCFunction2(ctx, create_policy, create_name.as_ptr(), 2, sys::JS_CFUNC_GENERIC, 0);
+    let create_fn = sys::JS_NewCFunction2(
+        ctx,
+        create_policy,
+        create_name.as_ptr(),
+        2,
+        sys::JS_CFUNC_GENERIC,
+        0,
+    );
     sys::JS_SetPropertyStr(ctx, factory, create_name.as_ptr(), create_fn);
 
     define_getter(ctx, factory, "defaultPolicy", default_policy_get);
@@ -250,11 +309,31 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     sys::JS_FreeValue(ctx, global);
 }
 
-unsafe fn define_getter(ctx: *mut sys::JSContext, object: sys::JSValue, name: &str, getter: unsafe extern "C" fn(*mut sys::JSContext, sys::JSValue) -> sys::JSValue) {
+unsafe fn define_getter(
+    ctx: *mut sys::JSContext,
+    object: sys::JSValue,
+    name: &str,
+    getter: unsafe extern "C" fn(*mut sys::JSContext, sys::JSValue) -> sys::JSValue,
+) {
     let name_c = CString::new(name).unwrap();
-    type Getter = unsafe extern "C" fn(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue;
-    let f = sys::JS_NewCFunction2(ctx, std::mem::transmute::<Getter, sys::JSCFunction>(getter), name_c.as_ptr(), 0, sys::JS_CFUNC_GETTER, 0);
+    type Getter =
+        unsafe extern "C" fn(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue;
+    let f = sys::JS_NewCFunction2(
+        ctx,
+        std::mem::transmute::<Getter, sys::JSCFunction>(getter),
+        name_c.as_ptr(),
+        0,
+        sys::JS_CFUNC_GETTER,
+        0,
+    );
     let atom = sys::JS_NewAtom(ctx, name_c.as_ptr());
-    sys::JS_DefinePropertyGetSet(ctx, object, atom, f, sys::js_undefined(), sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE);
+    sys::JS_DefinePropertyGetSet(
+        ctx,
+        object,
+        atom,
+        f,
+        sys::js_undefined(),
+        sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE,
+    );
     sys::JS_FreeAtom(ctx, atom);
 }

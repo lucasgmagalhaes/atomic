@@ -50,7 +50,12 @@ const MANIFEST_FILE: &str = ".downloads.manifest";
 fn filename_from_url(url: &str) -> String {
     url::Url::parse(url)
         .ok()
-        .and_then(|u| u.path_segments().and_then(|mut s| s.next_back()).filter(|s| !s.is_empty()).map(str::to_string))
+        .and_then(|u| {
+            u.path_segments()
+                .and_then(|mut s| s.next_back())
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        })
         .unwrap_or_else(|| "download".to_string())
 }
 
@@ -64,16 +69,29 @@ fn parse_manifest_line(line: &str) -> Option<DownloadRecord> {
         Some(bytes) => Ok(bytes.parse().ok()?),
         None => Err(status.strip_prefix("ERR:")?.to_string()),
     };
-    Some(DownloadRecord { url, dest, result, at: UNIX_EPOCH + Duration::from_secs(secs) })
+    Some(DownloadRecord {
+        url,
+        dest,
+        result,
+        at: UNIX_EPOCH + Duration::from_secs(secs),
+    })
 }
 
 fn format_manifest_line(record: &DownloadRecord) -> String {
-    let secs = record.at.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    let secs = record
+        .at
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
     let status = match &record.result {
         Ok(bytes) => format!("OK:{bytes}"),
         Err(message) => format!("ERR:{}", message.replace(['\n', '\t'], " ")),
     };
-    format!("{secs}\t{}\t{}\t{status}", record.url, record.dest.display())
+    format!(
+        "{secs}\t{}\t{}\t{status}",
+        record.url,
+        record.dest.display()
+    )
 }
 
 impl Downloads {
@@ -83,7 +101,9 @@ impl Downloads {
     /// the same stable pane id), its entries are loaded immediately - see
     /// this module's own doc.
     pub fn new(dir: PathBuf) -> Self {
-        let entries = std::fs::read_to_string(dir.join(MANIFEST_FILE)).map(|text| text.lines().filter_map(parse_manifest_line).collect()).unwrap_or_default();
+        let entries = std::fs::read_to_string(dir.join(MANIFEST_FILE))
+            .map(|text| text.lines().filter_map(parse_manifest_line).collect())
+            .unwrap_or_default();
         Downloads { dir, entries }
     }
 
@@ -104,9 +124,22 @@ impl Downloads {
         // just wrote, not the response.
         let result = net::download(url, &dest)
             .map_err(|e| e.to_string())
-            .and_then(|_| std::fs::metadata(&dest).map(|m| m.len()).map_err(|e| e.to_string()));
-        let record = DownloadRecord { url: url.to_string(), dest, result, at: SystemTime::now() };
-        if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(self.dir.join(MANIFEST_FILE)) {
+            .and_then(|_| {
+                std::fs::metadata(&dest)
+                    .map(|m| m.len())
+                    .map_err(|e| e.to_string())
+            });
+        let record = DownloadRecord {
+            url: url.to_string(),
+            dest,
+            result,
+            at: SystemTime::now(),
+        };
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(self.dir.join(MANIFEST_FILE))
+        {
             let _ = writeln!(file, "{}", format_manifest_line(&record));
         }
         self.entries.push(record);

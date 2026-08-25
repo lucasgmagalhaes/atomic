@@ -79,11 +79,17 @@ impl<'rt> AutomationEngine<'rt> {
     /// host with a `workspace::WorkspaceManager` (`apps/shell`) would build
     /// this from the active workspace's profile ids, keeping only the ones
     /// it actually has a live `Profile` for.
-    pub fn new(runtime: &'rt Runtime, panes: HashMap<String, Rc<RefCell<profile::Profile>>>) -> Self {
+    pub fn new(
+        runtime: &'rt Runtime,
+        panes: HashMap<String, Rc<RefCell<profile::Profile>>>,
+    ) -> Self {
         let ctx = Context::new(runtime);
         let mut panes = Box::new(panes);
         unsafe {
-            pane::register(ctx.as_raw(), panes.as_mut() as *mut HashMap<String, Rc<RefCell<profile::Profile>>>);
+            pane::register(
+                ctx.as_raw(),
+                panes.as_mut() as *mut HashMap<String, Rc<RefCell<profile::Profile>>>,
+            );
             events::register(ctx.as_raw());
             cron::register(ctx.as_raw());
         }

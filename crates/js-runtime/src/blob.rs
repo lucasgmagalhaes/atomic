@@ -95,13 +95,20 @@ unsafe extern "C" fn blob_finalizer(rt: *mut sys::JSRuntime, val: sys::JSValue) 
     }
 }
 
-unsafe fn define_method(ctx: *mut sys::JSContext, proto: sys::JSValue, name: &str, func: sys::JSCFunction, length: c_int) {
+unsafe fn define_method(
+    ctx: *mut sys::JSContext,
+    proto: sys::JSValue,
+    name: &str,
+    func: sys::JSCFunction,
+    length: c_int,
+) {
     let name_c = CString::new(name).unwrap();
     let f = sys::JS_NewCFunction2(ctx, func, name_c.as_ptr(), length, sys::JS_CFUNC_GENERIC, 0);
     sys::JS_SetPropertyStr(ctx, proto, name_c.as_ptr(), f);
 }
 
-type Getter = unsafe extern "C" fn(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue;
+type Getter =
+    unsafe extern "C" fn(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue;
 
 unsafe fn define_getter(ctx: *mut sys::JSContext, proto: sys::JSValue, name: &str, getter: Getter) {
     let name_c = CString::new(name).unwrap();
@@ -125,7 +132,10 @@ unsafe fn define_getter(ctx: *mut sys::JSContext, proto: sys::JSValue, name: &st
     sys::JS_FreeAtom(ctx, atom);
 }
 
-unsafe extern "C" fn blob_size_get(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn blob_size_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
     let ptr = blob_opaque(sys::JS_GetRuntime(ctx), this_val);
     if ptr.is_null() {
         return sys::js_float64(0.0);
@@ -133,7 +143,10 @@ unsafe extern "C" fn blob_size_get(ctx: *mut sys::JSContext, this_val: sys::JSVa
     sys::js_float64((*ptr).bytes.len() as f64)
 }
 
-unsafe extern "C" fn blob_type_get(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn blob_type_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
     let ptr = blob_opaque(sys::JS_GetRuntime(ctx), this_val);
     if ptr.is_null() {
         return new_js_string(ctx, "");
@@ -180,7 +193,11 @@ unsafe fn append_part(ctx: *mut sys::JSContext, part: sys::JSValue, out: &mut Ve
 /// never a `File`, which relying on the implicit default (last writer
 /// between `ensure_blob_class("Blob", ...)`/`("File", ...)` wins, since
 /// both share one class id) got wrong regardless.
-unsafe fn resolve_prototype(ctx: *mut sys::JSContext, new_target: sys::JSValue, fallback_ctor_name: &str) -> sys::JSValue {
+unsafe fn resolve_prototype(
+    ctx: *mut sys::JSContext,
+    new_target: sys::JSValue,
+    fallback_ctor_name: &str,
+) -> sys::JSValue {
     if new_target.tag != sys::JS_TAG_UNDEFINED {
         let proto = get_prop(ctx, new_target, "prototype");
         if proto.tag != sys::JS_TAG_UNDEFINED {
@@ -201,7 +218,12 @@ unsafe fn resolve_prototype(ctx: *mut sys::JSContext, new_target: sys::JSValue, 
 /// Builds a new `Blob`/`File` instance with `proto` (borrowed - callers
 /// keep ownership, same as every other `JS_SetPrototype` use in this
 /// crate) as its prototype.
-unsafe fn make_blob_object(ctx: *mut sys::JSContext, proto: sys::JSValue, bytes: Vec<u8>, mime: String) -> sys::JSValue {
+unsafe fn make_blob_object(
+    ctx: *mut sys::JSContext,
+    proto: sys::JSValue,
+    bytes: Vec<u8>,
+    mime: String,
+) -> sys::JSValue {
     let class_id = crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), BLOB_CLASS_KIND);
     let obj = sys::JS_NewObjectClass(ctx, class_id);
     if sys::js_is_exception(&obj) {
@@ -210,7 +232,10 @@ unsafe fn make_blob_object(ctx: *mut sys::JSContext, proto: sys::JSValue, bytes:
     if proto.tag != sys::JS_TAG_UNDEFINED {
         sys::JS_SetPrototype(ctx, obj, proto);
     }
-    sys::JS_SetOpaque(obj, Box::into_raw(Box::new(BlobInner { bytes, mime })) as *mut c_void);
+    sys::JS_SetOpaque(
+        obj,
+        Box::into_raw(Box::new(BlobInner { bytes, mime })) as *mut c_void,
+    );
     obj
 }
 
@@ -240,7 +265,11 @@ unsafe extern "C" fn blob_constructor(
             sys::JS_FreeValue(ctx, part);
         }
     }
-    let mime = if argc >= 2 { read_options_type(ctx, *argv.add(1)) } else { String::new() };
+    let mime = if argc >= 2 {
+        read_options_type(ctx, *argv.add(1))
+    } else {
+        String::new()
+    };
     let proto = resolve_prototype(ctx, new_target, "Blob");
     let obj = make_blob_object(ctx, proto, bytes, mime);
     sys::JS_FreeValue(ctx, proto);
@@ -263,8 +292,16 @@ unsafe extern "C" fn file_constructor(
             sys::JS_FreeValue(ctx, part);
         }
     }
-    let name = if argc >= 2 { read_js_string(ctx, *argv.add(1)).unwrap_or_default() } else { String::new() };
-    let mime = if argc >= 3 { read_options_type(ctx, *argv.add(2)) } else { String::new() };
+    let name = if argc >= 2 {
+        read_js_string(ctx, *argv.add(1)).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let mime = if argc >= 3 {
+        read_options_type(ctx, *argv.add(2))
+    } else {
+        String::new()
+    };
 
     let proto = resolve_prototype(ctx, new_target, "File");
     let obj = make_blob_object(ctx, proto, bytes, mime);
@@ -276,19 +313,42 @@ unsafe extern "C" fn file_constructor(
     obj
 }
 
-unsafe extern "C" fn blob_slice(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn blob_slice(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
     let ptr = blob_opaque(sys::JS_GetRuntime(ctx), this_val);
     if ptr.is_null() {
         return sys::js_undefined();
     }
     let total = (*ptr).bytes.len() as i64;
-    let start = if argc >= 1 { read_js_number(*argv).map(|n| n as i64).unwrap_or(0) } else { 0 };
-    let end = if argc >= 2 { read_js_number(*argv.add(1)).map(|n| n as i64).unwrap_or(total) } else { total };
+    let start = if argc >= 1 {
+        read_js_number(*argv).map(|n| n as i64).unwrap_or(0)
+    } else {
+        0
+    };
+    let end = if argc >= 2 {
+        read_js_number(*argv.add(1))
+            .map(|n| n as i64)
+            .unwrap_or(total)
+    } else {
+        total
+    };
     let start = start.clamp(0, total) as usize;
     let end = end.clamp(0, total) as usize;
-    let sliced = if start < end { (&(*ptr).bytes)[start..end].to_vec() } else { Vec::new() };
+    let sliced = if start < end {
+        (&(*ptr).bytes)[start..end].to_vec()
+    } else {
+        Vec::new()
+    };
 
-    let mime = if argc >= 3 { read_js_string(ctx, *argv.add(2)).unwrap_or_default() } else { (*ptr).mime.clone() };
+    let mime = if argc >= 3 {
+        read_js_string(ctx, *argv.add(2)).unwrap_or_default()
+    } else {
+        (*ptr).mime.clone()
+    };
     // Per spec, `slice()` always returns a `Blob`, never a `File` -
     // `resolve_prototype` with `new_target: undefined` always takes the
     // fallback (`globalThis.Blob.prototype`) branch.
@@ -311,14 +371,28 @@ unsafe fn resolved_promise(ctx: *mut sys::JSContext, value: sys::JSValue) -> sys
     promise
 }
 
-unsafe extern "C" fn blob_text(ctx: *mut sys::JSContext, this_val: sys::JSValue, _argc: c_int, _argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn blob_text(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
+) -> sys::JSValue {
     let ptr = blob_opaque(sys::JS_GetRuntime(ctx), this_val);
-    let text = if ptr.is_null() { String::new() } else { String::from_utf8_lossy(&(*ptr).bytes).into_owned() };
+    let text = if ptr.is_null() {
+        String::new()
+    } else {
+        String::from_utf8_lossy(&(*ptr).bytes).into_owned()
+    };
     let js_text = new_js_string(ctx, &text);
     resolved_promise(ctx, js_text)
 }
 
-unsafe extern "C" fn blob_array_buffer(ctx: *mut sys::JSContext, this_val: sys::JSValue, _argc: c_int, _argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn blob_array_buffer(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
+) -> sys::JSValue {
     let ptr = blob_opaque(sys::JS_GetRuntime(ctx), this_val);
     let buf = if ptr.is_null() {
         sys::JS_NewArrayBufferCopy(ctx, std::ptr::null(), 0)
@@ -328,7 +402,11 @@ unsafe extern "C" fn blob_array_buffer(ctx: *mut sys::JSContext, this_val: sys::
     resolved_promise(ctx, buf)
 }
 
-unsafe fn ensure_blob_class(ctx: *mut sys::JSContext, name: &str, ctor: sys::JSCFunction) -> sys::JSClassID {
+unsafe fn ensure_blob_class(
+    ctx: *mut sys::JSContext,
+    name: &str,
+    ctor: sys::JSCFunction,
+) -> sys::JSClassID {
     let rt = sys::JS_GetRuntime(ctx);
     // `Blob` and `File` share one class/opaque layout (`BlobInner`) and
     // therefore one registry entry (`BLOB_CLASS_KIND`) - see
@@ -352,9 +430,21 @@ unsafe fn ensure_blob_class(ctx: *mut sys::JSContext, name: &str, ctor: sys::JSC
     define_method(ctx, proto, "arrayBuffer", blob_array_buffer, 0);
 
     let ctor_name = CString::new(name).unwrap();
-    let ctor_fn = sys::JS_NewCFunction2(ctx, ctor, ctor_name.as_ptr(), 2, sys::JS_CFUNC_CONSTRUCTOR_OR_FUNC, 0);
+    let ctor_fn = sys::JS_NewCFunction2(
+        ctx,
+        ctor,
+        ctor_name.as_ptr(),
+        2,
+        sys::JS_CFUNC_CONSTRUCTOR_OR_FUNC,
+        0,
+    );
     let proto_name = CString::new("prototype").unwrap();
-    sys::JS_SetPropertyStr(ctx, ctor_fn, proto_name.as_ptr(), sys::JS_DupValue(ctx, proto));
+    sys::JS_SetPropertyStr(
+        ctx,
+        ctor_fn,
+        proto_name.as_ptr(),
+        sys::JS_DupValue(ctx, proto),
+    );
     sys::JS_SetClassProto(ctx, class_id, proto);
 
     let global = sys::JS_GetGlobalObject(ctx);
@@ -364,7 +454,12 @@ unsafe fn ensure_blob_class(ctx: *mut sys::JSContext, name: &str, ctor: sys::JSC
     class_id
 }
 
-unsafe extern "C" fn create_object_url(ctx: *mut sys::JSContext, _this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn create_object_url(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
     if argc < 1 {
         return sys::js_undefined();
     }
@@ -374,14 +469,25 @@ unsafe extern "C" fn create_object_url(ctx: *mut sys::JSContext, _this_val: sys:
     }
     let id = NEXT_BLOB_URL_ID.fetch_add(1, Ordering::Relaxed);
     let url = format!("blob:nimble-internal/{id:016x}");
-    let entry = BlobInner { bytes: (*ptr).bytes.clone(), mime: (*ptr).mime.clone() };
+    let entry = BlobInner {
+        bytes: (*ptr).bytes.clone(),
+        mime: (*ptr).mime.clone(),
+    };
     OBJECT_URLS.with(|m| {
-        m.borrow_mut().entry(ctx as usize).or_default().insert(url.clone(), entry);
+        m.borrow_mut()
+            .entry(ctx as usize)
+            .or_default()
+            .insert(url.clone(), entry);
     });
     new_js_string(ctx, &url)
 }
 
-unsafe extern "C" fn revoke_object_url(ctx: *mut sys::JSContext, _this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn revoke_object_url(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
     if argc >= 1 {
         if let Some(url) = read_js_string(ctx, *argv) {
             OBJECT_URLS.with(|m| {
@@ -404,11 +510,25 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     let url_obj = sys::JS_NewObject(ctx);
 
     let create_name = CString::new("createObjectURL").unwrap();
-    let create_fn = sys::JS_NewCFunction2(ctx, create_object_url, create_name.as_ptr(), 1, sys::JS_CFUNC_GENERIC, 0);
+    let create_fn = sys::JS_NewCFunction2(
+        ctx,
+        create_object_url,
+        create_name.as_ptr(),
+        1,
+        sys::JS_CFUNC_GENERIC,
+        0,
+    );
     sys::JS_SetPropertyStr(ctx, url_obj, create_name.as_ptr(), create_fn);
 
     let revoke_name = CString::new("revokeObjectURL").unwrap();
-    let revoke_fn = sys::JS_NewCFunction2(ctx, revoke_object_url, revoke_name.as_ptr(), 1, sys::JS_CFUNC_GENERIC, 0);
+    let revoke_fn = sys::JS_NewCFunction2(
+        ctx,
+        revoke_object_url,
+        revoke_name.as_ptr(),
+        1,
+        sys::JS_CFUNC_GENERIC,
+        0,
+    );
     sys::JS_SetPropertyStr(ctx, url_obj, revoke_name.as_ptr(), revoke_fn);
 
     let url_name = CString::new("URL").unwrap();

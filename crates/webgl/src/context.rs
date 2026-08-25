@@ -105,7 +105,9 @@ impl WebGl {
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions::default())
             .await
-            .expect("no wgpu adapter available - this needs a GPU (or software fallback) on the host");
+            .expect(
+                "no wgpu adapter available - this needs a GPU (or software fallback) on the host",
+            );
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor::default(), None)
             .await
@@ -147,20 +149,26 @@ impl WebGl {
             return Err("fragment shader must be compiled with ShaderType::Fragment".into());
         }
 
-        let vs = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("webgl-vertex"),
-            source: wgpu::ShaderSource::Naga(Cow::Owned(vertex.module.clone())),
-        });
-        let fs = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("webgl-fragment"),
-            source: wgpu::ShaderSource::Naga(Cow::Owned(fragment.module.clone())),
-        });
+        let vs = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("webgl-vertex"),
+                source: wgpu::ShaderSource::Naga(Cow::Owned(vertex.module.clone())),
+            });
+        let fs = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("webgl-fragment"),
+                source: wgpu::ShaderSource::Naga(Cow::Owned(fragment.module.clone())),
+            });
 
-        let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("webgl-program-layout"),
-            bind_group_layouts: &[],
-            push_constant_ranges: &[],
-        });
+        let layout = self
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("webgl-program-layout"),
+                bind_group_layouts: &[],
+                push_constant_ranges: &[],
+            });
 
         let vertex_attrs: Vec<wgpu::VertexAttribute> = attributes
             .iter()
@@ -170,7 +178,9 @@ impl WebGl {
                     2 => wgpu::VertexFormat::Float32x2,
                     3 => wgpu::VertexFormat::Float32x3,
                     4 => wgpu::VertexFormat::Float32x4,
-                    other => panic!("vertexAttribPointer: unsupported component count {other} (must be 1-4)"),
+                    other => panic!(
+                        "vertexAttribPointer: unsupported component count {other} (must be 1-4)"
+                    ),
                 };
                 wgpu::VertexAttribute {
                     offset: a.offset,
@@ -186,32 +196,34 @@ impl WebGl {
             attributes: &vertex_attrs,
         };
 
-        let pipeline = self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("webgl-program"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &vs,
-                entry_point: "main",
-                buffers: &[vertex_layout],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &fs,
-                entry_point: "main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            // TriangleList by default - matches gl.TRIANGLES, the only
-            // primitive topology this crate supports.
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-        });
+        let pipeline = self
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("webgl-program"),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &vs,
+                    entry_point: "main",
+                    buffers: &[vertex_layout],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &fs,
+                    entry_point: "main",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                // TriangleList by default - matches gl.TRIANGLES, the only
+                // primitive topology this crate supports.
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+            });
 
         Ok(Program { pipeline })
     }
@@ -248,11 +260,13 @@ impl WebGl {
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         use wgpu::util::DeviceExt;
-        let vertex_buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("webgl-vertex-buffer"),
-            contents: bytemuck::cast_slice(vertex_data),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
+        let vertex_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("webgl-vertex-buffer"),
+                contents: bytemuck::cast_slice(vertex_data),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
 
         let mut encoder = self
             .device

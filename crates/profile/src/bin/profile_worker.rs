@@ -138,12 +138,15 @@ use std::time::{Duration, Instant};
 use css::{parse_stylesheet, Stylesheet};
 use dom::{Dom, NodeData, NodeId};
 use image_decode::DecodedImage;
-use js_runtime::{Context, Runtime};
 use js_runtime::Rect as LayoutMeasurementRect;
-use layout_engine::{apply_image_sizes, build_box_tree_with_viewport, layout_block, Color, Display, Length, LayoutBox, Position, PositionedGlyph};
+use js_runtime::{Context, Runtime};
+use layout_engine::{
+    apply_image_sizes, build_box_tree_with_viewport, layout_block, Color, Display, LayoutBox,
+    Length, Position, PositionedGlyph,
+};
 use render::{
-    build_display_list, build_glyph_list, build_image_list, composite_glyphs, composite_images, ClipRect, ClippedGlyph, GpuRenderer,
-    ImageQuad, Rect,
+    build_display_list, build_glyph_list, build_image_list, composite_glyphs, composite_images,
+    ClipRect, ClippedGlyph, GpuRenderer, ImageQuad, Rect,
 };
 
 const TARGET_FPS: u32 = 60;
@@ -210,11 +213,17 @@ enum CssSource {
 /// ones).
 fn collect_css_sources(dom: &Dom, node: NodeId, out: &mut Vec<CssSource>) {
     let Some(n) = dom.get(node) else { return };
-    if let NodeData::Element { tag, attributes, .. } = &n.data {
+    if let NodeData::Element {
+        tag, attributes, ..
+    } = &n.data
+    {
         if tag == "style" {
             out.push(CssSource::Inline(dom.text_content(node)));
         } else if tag == "link" {
-            let is_stylesheet = attributes.get("rel").map(|r| r.eq_ignore_ascii_case("stylesheet")).unwrap_or(false);
+            let is_stylesheet = attributes
+                .get("rel")
+                .map(|r| r.eq_ignore_ascii_case("stylesheet"))
+                .unwrap_or(false);
             if is_stylesheet {
                 if let Some(href) = attributes.get("href") {
                     out.push(CssSource::Link(href.clone()));
@@ -286,7 +295,13 @@ fn format_length(length: Length) -> String {
 }
 
 fn format_color(color: Color) -> String {
-    format!("rgba({}, {}, {}, {})", color.r, color.g, color.b, color.a as f64 / 255.0)
+    format!(
+        "rgba({}, {}, {}, {})",
+        color.r,
+        color.g,
+        color.b,
+        color.a as f64 / 255.0
+    )
 }
 
 /// Flattens a laid-out `LayoutBox` tree's per-box `ComputedStyle` into a
@@ -311,23 +326,45 @@ fn collect_computed_styles(tree: &LayoutBox) -> HashMap<NodeId, HashMap<String, 
             }
             .to_string(),
         );
-        properties.insert("position".to_string(), match style.position {
-            Position::Static => "static",
-            Position::Relative => "relative",
-            Position::Absolute => "absolute",
-        }.to_string());
+        properties.insert(
+            "position".to_string(),
+            match style.position {
+                Position::Static => "static",
+                Position::Relative => "relative",
+                Position::Absolute => "absolute",
+            }
+            .to_string(),
+        );
         properties.insert("width".to_string(), format_length(style.width));
         properties.insert("height".to_string(), format_length(style.height));
         properties.insert("margin-top".to_string(), format_length(style.margin.top));
-        properties.insert("margin-right".to_string(), format_length(style.margin.right));
-        properties.insert("margin-bottom".to_string(), format_length(style.margin.bottom));
+        properties.insert(
+            "margin-right".to_string(),
+            format_length(style.margin.right),
+        );
+        properties.insert(
+            "margin-bottom".to_string(),
+            format_length(style.margin.bottom),
+        );
         properties.insert("margin-left".to_string(), format_length(style.margin.left));
         properties.insert("padding-top".to_string(), format_length(style.padding.top));
-        properties.insert("padding-right".to_string(), format_length(style.padding.right));
-        properties.insert("padding-bottom".to_string(), format_length(style.padding.bottom));
-        properties.insert("padding-left".to_string(), format_length(style.padding.left));
+        properties.insert(
+            "padding-right".to_string(),
+            format_length(style.padding.right),
+        );
+        properties.insert(
+            "padding-bottom".to_string(),
+            format_length(style.padding.bottom),
+        );
+        properties.insert(
+            "padding-left".to_string(),
+            format_length(style.padding.left),
+        );
         properties.insert("color".to_string(), format_color(style.color));
-        properties.insert("background-color".to_string(), format_color(style.background_color));
+        properties.insert(
+            "background-color".to_string(),
+            format_color(style.background_color),
+        );
         properties.insert("font-size".to_string(), format!("{}px", style.font_size));
         properties.insert("opacity".to_string(), style.opacity.to_string());
         out.insert(box_.node, properties);
@@ -342,7 +379,10 @@ fn collect_computed_styles(tree: &LayoutBox) -> HashMap<NodeId, HashMap<String, 
 
 fn collect_script_sources(dom: &Dom, node: NodeId, out: &mut Vec<String>) {
     let Some(n) = dom.get(node) else { return };
-    if let NodeData::Element { tag, attributes, .. } = &n.data {
+    if let NodeData::Element {
+        tag, attributes, ..
+    } = &n.data
+    {
         if tag == "script" && !attributes.contains_key("src") {
             out.push(dom.text_content(node));
         }
@@ -365,9 +405,14 @@ fn collect_script_sources(dom: &Dom, node: NodeId, out: &mut Vec<String>) {
 /// page load, including its scripts.
 fn collect_meta_csp_policies(dom: &Dom, node: NodeId, out: &mut Vec<String>) {
     let Some(n) = dom.get(node) else { return };
-    if let NodeData::Element { tag, attributes, .. } = &n.data {
+    if let NodeData::Element {
+        tag, attributes, ..
+    } = &n.data
+    {
         if tag == "meta"
-            && attributes.get("http-equiv").is_some_and(|v| v.eq_ignore_ascii_case("content-security-policy"))
+            && attributes
+                .get("http-equiv")
+                .is_some_and(|v| v.eq_ignore_ascii_case("content-security-policy"))
         {
             if let Some(policy) = attributes.get("content").filter(|p| !p.is_empty()) {
                 out.push(policy.clone());
@@ -390,7 +435,10 @@ fn collect_meta_csp_policies(dom: &Dom, node: NodeId, out: &mut Vec<String>) {
 /// "gap total" — this closes the missing wiring, not new primitives.
 fn collect_image_sources(dom: &Dom, node: NodeId, out: &mut Vec<(NodeId, String)>) {
     let Some(n) = dom.get(node) else { return };
-    if let NodeData::Element { tag, attributes, .. } = &n.data {
+    if let NodeData::Element {
+        tag, attributes, ..
+    } = &n.data
+    {
         if tag == "img" {
             if let Some(src) = attributes.get("src") {
                 out.push((node, src.clone()));
@@ -427,9 +475,15 @@ fn load_images(
 
     let mut images = HashMap::new();
     for (node, src) in sources {
-        let Some(url) = resolve_url(base_url, &src) else { continue };
-        let Ok(response) = fetch_with_cookies(&url, storage_root, proxy, dns_server) else { continue };
-        let Some(decoded) = image_decode::decode(&response.body) else { continue };
+        let Some(url) = resolve_url(base_url, &src) else {
+            continue;
+        };
+        let Ok(response) = fetch_with_cookies(&url, storage_root, proxy, dns_server) else {
+            continue;
+        };
+        let Some(decoded) = image_decode::decode(&response.body) else {
+            continue;
+        };
         images.insert(node, Rc::new(decoded));
     }
     images
@@ -458,18 +512,38 @@ fn load_images(
 /// wins if both are set (there's no `net` entry point combining custom
 /// DNS resolution with proxy tunneling — a proxied request's DNS
 /// resolution is the proxy's own job, not this worker's).
-fn fetch_with_cookies(url: &str, storage_root: &std::path::Path, proxy: Option<&net::ProxyConfig>, dns_server: Option<std::net::SocketAddr>) -> Result<net::Response, net::Error> {
+fn fetch_with_cookies(
+    url: &str,
+    storage_root: &std::path::Path,
+    proxy: Option<&net::ProxyConfig>,
+    dns_server: Option<std::net::SocketAddr>,
+) -> Result<net::Response, net::Error> {
     let parsed = url::Url::parse(url).ok();
-    let host = parsed.as_ref().and_then(|u| u.host_str()).map(str::to_string);
-    let path = parsed.as_ref().map(|u| u.path().to_string()).unwrap_or_else(|| "/".to_string());
-    let secure = parsed.as_ref().map(|u| u.scheme() == "https").unwrap_or(false);
+    let host = parsed
+        .as_ref()
+        .and_then(|u| u.host_str())
+        .map(str::to_string);
+    let path = parsed
+        .as_ref()
+        .map(|u| u.path().to_string())
+        .unwrap_or_else(|| "/".to_string());
+    let secure = parsed
+        .as_ref()
+        .map(|u| u.scheme() == "https")
+        .unwrap_or(false);
 
-    let mut jar = host
+    let mut jar = host.as_deref().and_then(|h| {
+        storage::cookies::CookieJar::open(storage_root.join(h).join("cookies.txt")).ok()
+    });
+
+    let cookie_header = jar
+        .as_ref()
+        .zip(host.as_deref())
+        .and_then(|(jar, h)| jar.header_value(h, &path, secure));
+    let extra_headers: Vec<(&str, &str)> = cookie_header
         .as_deref()
-        .and_then(|h| storage::cookies::CookieJar::open(storage_root.join(h).join("cookies.txt")).ok());
-
-    let cookie_header = jar.as_ref().zip(host.as_deref()).and_then(|(jar, h)| jar.header_value(h, &path, secure));
-    let extra_headers: Vec<(&str, &str)> = cookie_header.as_deref().map(|v| vec![("Cookie", v)]).unwrap_or_default();
+        .map(|v| vec![("Cookie", v)])
+        .unwrap_or_default();
 
     let response = match (proxy, dns_server) {
         (Some(proxy), _) => net::get_via_proxy(url, &extra_headers, proxy)?,
@@ -514,7 +588,12 @@ fn parse_proxy_arg(arg: Option<&str>) -> Option<net::ProxyConfig> {
         Some((user, pass)) => (Some(user.to_string()), Some(pass.to_string())),
         None => (None, None),
     };
-    Some(net::ProxyConfig { host: host.to_string(), port, username, password })
+    Some(net::ProxyConfig {
+        host: host.to_string(),
+        port,
+        username,
+        password,
+    })
 }
 
 /// Parses this worker's optional 6th CLI argument (`"host:port"`) into
@@ -588,7 +667,11 @@ fn merge_stylesheet_text(
 ) {
     let parsed = parse_stylesheet(css_text);
     for import in &parsed.imports {
-        let should_fetch = import.media.as_ref().map(|m| m.matches(viewport_width)).unwrap_or(true);
+        let should_fetch = import
+            .media
+            .as_ref()
+            .map(|m| m.matches(viewport_width))
+            .unwrap_or(true);
         if !should_fetch {
             continue;
         }
@@ -623,7 +706,15 @@ fn build_stylesheet(
                 .map(|response| String::from_utf8_lossy(&response.body).into_owned()),
         };
         if let Some(css_text) = css_text {
-            merge_stylesheet_text(&mut sheet, &css_text, base_url, viewport_width, storage_root, proxy, dns_server);
+            merge_stylesheet_text(
+                &mut sheet,
+                &css_text,
+                base_url,
+                viewport_width,
+                storage_root,
+                proxy,
+                dns_server,
+            );
         }
     }
     sheet
@@ -636,7 +727,9 @@ enum PageSource {
 }
 
 fn escape_html_text(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 fn error_page_html(url: &str, message: &str) -> String {
@@ -667,9 +760,17 @@ struct LoadedDocument {
 /// `Content-Security-Policy` headers — extracted here because this is the
 /// only place that still holds the raw response; `Page::load` only ever
 /// saw the body string.
-fn resolve_document(source: &PageSource, storage_root: &std::path::Path, proxy: Option<&net::ProxyConfig>, dns_server: Option<std::net::SocketAddr>) -> Result<LoadedDocument, String> {
+fn resolve_document(
+    source: &PageSource,
+    storage_root: &std::path::Path,
+    proxy: Option<&net::ProxyConfig>,
+    dns_server: Option<std::net::SocketAddr>,
+) -> Result<LoadedDocument, String> {
     match source {
-        PageSource::Demo => Ok(LoadedDocument { html: DEMO_HTML.to_string(), csp_policies: Vec::new() }),
+        PageSource::Demo => Ok(LoadedDocument {
+            html: DEMO_HTML.to_string(),
+            csp_policies: Vec::new(),
+        }),
         PageSource::Url(url) => fetch_with_cookies(url, storage_root, proxy, dns_server)
             .map(|response| LoadedDocument {
                 html: String::from_utf8_lossy(&response.body).into_owned(),
@@ -694,7 +795,9 @@ fn require_id_selector(selector: &str) -> Result<&str, String> {
     selector
         .strip_prefix('#')
         .filter(|id| !id.is_empty())
-        .ok_or_else(|| format!("unsupported selector \"{selector}\" - only #id selectors are implemented"))
+        .ok_or_else(|| {
+            format!("unsupported selector \"{selector}\" - only #id selectors are implemented")
+        })
 }
 
 /// A valid JS double-quoted string literal for `s` - just enough escaping
@@ -734,7 +837,9 @@ fn dispatch_click(ctx: &Context, selector: &str) -> Result<(), String> {
         id = js_string_literal(id),
         missing = js_string_literal(&format!("no element with id \"{id}\"")),
     );
-    ctx.eval(&script, "<pane click>").map(|_| ()).map_err(|_| format!("no element with id \"{id}\" (or its click handler threw)"))
+    ctx.eval(&script, "<pane click>")
+        .map(|_| ())
+        .map_err(|_| format!("no element with id \"{id}\" (or its click handler threw)"))
 }
 
 /// Real focus, via the JS `.focus()` binding rather than calling
@@ -748,7 +853,9 @@ fn focus_element(ctx: &Context, id: &str) -> Result<(), String> {
         id = js_string_literal(id),
         missing = js_string_literal(&format!("no element with id \"{id}\"")),
     );
-    ctx.eval(&script, "<pane focus>").map(|_| ()).map_err(|_| format!("no element with id \"{id}\""))
+    ctx.eval(&script, "<pane focus>")
+        .map(|_| ())
+        .map_err(|_| format!("no element with id \"{id}\""))
 }
 
 /// Real blur, via the JS `.blur()` binding — see `focus_element`'s own doc
@@ -761,7 +868,9 @@ fn blur_element(ctx: &Context, id: &str) -> Result<(), String> {
         id = js_string_literal(id),
         missing = js_string_literal(&format!("no element with id \"{id}\"")),
     );
-    ctx.eval(&script, "<pane blur>").map(|_| ()).map_err(|_| format!("no element with id \"{id}\""))
+    ctx.eval(&script, "<pane blur>")
+        .map(|_| ())
+        .map_err(|_| format!("no element with id \"{id}\""))
 }
 
 /// `true` if `node` is a real `<input>`/`<textarea>` — the only tags this
@@ -780,8 +889,14 @@ fn fill_element(ctx: &Context, selector: &str, value: &str) -> Result<(), String
     let id = require_id_selector(selector)?;
     let prop = {
         let dom_ref = ctx.dom().ok_or("no DOM available")?;
-        let node = dom_ref.find_by_id(id).ok_or_else(|| format!("no element with id \"{id}\""))?;
-        if is_input_like(dom_ref, node) { "value" } else { "textContent" }
+        let node = dom_ref
+            .find_by_id(id)
+            .ok_or_else(|| format!("no element with id \"{id}\""))?;
+        if is_input_like(dom_ref, node) {
+            "value"
+        } else {
+            "textContent"
+        }
     };
     let script = format!(
         "(function(){{ var el = document.getElementById({id}); if (el === null) throw {missing}; el.{prop} = {value}; }})();",
@@ -789,7 +904,9 @@ fn fill_element(ctx: &Context, selector: &str, value: &str) -> Result<(), String
         missing = js_string_literal(&format!("no element with id \"{id}\"")),
         value = js_string_literal(value),
     );
-    ctx.eval(&script, "<pane fill>").map(|_| ()).map_err(|_| format!("no element with id \"{id}\""))
+    ctx.eval(&script, "<pane fill>")
+        .map(|_| ())
+        .map_err(|_| format!("no element with id \"{id}\""))
 }
 
 /// One (re)loadable "page": the parsed DOM's root `<html>` element, its
@@ -856,20 +973,30 @@ impl<'rt> Page<'rt> {
     ) -> Self {
         let html = &doc.html;
         let (dom, html_el) = html::parse_to_html_element(html);
-        let sheet = build_stylesheet(&dom, html_el, base_url, viewport_width, storage_root, proxy, dns_server);
+        let sheet = build_stylesheet(
+            &dom,
+            html_el,
+            base_url,
+            viewport_width,
+            storage_root,
+            proxy,
+            dns_server,
+        );
         let images = load_images(&dom, html_el, base_url, storage_root, proxy, dns_server);
         let mut scripts = Vec::new();
         collect_script_sources(&dom, html_el, &mut scripts);
 
         let mut ctx = match storage_host {
-            Some(host) => match Context::with_storage(runtime, dom, host, storage_root.join(host)) {
-                Ok(ctx) => ctx,
-                // `with_storage` already consumed `dom` by the time it can
-                // fail (a rare I/O error opening the storage files) - it
-                // has to be re-parsed from `html` rather than reused,
-                // acceptable for a path this unlikely to hit in practice.
-                Err(_) => Context::with_dom(runtime, html::parse_to_html_element(html).0),
-            },
+            Some(host) => {
+                match Context::with_storage(runtime, dom, host, storage_root.join(host)) {
+                    Ok(ctx) => ctx,
+                    // `with_storage` already consumed `dom` by the time it can
+                    // fail (a rare I/O error opening the storage files) - it
+                    // has to be re-parsed from `html` rather than reused,
+                    // acceptable for a path this unlikely to hit in practice.
+                    Err(_) => Context::with_dom(runtime, html::parse_to_html_element(html).0),
+                }
+            }
             None => Context::with_dom(runtime, dom),
         };
         if let Some(url) = base_url {
@@ -888,7 +1015,12 @@ impl<'rt> Page<'rt> {
             ctx.add_csp_policy(policy);
         }
         let mut meta_policies = Vec::new();
-        collect_meta_csp_policies(ctx.dom().expect("Page::load always builds its context over a dom"), html_el, &mut meta_policies);
+        collect_meta_csp_policies(
+            ctx.dom()
+                .expect("Page::load always builds its context over a dom"),
+            html_el,
+            &mut meta_policies,
+        );
         for policy in meta_policies {
             ctx.add_csp_policy(&policy);
         }
@@ -911,7 +1043,13 @@ impl<'rt> Page<'rt> {
         // real browser's own ordering (see `Context::dispatch_lifecycle_events`'s
         // doc for the scope this crate cuts relative to the full spec).
         ctx.dispatch_lifecycle_events();
-        Page { ctx, html_el, sheet, images, layout_cache: std::cell::RefCell::new(None) }
+        Page {
+            ctx,
+            html_el,
+            sheet,
+            images,
+            layout_cache: std::cell::RefCell::new(None),
+        }
     }
 
     /// Builds and lays out this page's real box tree against `width` —
@@ -933,7 +1071,10 @@ impl<'rt> Page<'rt> {
         let adopted_text = self.ctx.adopted_stylesheet_text();
 
         if let Some(cached) = self.layout_cache.borrow().as_ref() {
-            if cached.width == width && cached.dom_mutations == dom_mutations && cached.adopted_text == adopted_text {
+            if cached.width == width
+                && cached.dom_mutations == dom_mutations
+                && cached.adopted_text == adopted_text
+            {
                 return Some(cached.tree.clone());
             }
         }
@@ -953,7 +1094,12 @@ impl<'rt> Page<'rt> {
         apply_image_sizes(dom, &mut tree, &self.images);
         layout_block(&mut tree, width as f64, 0.0, 0.0);
 
-        *self.layout_cache.borrow_mut() = Some(LayoutCache { width, dom_mutations, adopted_text, tree: tree.clone() });
+        *self.layout_cache.borrow_mut() = Some(LayoutCache {
+            width,
+            dom_mutations,
+            adopted_text,
+            tree: tree.clone(),
+        });
         Some(tree)
     }
 
@@ -964,7 +1110,9 @@ impl<'rt> Page<'rt> {
     /// arbitrary range. `0.0` if layout itself fails (same "nothing to
     /// scroll" outcome as a page shorter than its viewport).
     fn content_height(&self, width: u32) -> f64 {
-        self.layout(width).map(|tree| tree.dimensions.height).unwrap_or(0.0)
+        self.layout(width)
+            .map(|tree| tree.dimensions.height)
+            .unwrap_or(0.0)
     }
 
     /// Re-layouts and re-rasterizes from the DOM's *current* state (which
@@ -997,14 +1145,29 @@ impl<'rt> Page<'rt> {
     /// absolute document space as everything else, so it needs the same
     /// `-offset`/`-scroll_top` shift applied as the quad/glyph it clips,
     /// or a scrolled page would clip against a stale, unscrolled region.
-    fn render(&mut self, renderer: &GpuRenderer, width: u32, height: u32, scroll_top: f64) -> Vec<u8> {
-        let tree = self.layout(width).expect("parsed HTML always produces a box");
+    fn render(
+        &mut self,
+        renderer: &GpuRenderer,
+        width: u32,
+        height: u32,
+        scroll_top: f64,
+    ) -> Vec<u8> {
+        let tree = self
+            .layout(width)
+            .expect("parsed HTML always produces a box");
         self.ctx.set_layout_rects(collect_layout_rects(&tree));
         self.ctx.set_computed_styles(collect_computed_styles(&tree));
         let offset = scroll_top as f32;
-        let shift_clip = |clip: Option<ClipRect>, dy: f32| clip.map(|c| ClipRect { y: c.y - dy, ..c });
+        let shift_clip =
+            |clip: Option<ClipRect>, dy: f32| clip.map(|c| ClipRect { y: c.y - dy, ..c });
 
-        let rects: Vec<Rect> = build_display_list(&tree).into_iter().map(|r| Rect { y: r.y - offset, ..r }).collect();
+        let rects: Vec<Rect> = build_display_list(&tree)
+            .into_iter()
+            .map(|r| Rect {
+                y: r.y - offset,
+                ..r
+            })
+            .collect();
         let images: Vec<ImageQuad> = build_image_list(&tree)
             .into_iter()
             .map(|q| ImageQuad {
@@ -1016,7 +1179,10 @@ impl<'rt> Page<'rt> {
         let glyphs: Vec<ClippedGlyph> = build_glyph_list(&tree)
             .into_iter()
             .map(|g| ClippedGlyph {
-                glyph: PositionedGlyph { y: g.glyph.y - scroll_top as i32, ..g.glyph },
+                glyph: PositionedGlyph {
+                    y: g.glyph.y - scroll_top as i32,
+                    ..g.glyph
+                },
                 clip: shift_clip(g.clip, offset),
                 opacity: g.opacity,
             })
@@ -1086,11 +1252,20 @@ fn nearest_id_ancestor(dom: &Dom, node: NodeId) -> Option<String> {
 /// redundant `blur`+`focus` pair), matching a real browser not re-firing
 /// focus on a click to a field that already has it. See `tab_focus` for
 /// the other way focus moves - a real `Tab`/`Shift+Tab` press.
-fn dispatch_click_at(page: &mut Page, width: u32, x: f64, y: f64, scroll_top: f64) -> Result<Option<String>, String> {
-    let node = page.hit_test_at(width, x, y, scroll_top).ok_or("no element at that point")?;
+fn dispatch_click_at(
+    page: &mut Page,
+    width: u32,
+    x: f64,
+    y: f64,
+    scroll_top: f64,
+) -> Result<Option<String>, String> {
+    let node = page
+        .hit_test_at(width, x, y, scroll_top)
+        .ok_or("no element at that point")?;
     let click_id = {
         let dom_ref = page.ctx.dom().ok_or("no DOM available")?;
-        nearest_id_ancestor(dom_ref, node).ok_or("no id-addressable element at or above that point")?
+        nearest_id_ancestor(dom_ref, node)
+            .ok_or("no id-addressable element at or above that point")?
     };
     dispatch_click(&page.ctx, &format!("#{click_id}"))?;
 
@@ -1102,12 +1277,18 @@ fn dispatch_click_at(page: &mut Page, width: u32, x: f64, y: f64, scroll_top: f6
     let (focusable, focus_id, already_focused, previously_focused_id) = {
         let dom_ref = page.ctx.dom().ok_or("no DOM available")?;
         let focusable = is_input_like(dom_ref, node);
-        let focus_id = if focusable { dom_ref.attribute(node, "id").map(str::to_string) } else { None };
+        let focus_id = if focusable {
+            dom_ref.attribute(node, "id").map(str::to_string)
+        } else {
+            None
+        };
         let already_focused = focusable && dom_ref.active_element() == Some(node);
         let previously_focused_id = if already_focused {
             None
         } else {
-            dom_ref.active_element().and_then(|prev| dom_ref.attribute(prev, "id").map(str::to_string))
+            dom_ref
+                .active_element()
+                .and_then(|prev| dom_ref.attribute(prev, "id").map(str::to_string))
         };
         (focusable, focus_id, already_focused, previously_focused_id)
     };
@@ -1134,7 +1315,9 @@ fn dispatch_click_at(page: &mut Page, width: u32, x: f64, y: f64, scroll_top: f6
 fn type_key(ctx: &Context, focused_id: &str, key: &str) -> Result<(), String> {
     let current = {
         let dom_ref = ctx.dom().ok_or("no DOM available")?;
-        let node = dom_ref.find_by_id(focused_id).ok_or_else(|| format!("no element with id \"{focused_id}\""))?;
+        let node = dom_ref
+            .find_by_id(focused_id)
+            .ok_or_else(|| format!("no element with id \"{focused_id}\""))?;
         dom_ref.value(node)
     };
     let updated = if key == "Backspace" {
@@ -1150,7 +1333,9 @@ fn type_key(ctx: &Context, focused_id: &str, key: &str) -> Result<(), String> {
         missing = js_string_literal(&format!("no element with id \"{focused_id}\"")),
         value = js_string_literal(&updated),
     );
-    ctx.eval(&script, "<pane key>").map(|_| ()).map_err(|_| format!("no element with id \"{focused_id}\" (or its keydown handler threw)"))
+    ctx.eval(&script, "<pane key>")
+        .map(|_| ())
+        .map_err(|_| format!("no element with id \"{focused_id}\" (or its keydown handler threw)"))
 }
 
 /// Real `Tab` (`reverse: false`) / `Shift+Tab` (`reverse: true`) focus
@@ -1175,7 +1360,9 @@ fn tab_focus(page: &mut Page, reverse: bool) -> Result<Option<String>, String> {
         if order.is_empty() {
             return Ok(None);
         }
-        let current_index = dom_ref.active_element().and_then(|id| order.iter().position(|&n| n == id));
+        let current_index = dom_ref
+            .active_element()
+            .and_then(|id| order.iter().position(|&n| n == id));
         let start = match (current_index, reverse) {
             (Some(i), false) => (i + 1) % order.len(),
             (Some(i), true) => (i + order.len() - 1) % order.len(),
@@ -1184,10 +1371,13 @@ fn tab_focus(page: &mut Page, reverse: bool) -> Result<Option<String>, String> {
         };
         let step: i64 = if reverse { -1 } else { 1 };
         let target_id = (0..order.len()).find_map(|offset| {
-            let index = (start as i64 + step * offset as i64).rem_euclid(order.len() as i64) as usize;
+            let index =
+                (start as i64 + step * offset as i64).rem_euclid(order.len() as i64) as usize;
             dom_ref.attribute(order[index], "id").map(str::to_string)
         });
-        let previously_focused_id = dom_ref.active_element().and_then(|prev| dom_ref.attribute(prev, "id").map(str::to_string));
+        let previously_focused_id = dom_ref
+            .active_element()
+            .and_then(|prev| dom_ref.attribute(prev, "id").map(str::to_string));
         (target_id, previously_focused_id)
     };
 
@@ -1227,12 +1417,27 @@ fn load_source<'rt>(
     };
     let storage_host = match source {
         PageSource::Demo => Some(DEMO_STORAGE_HOST.to_string()),
-        PageSource::Url(url) => url::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_string)),
+        PageSource::Url(url) => url::Url::parse(url)
+            .ok()
+            .and_then(|u| u.host_str().map(str::to_string)),
     };
     match resolve_document(source, storage_root, proxy, dns_server) {
         Ok(doc) => {
             let run_demo_script = matches!(source, PageSource::Demo);
-            (Page::load(runtime, &doc, run_demo_script, base_url, storage_host.as_deref(), viewport_width, storage_root, proxy, dns_server), None)
+            (
+                Page::load(
+                    runtime,
+                    &doc,
+                    run_demo_script,
+                    base_url,
+                    storage_host.as_deref(),
+                    viewport_width,
+                    storage_root,
+                    proxy,
+                    dns_server,
+                ),
+                None,
+            )
         }
         Err(message) => {
             let url = match source {
@@ -1249,7 +1454,10 @@ fn load_source<'rt>(
             (
                 Page::load(
                     runtime,
-                    &LoadedDocument { html: error_page_html(url, &message), csp_policies: Vec::new() },
+                    &LoadedDocument {
+                        html: error_page_html(url, &message),
+                        csp_policies: Vec::new(),
+                    },
                     false,
                     None,
                     storage_host.as_deref(),
@@ -1280,24 +1488,37 @@ fn main() {
     // about an optional trailing arg" stance as `dns_server`, not `proxy`'s
     // stricter one (there's no "adapter selection failed" state worth
     // reporting back over the stdin/stdout protocol; it just falls back).
-    let gpu_adapter: Option<usize> = args.get(6).filter(|s| !s.is_empty()).and_then(|s| s.parse().ok());
+    let gpu_adapter: Option<usize> = args
+        .get(6)
+        .filter(|s| !s.is_empty())
+        .and_then(|s| s.parse().ok());
 
     // One storage root per worker process, keyed by shmem name (already
     // unique per spawned profile) so two profiles never share cookies/
     // localStorage, then further split by host under `Page::load` -
     // real per-origin partitioning. Doesn't persist across the worker
     // process's own lifetime yet - see `Page::load`'s doc.
-    let storage_root = std::env::temp_dir().join("nimble-profile-storage").join(shmem_name);
+    let storage_root = std::env::temp_dir()
+        .join("nimble-profile-storage")
+        .join(shmem_name);
 
     let runtime = Runtime::new();
     let mut current_source = PageSource::Demo;
-    let (mut page, _) = load_source(&runtime, &current_source, width as f64, &storage_root, proxy.as_ref(), dns_server);
+    let (mut page, _) = load_source(
+        &runtime,
+        &current_source,
+        width as f64,
+        &storage_root,
+        proxy.as_ref(),
+        dns_server,
+    );
     let renderer = match gpu_adapter {
         Some(index) => GpuRenderer::new_with_adapter(index),
         None => GpuRenderer::new(),
     };
 
-    let mut writer = ipc::FrameWriter::new(shmem_name, width, height).expect("failed to create/open shared memory");
+    let mut writer = ipc::FrameWriter::new(shmem_name, width, height)
+        .expect("failed to create/open shared memory");
     writer.publish(&page.render(&renderer, width, height, 0.0));
 
     // Commands arrive on a dedicated thread so a slow/absent stdin stream
@@ -1364,7 +1585,14 @@ fn main() {
                     let _ = stdout.flush();
                     continue;
                 }
-                let (loaded, error) = load_source(&runtime, &current_source, width as f64, &storage_root, proxy.as_ref(), dns_server);
+                let (loaded, error) = load_source(
+                    &runtime,
+                    &current_source,
+                    width as f64,
+                    &storage_root,
+                    proxy.as_ref(),
+                    dns_server,
+                );
                 page = loaded;
                 focused_id = None;
                 scroll_top = 0.0;
@@ -1385,7 +1613,14 @@ fn main() {
                     continue;
                 }
                 current_source = PageSource::Url(url.trim().to_string());
-                let (loaded, error) = load_source(&runtime, &current_source, width as f64, &storage_root, proxy.as_ref(), dns_server);
+                let (loaded, error) = load_source(
+                    &runtime,
+                    &current_source,
+                    width as f64,
+                    &storage_root,
+                    proxy.as_ref(),
+                    dns_server,
+                );
                 page = loaded;
                 focused_id = None;
                 scroll_top = 0.0;
@@ -1413,7 +1648,10 @@ fn main() {
                 let _ = stdout.flush();
             } else if let Some(rest) = line.strip_prefix("CLICK_AT ") {
                 let mut parts = rest.split_whitespace();
-                let coords = parts.next().zip(parts.next()).and_then(|(x, y)| Some((x.parse::<f64>().ok()?, y.parse::<f64>().ok()?)));
+                let coords = parts
+                    .next()
+                    .zip(parts.next())
+                    .and_then(|(x, y)| Some((x.parse::<f64>().ok()?, y.parse::<f64>().ok()?)));
                 match coords {
                     Some((x, y)) => {
                         let result = dispatch_click_at(&mut page, width, x, y, scroll_top);
@@ -1448,7 +1686,10 @@ fn main() {
                         }
                     }
                     None => {
-                        let _ = writeln!(stdout, "ERROR no element focused - CLICK_AT an <input>/<textarea> first");
+                        let _ = writeln!(
+                            stdout,
+                            "ERROR no element focused - CLICK_AT an <input>/<textarea> first"
+                        );
                     }
                 }
                 let _ = stdout.flush();
@@ -1462,7 +1703,8 @@ fn main() {
                         let _ = writeln!(stdout, "TABBED");
                     }
                     Ok(None) => {
-                        let _ = writeln!(stdout, "ERROR no focusable element with an id on this page");
+                        let _ =
+                            writeln!(stdout, "ERROR no focusable element with an id on this page");
                     }
                     Err(message) => {
                         let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));

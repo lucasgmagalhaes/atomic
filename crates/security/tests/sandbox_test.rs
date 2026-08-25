@@ -3,7 +3,12 @@ use security::sandbox;
 #[cfg(windows)]
 fn spawn_long_running_process() -> std::process::Child {
     std::process::Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 30"])
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Start-Sleep -Seconds 30",
+        ])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -57,7 +62,10 @@ fn dropping_the_sandbox_kills_the_confined_process() {
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
 
-    assert!(!still_alive, "process should have been killed when the sandbox job was closed");
+    assert!(
+        !still_alive,
+        "process should have been killed when the sandbox job was closed"
+    );
 }
 
 #[cfg(not(windows))]

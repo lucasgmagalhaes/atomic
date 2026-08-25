@@ -26,12 +26,20 @@ fn basis_of(child: &LayoutBox, is_row: bool, main_known: Option<f64>) -> f64 {
     if let Some(v) = resolve_opt(child.style.flex_basis, main_known) {
         return v;
     }
-    let main_prop = if is_row { child.style.width } else { child.style.height };
+    let main_prop = if is_row {
+        child.style.width
+    } else {
+        child.style.height
+    };
     resolve_opt(main_prop, main_known).unwrap_or(0.0)
 }
 
 fn cross_of(child: &LayoutBox, is_row: bool, cross_known: Option<f64>) -> Option<f64> {
-    let cross_prop = if is_row { child.style.height } else { child.style.width };
+    let cross_prop = if is_row {
+        child.style.height
+    } else {
+        child.style.width
+    };
     resolve_opt(cross_prop, cross_known)
 }
 
@@ -100,7 +108,8 @@ pub fn layout_flex_children(
             _ => cross_of(c, is_row, cross_known).unwrap_or(0.0),
         })
         .collect();
-    let resolved_cross = cross_known.unwrap_or_else(|| cross_sizes.iter().cloned().fold(0.0, f64::max));
+    let resolved_cross =
+        cross_known.unwrap_or_else(|| cross_sizes.iter().cloned().fold(0.0, f64::max));
 
     let gap_count = n.saturating_sub(1);
     let (start_offset, gap) = match justify {
@@ -109,7 +118,11 @@ pub fn layout_flex_children(
         JustifyContent::Center => (leftover / 2.0, 0.0),
         JustifyContent::SpaceBetween => (
             0.0,
-            if gap_count > 0 { leftover / gap_count as f64 } else { 0.0 },
+            if gap_count > 0 {
+                leftover / gap_count as f64
+            } else {
+                0.0
+            },
         ),
         JustifyContent::SpaceAround => {
             let g = if n > 0 { leftover / n as f64 } else { 0.0 };

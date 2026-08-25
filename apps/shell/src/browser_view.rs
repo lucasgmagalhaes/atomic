@@ -42,8 +42,14 @@ use std::rc::Rc;
 /// a separate install step.
 pub fn worker_binary_path() -> Result<PathBuf, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let name = if cfg!(windows) { "profile-worker.exe" } else { "profile-worker" };
-    let dir = exe.parent().ok_or_else(|| "executable has no parent directory".to_string())?;
+    let name = if cfg!(windows) {
+        "profile-worker.exe"
+    } else {
+        "profile-worker"
+    };
+    let dir = exe
+        .parent()
+        .ok_or_else(|| "executable has no parent directory".to_string())?;
 
     for candidate_dir in [dir, dir.parent().unwrap_or(dir)] {
         let candidate = candidate_dir.join(name);
@@ -51,7 +57,10 @@ pub fn worker_binary_path() -> Result<PathBuf, String> {
             return Ok(candidate);
         }
     }
-    Err(format!("profile-worker binary ({name}) not found next to {}", exe.display()))
+    Err(format!(
+        "profile-worker binary ({name}) not found next to {}",
+        exe.display()
+    ))
 }
 
 /// Converts a tightly-packed RGBA8 frame (`profile::Profile::latest_frame`'s
@@ -133,7 +142,12 @@ impl BrowserView {
     /// the same shared-memory region and storage directory - not handled
     /// here, same as this project's existing "no per-profile identity
     /// beyond a GUI-assigned id" scope.
-    pub fn spawn_with_identity(pane_id: &str, width: u32, height: u32, proxy: Option<&str>) -> Self {
+    pub fn spawn_with_identity(
+        pane_id: &str,
+        width: u32,
+        height: u32,
+        proxy: Option<&str>,
+    ) -> Self {
         Self::spawn_with_identity_and_gpu(pane_id, width, height, proxy, None)
     }
 
@@ -144,21 +158,50 @@ impl BrowserView {
     /// proxy/DNS, this is fixed for the spawned process's lifetime -
     /// changing it means a fresh spawn, same "respawn, not a live
     /// setting" scope every other spawn-time choice already has here.
-    pub fn spawn_with_identity_and_gpu(pane_id: &str, width: u32, height: u32, proxy: Option<&str>, gpu_adapter: Option<usize>) -> Self {
+    pub fn spawn_with_identity_and_gpu(
+        pane_id: &str,
+        width: u32,
+        height: u32,
+        proxy: Option<&str>,
+        gpu_adapter: Option<usize>,
+    ) -> Self {
         let shmem_name = format!("nimble-profile-{pane_id}");
         Self::spawn_with_shmem_name(&shmem_name, width, height, proxy, gpu_adapter)
     }
 
-    fn spawn_with_shmem_name(shmem_name: &str, width: u32, height: u32, proxy: Option<&str>, gpu_adapter: Option<usize>) -> Self {
+    fn spawn_with_shmem_name(
+        shmem_name: &str,
+        width: u32,
+        height: u32,
+        proxy: Option<&str>,
+        gpu_adapter: Option<usize>,
+    ) -> Self {
         let (profile, error) = match worker_binary_path() {
-            Ok(path) => match profile::Profile::spawn_full(&path.to_string_lossy(), shmem_name, width, height, proxy, None, gpu_adapter) {
+            Ok(path) => match profile::Profile::spawn_full(
+                &path.to_string_lossy(),
+                shmem_name,
+                width,
+                height,
+                proxy,
+                None,
+                gpu_adapter,
+            ) {
                 Ok(p) => (Some(Rc::new(RefCell::new(p))), None),
                 Err(e) => (None, Some(e.to_string())),
             },
             Err(e) => (None, Some(e)),
         };
 
-        BrowserView { profile, texture: None, last_generation: 0, width, height, error, current_url: String::new(), navigation_error: None }
+        BrowserView {
+            profile,
+            texture: None,
+            last_generation: 0,
+            width,
+            height,
+            error,
+            current_url: String::new(),
+            navigation_error: None,
+        }
     }
 
     pub fn error(&self) -> Option<&str> {
@@ -273,7 +316,11 @@ impl BrowserView {
             if generation != self.last_generation {
                 if let Some(pixels) = profile.latest_frame() {
                     let image = rgba_to_color_image(&pixels, self.width, self.height);
-                    let handle = ctx.load_texture("nimble-browser-frame", image, egui::TextureOptions::LINEAR);
+                    let handle = ctx.load_texture(
+                        "nimble-browser-frame",
+                        image,
+                        egui::TextureOptions::LINEAR,
+                    );
                     self.texture = Some(handle);
                     self.last_generation = generation;
                 }

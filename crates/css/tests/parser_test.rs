@@ -38,8 +38,15 @@ fn an_unrecognized_pseudo_class_does_not_hang_the_parser() {
 #[test]
 fn an_unrecognized_pseudo_class_in_a_comma_list_does_not_hang_and_later_rules_still_parse() {
     let sheet = parse_with_timeout("a:link,a:visited{color:#348}div{width:10px}");
-    assert_eq!(sheet.rules.len(), 1, "the malformed rule should be skipped, but a real later rule must still parse");
-    assert_eq!(sheet.rules[0].selectors.0[0].0, vec![CompoundSelector(vec![SimpleSelector::Type("div".into())])]);
+    assert_eq!(
+        sheet.rules.len(),
+        1,
+        "the malformed rule should be skipped, but a real later rule must still parse"
+    );
+    assert_eq!(
+        sheet.rules[0].selectors.0[0].0,
+        vec![CompoundSelector(vec![SimpleSelector::Type("div".into())])]
+    );
 }
 
 #[test]
@@ -57,7 +64,11 @@ fn the_real_example_com_stylesheet_parses_without_hanging() {
 #[test]
 fn a_malformed_rule_inside_a_real_media_block_does_not_hang() {
     let sheet = parse_with_timeout("@media screen { a:link{color:red} div{width:10px} }");
-    assert_eq!(sheet.rules.len(), 1, "the malformed rule inside @media should be skipped, the real one after it still parses");
+    assert_eq!(
+        sheet.rules.len(),
+        1,
+        "the malformed rule inside @media should be skipped, the real one after it still parses"
+    );
 }
 
 #[test]

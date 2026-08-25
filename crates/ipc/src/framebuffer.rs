@@ -88,7 +88,11 @@ impl FrameWriter {
     /// the back buffer, then atomically publishes it. Never touches the
     /// currently-published buffer, so a concurrent reader is never torn.
     pub fn publish(&mut self, pixels: &[u8]) {
-        assert_eq!(pixels.len(), self.frame_len, "pixel buffer size must match width*height*4");
+        assert_eq!(
+            pixels.len(),
+            self.frame_len,
+            "pixel buffer size must match width*height*4"
+        );
 
         let dst = buffer_ptr(&self.shmem, self.next_index, self.frame_len);
         unsafe {

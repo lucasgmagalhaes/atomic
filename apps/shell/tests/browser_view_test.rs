@@ -7,7 +7,8 @@ fn worker_binary_path_finds_the_real_profile_worker_next_to_this_test_binary() {
     // been, by anything that ran `cargo build --workspace` or built the
     // `profile` crate) - proves the sibling-binary lookup logic against
     // an actual file, not a fabricated path.
-    let path = worker_binary_path().expect("profile-worker should be built alongside the workspace");
+    let path =
+        worker_binary_path().expect("profile-worker should be built alongside the workspace");
     assert!(path.exists());
     let file_name = path.file_name().unwrap().to_string_lossy();
     assert!(file_name.starts_with("profile-worker"));
@@ -16,22 +17,36 @@ fn worker_binary_path_finds_the_real_profile_worker_next_to_this_test_binary() {
 #[test]
 fn navigate_to_a_real_url_clears_any_navigation_error_and_records_the_url() {
     let mut browser = BrowserView::spawn(200, 150);
-    assert!(browser.error().is_none(), "spawn should succeed against the real workspace build");
+    assert!(
+        browser.error().is_none(),
+        "spawn should succeed against the real workspace build"
+    );
 
     browser.navigate("https://example.com/");
     assert_eq!(browser.current_url(), "https://example.com/");
-    assert!(browser.navigation_error().is_none(), "navigating to a real URL should succeed");
+    assert!(
+        browser.navigation_error().is_none(),
+        "navigating to a real URL should succeed"
+    );
 }
 
 #[test]
 fn profile_handle_lends_a_real_shared_handle_to_the_running_profile() {
     let browser = BrowserView::spawn(200, 150);
-    assert!(browser.error().is_none(), "spawn should succeed against the real workspace build");
+    assert!(
+        browser.error().is_none(),
+        "spawn should succeed against the real workspace build"
+    );
 
     // Real proof this is the live profile, not a stand-in: a ping through
     // the shared handle actually reaches the spawned `profile-worker`.
-    let profile = browser.profile_handle().expect("a successfully spawned view should have a live profile");
-    assert!(profile.borrow_mut().ping().expect("ping should reach the worker"));
+    let profile = browser
+        .profile_handle()
+        .expect("a successfully spawned view should have a live profile");
+    assert!(profile
+        .borrow_mut()
+        .ping()
+        .expect("ping should reach the worker"));
 }
 
 #[test]
@@ -62,7 +77,12 @@ fn spawn_connect_proxy(seen: std::sync::mpsc::Sender<String>) -> u16 {
                 if reader.read_line(&mut request_line).is_err() || request_line.is_empty() {
                     return;
                 }
-                let target = request_line.trim_start_matches("CONNECT ").split(' ').next().unwrap_or("").to_string();
+                let target = request_line
+                    .trim_start_matches("CONNECT ")
+                    .split(' ')
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
                 loop {
                     let mut line = String::new();
                     match reader.read_line(&mut line) {
@@ -98,14 +118,19 @@ fn spawn_connect_proxy(seen: std::sync::mpsc::Sender<String>) -> u16 {
 fn spawn_with_proxy_routes_navigation_through_the_configured_proxy() {
     use std::io::{Read, Write};
 
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("failed to bind a loopback test server");
+    let listener =
+        std::net::TcpListener::bind("127.0.0.1:0").expect("failed to bind a loopback test server");
     let page_addr = listener.local_addr().unwrap();
     std::thread::spawn(move || {
         if let Ok((mut stream, _)) = listener.accept() {
             let mut buf = [0u8; 4096];
             let _ = stream.read(&mut buf);
             let body = "<div>via shell proxy</div>";
-            let response = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
             let _ = stream.write_all(response.as_bytes());
         }
     });
@@ -113,14 +138,28 @@ fn spawn_with_proxy_routes_navigation_through_the_configured_proxy() {
     let (seen_tx, seen_rx) = std::sync::mpsc::channel();
     let proxy_port = spawn_connect_proxy(seen_tx);
 
-    let mut browser = BrowserView::spawn_with_proxy(64, 64, Some(&format!("127.0.0.1:{proxy_port}")));
-    assert!(browser.error().is_none(), "spawn_with_proxy should succeed against the real workspace build");
+    let mut browser =
+        BrowserView::spawn_with_proxy(64, 64, Some(&format!("127.0.0.1:{proxy_port}")));
+    assert!(
+        browser.error().is_none(),
+        "spawn_with_proxy should succeed against the real workspace build"
+    );
 
     browser.navigate(&format!("http://{page_addr}/"));
-    assert!(browser.navigation_error().is_none(), "navigating through the proxy should succeed: {:?}", browser.navigation_error());
+    assert!(
+        browser.navigation_error().is_none(),
+        "navigating through the proxy should succeed: {:?}",
+        browser.navigation_error()
+    );
 
-    let tunneled_target = seen_rx.recv_timeout(std::time::Duration::from_secs(5)).expect("proxy should have handled a CONNECT for the page fetch");
-    assert_eq!(tunneled_target, page_addr.to_string(), "the shell's profile should have tunneled through the proxy to the page's own address");
+    let tunneled_target = seen_rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("proxy should have handled a CONNECT for the page fetch");
+    assert_eq!(
+        tunneled_target,
+        page_addr.to_string(),
+        "the shell's profile should have tunneled through the proxy to the page's own address"
+    );
 }
 
 /// A real local server that sets a cookie on its one response, so a test
@@ -128,7 +167,8 @@ fn spawn_with_proxy_routes_navigation_through_the_configured_proxy() {
 /// `storage::cookies::CookieJar` file, not just that navigation succeeded.
 fn spawn_cookie_setting_server() -> std::net::SocketAddr {
     use std::io::{Read, Write};
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("failed to bind a loopback test server");
+    let listener =
+        std::net::TcpListener::bind("127.0.0.1:0").expect("failed to bind a loopback test server");
     let addr = listener.local_addr().unwrap();
     std::thread::spawn(move || {
         if let Ok((mut stream, _)) = listener.accept() {
@@ -152,7 +192,11 @@ fn spawn_cookie_setting_server() -> std::net::SocketAddr {
 /// (`storage_root/<host>/cookies.txt`) so this test can check the real
 /// file `BrowserView` never gets a handle to itself.
 fn cookie_jar_path(pane_id: &str, host: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join("nimble-profile-storage").join(format!("nimble-profile-{pane_id}")).join(host).join("cookies.txt")
+    std::env::temp_dir()
+        .join("nimble-profile-storage")
+        .join(format!("nimble-profile-{pane_id}"))
+        .join(host)
+        .join("cookies.txt")
 }
 
 #[test]
@@ -164,9 +208,16 @@ fn spawn_with_identity_persists_cookies_across_a_respawn_with_the_same_id() {
     let addr = spawn_cookie_setting_server();
     {
         let mut browser = BrowserView::spawn_with_identity(&pane_id, 64, 64, None);
-        assert!(browser.error().is_none(), "spawn_with_identity should succeed against the real workspace build");
+        assert!(
+            browser.error().is_none(),
+            "spawn_with_identity should succeed against the real workspace build"
+        );
         browser.navigate(&format!("http://{addr}/"));
-        assert!(browser.navigation_error().is_none(), "navigating should succeed: {:?}", browser.navigation_error());
+        assert!(
+            browser.navigation_error().is_none(),
+            "navigating should succeed: {:?}",
+            browser.navigation_error()
+        );
         // profile-worker writes Set-Cookie to disk before it renders the
         // page (see fetch_with_cookies's own doc) - give the child process
         // a brief moment to have actually done the write before this test
@@ -174,16 +225,24 @@ fn spawn_with_identity_persists_cookies_across_a_respawn_with_the_same_id() {
         std::thread::sleep(std::time::Duration::from_millis(300));
     } // BrowserView::drop kills the profile-worker child - see profile::Profile's own Drop guarantee.
 
-    let jar_contents_after_first_spawn = std::fs::read_to_string(&jar_path).expect("first spawn should have written a real cookie jar file to disk");
-    assert!(jar_contents_after_first_spawn.contains("identity-marker"), "jar should contain the cookie the server actually set: {jar_contents_after_first_spawn}");
+    let jar_contents_after_first_spawn = std::fs::read_to_string(&jar_path)
+        .expect("first spawn should have written a real cookie jar file to disk");
+    assert!(
+        jar_contents_after_first_spawn.contains("identity-marker"),
+        "jar should contain the cookie the server actually set: {jar_contents_after_first_spawn}"
+    );
 
     // A second spawn under the *same* pane id must reuse the same
     // storage_root - this is the actual persistence guarantee - rather
     // than getting a fresh empty one the way the old per-process-spawn
     // shmem naming scheme did.
     let _browser_again = BrowserView::spawn_with_identity(&pane_id, 64, 64, None);
-    let jar_contents_after_second_spawn = std::fs::read_to_string(&jar_path).expect("the same jar file should still exist after a second spawn with the same identity");
-    assert_eq!(jar_contents_after_second_spawn, jar_contents_after_first_spawn, "a fresh spawn with the same pane id must not wipe or replace the existing cookie jar");
+    let jar_contents_after_second_spawn = std::fs::read_to_string(&jar_path)
+        .expect("the same jar file should still exist after a second spawn with the same identity");
+    assert_eq!(
+        jar_contents_after_second_spawn, jar_contents_after_first_spawn,
+        "a fresh spawn with the same pane id must not wipe or replace the existing cookie jar"
+    );
 
     let _ = std::fs::remove_dir_all(jar_path.parent().unwrap().parent().unwrap());
 }
@@ -205,7 +264,10 @@ fn spawn_with_identity_isolates_storage_between_different_pane_ids() {
     }
 
     assert!(jar_a.exists(), "pane a's own jar should exist");
-    assert!(!jar_b.exists(), "a different pane id must get its own storage_root, not share pane a's");
+    assert!(
+        !jar_b.exists(),
+        "a different pane id must get its own storage_root, not share pane a's"
+    );
 
     let _ = std::fs::remove_dir_all(jar_a.parent().unwrap().parent().unwrap());
     let _ = std::fs::remove_dir_all(jar_b.parent().unwrap().parent().unwrap());
@@ -226,8 +288,20 @@ fn rgba_to_color_image_preserves_dimensions_and_pixel_bytes() {
 
     assert_eq!(image.size, [width as usize, height as usize]);
     assert_eq!(image.pixels.len(), 4);
-    assert_eq!(image.pixels[0], egui::Color32::from_rgba_unmultiplied(255, 0, 0, 255));
-    assert_eq!(image.pixels[1], egui::Color32::from_rgba_unmultiplied(0, 255, 0, 255));
-    assert_eq!(image.pixels[2], egui::Color32::from_rgba_unmultiplied(0, 0, 255, 255));
-    assert_eq!(image.pixels[3], egui::Color32::from_rgba_unmultiplied(255, 255, 0, 255));
+    assert_eq!(
+        image.pixels[0],
+        egui::Color32::from_rgba_unmultiplied(255, 0, 0, 255)
+    );
+    assert_eq!(
+        image.pixels[1],
+        egui::Color32::from_rgba_unmultiplied(0, 255, 0, 255)
+    );
+    assert_eq!(
+        image.pixels[2],
+        egui::Color32::from_rgba_unmultiplied(0, 0, 255, 255)
+    );
+    assert_eq!(
+        image.pixels[3],
+        egui::Color32::from_rgba_unmultiplied(255, 255, 0, 255)
+    );
 }

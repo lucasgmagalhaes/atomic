@@ -7,7 +7,8 @@ use js_runtime::{Context, Runtime};
 /// already uses, just echoing the request instead of serving fixed content.
 fn serve_once_echoing_request() -> std::net::SocketAddr {
     use std::io::{Read, Write};
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("failed to bind a loopback test server");
+    let listener =
+        std::net::TcpListener::bind("127.0.0.1:0").expect("failed to bind a loopback test server");
     let addr = listener.local_addr().unwrap();
     std::thread::spawn(move || {
         if let Ok((mut stream, _)) = listener.accept() {
@@ -37,8 +38,15 @@ fn same_origin_request_sends_the_full_page_url_as_referer() {
     let page_url = format!("http://{addr}/page?x=1");
     ctx.set_url(&page_url);
 
-    let result = ctx.eval(&format!("fetchSync('{url}').body"), "<test>").unwrap();
-    assert!(result.to_lowercase().contains(&format!("referer: {page_url}").to_lowercase()), "got: {result}");
+    let result = ctx
+        .eval(&format!("fetchSync('{url}').body"), "<test>")
+        .unwrap();
+    assert!(
+        result
+            .to_lowercase()
+            .contains(&format!("referer: {page_url}").to_lowercase()),
+        "got: {result}"
+    );
 }
 
 #[test]
@@ -51,9 +59,13 @@ fn cross_origin_request_sends_only_the_page_origin_as_referer() {
     let mut ctx = Context::with_dom(&rt, d);
     ctx.set_url("http://totally-different-origin.example/secret-path");
 
-    let result = ctx.eval(&format!("fetchSync('{url}').body"), "<test>").unwrap();
+    let result = ctx
+        .eval(&format!("fetchSync('{url}').body"), "<test>")
+        .unwrap();
     assert!(
-        result.to_lowercase().contains("referer: http://totally-different-origin.example/\r\n"),
+        result
+            .to_lowercase()
+            .contains("referer: http://totally-different-origin.example/\r\n"),
         "got: {result}"
     );
 }
@@ -79,7 +91,9 @@ fn an_opaque_origin_page_sends_no_referer() {
     let mut ctx = Context::with_dom(&rt, d);
     ctx.set_url("data:text/html,hello");
 
-    let result = ctx.eval(&format!("fetchSync('{url}').body"), "<test>").unwrap();
+    let result = ctx
+        .eval(&format!("fetchSync('{url}').body"), "<test>")
+        .unwrap();
     assert!(!result.to_lowercase().contains("referer:"), "got: {result}");
 }
 
@@ -92,6 +106,8 @@ fn a_context_with_no_real_url_sends_no_referer() {
     let rt = Runtime::new();
     let ctx = Context::with_dom(&rt, d); // no set_url call
 
-    let result = ctx.eval(&format!("fetchSync('{url}').body"), "<test>").unwrap();
+    let result = ctx
+        .eval(&format!("fetchSync('{url}').body"), "<test>")
+        .unwrap();
     assert!(!result.to_lowercase().contains("referer:"), "got: {result}");
 }

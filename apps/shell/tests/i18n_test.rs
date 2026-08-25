@@ -31,7 +31,11 @@ fn en_and_pt_differ_for_translated_labels() {
         if key == i18n::AUTOMATION_SCRIPT_HINT {
             continue;
         }
-        assert_ne!(i18n::t(key, Locale::En), i18n::t(key, Locale::Pt), "{key} is identical in both locales");
+        assert_ne!(
+            i18n::t(key, Locale::En),
+            i18n::t(key, Locale::Pt),
+            "{key} is identical in both locales"
+        );
     }
 }
 
@@ -58,14 +62,23 @@ fn missing_key_falls_back_to_the_key_itself_in_either_locale() {
 
 #[test]
 fn fill_replaces_placeholders_left_to_right() {
-    assert_eq!(i18n::fill(i18n::t(i18n::SELECTED_LABEL, Locale::En), &["pane-2"]), "Selected: pane-2");
     assert_eq!(
-        i18n::fill(i18n::t(i18n::AUTOMATION_HEADER, Locale::Pt), &["Principal", "pane-1, pane-2"]),
+        i18n::fill(i18n::t(i18n::SELECTED_LABEL, Locale::En), &["pane-2"]),
+        "Selected: pane-2"
+    );
+    assert_eq!(
+        i18n::fill(
+            i18n::t(i18n::AUTOMATION_HEADER, Locale::Pt),
+            &["Principal", "pane-1, pane-2"]
+        ),
         "Automação — nomes dos painéis do workspace ativo (\"Principal\"): pane-1, pane-2"
     );
 }
 
 #[test]
 fn fill_with_no_placeholders_returns_the_template_unchanged() {
-    assert_eq!(i18n::fill(i18n::t(i18n::RUN_BUTTON, Locale::En), &[]), "Run");
+    assert_eq!(
+        i18n::fill(i18n::t(i18n::RUN_BUTTON, Locale::En), &[]),
+        "Run"
+    );
 }

@@ -73,6 +73,7 @@ Note: `crates/automation` (the earlier in-progress concurrent change) has since 
 - All code, docs, and commit messages: English.
 - Never commit `graphify-out/` (gitignored — contains absolute local filesystem paths).
 - Tests are integration-style, not inline `#[cfg(test)] mod tests` in `src/`: put them under `crate/tests/<file>_test.rs` (e.g. `crates/dom/tests/dom_test.rs`). Only works cleanly when the tests exercise the crate's public API — if a test needs a private item, that's a signal to reconsider what's private, not to fall back to an inline module.
+- Formatting is enforced on commit via a git pre-commit hook (`cargo fmt -- --check`), installed by `cargo-husky` (a dev-dependency of `xtask` — the Rust-native equivalent of Husky, since this workspace has no Node/npm anywhere). The hook installs itself into `.git/hooks/pre-commit` the first time `cargo test`/`cargo test -p xtask` runs after a fresh clone; run `make fmt`/`cargo fmt --all` to fix a failing check, or `git commit --no-verify` to bypass in a pinch.
 
 ## Knowledge graph
 

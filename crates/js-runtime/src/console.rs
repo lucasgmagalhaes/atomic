@@ -82,33 +82,69 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     sys::JS_FreeValue(ctx, global);
 }
 
-unsafe extern "C" fn console_debug(ctx: *mut sys::JSContext, _this: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn console_debug(
+    ctx: *mut sys::JSContext,
+    _this: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
     record(ctx, argc, argv, ConsoleLevel::Debug)
 }
 
-unsafe extern "C" fn console_log(ctx: *mut sys::JSContext, _this: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn console_log(
+    ctx: *mut sys::JSContext,
+    _this: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
     record(ctx, argc, argv, ConsoleLevel::Log)
 }
 
-unsafe extern "C" fn console_info(ctx: *mut sys::JSContext, _this: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn console_info(
+    ctx: *mut sys::JSContext,
+    _this: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
     record(ctx, argc, argv, ConsoleLevel::Info)
 }
 
-unsafe extern "C" fn console_warn(ctx: *mut sys::JSContext, _this: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn console_warn(
+    ctx: *mut sys::JSContext,
+    _this: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
     record(ctx, argc, argv, ConsoleLevel::Warn)
 }
 
-unsafe extern "C" fn console_error(ctx: *mut sys::JSContext, _this: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn console_error(
+    ctx: *mut sys::JSContext,
+    _this: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
     record(ctx, argc, argv, ConsoleLevel::Error)
 }
 
-unsafe fn record(ctx: *mut sys::JSContext, argc: c_int, argv: *mut sys::JSValue, level: ConsoleLevel) -> sys::JSValue {
+unsafe fn record(
+    ctx: *mut sys::JSContext,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+    level: ConsoleLevel,
+) -> sys::JSValue {
     let mut parts: Vec<String> = Vec::with_capacity(argc.max(0) as usize);
     for i in 0..argc.max(0) {
         let value = *argv.add(i as usize);
         parts.push(format_value(ctx, value));
     }
-    push_message(ctx, ConsoleMessage { level, text: parts.join(" ") });
+    push_message(
+        ctx,
+        ConsoleMessage {
+            level,
+            text: parts.join(" "),
+        },
+    );
     sys::js_undefined()
 }
 

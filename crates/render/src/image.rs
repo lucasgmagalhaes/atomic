@@ -29,7 +29,12 @@ use crate::display_list::{ClipRect, ImageQuad};
 /// `display_list`'s own doc on its per-primitive scope).
 pub fn composite_images(pixels: &mut [u8], width: u32, height: u32, quads: &[ImageQuad]) {
     for quad in quads {
-        if quad.width <= 0.0 || quad.height <= 0.0 || quad.image.width == 0 || quad.image.height == 0 || quad.opacity <= 0.0 {
+        if quad.width <= 0.0
+            || quad.height <= 0.0
+            || quad.image.width == 0
+            || quad.image.height == 0
+            || quad.opacity <= 0.0
+        {
             continue;
         }
         let src = &quad.image;
@@ -40,7 +45,10 @@ pub fn composite_images(pixels: &mut [u8], width: u32, height: u32, quads: &[Ima
         let dest_x0 = quad.x.floor().max(0.0).max(clip_x0) as i32;
         let dest_y0 = quad.y.floor().max(0.0).max(clip_y0) as i32;
         let dest_x1 = (quad.x + quad.width).ceil().min(width as f32).min(clip_x1) as i32;
-        let dest_y1 = (quad.y + quad.height).ceil().min(height as f32).min(clip_y1) as i32;
+        let dest_y1 = (quad.y + quad.height)
+            .ceil()
+            .min(height as f32)
+            .min(clip_y1) as i32;
 
         for py in dest_y0..dest_y1 {
             let rel_y = py as f32 - quad.y;
@@ -56,8 +64,15 @@ pub fn composite_images(pixels: &mut [u8], width: u32, height: u32, quads: &[Ima
                 let src_x = ((rel_x * scale_x) as u32).min(src.width - 1);
 
                 let src_idx = ((src_y * src.width + src_x) * 4) as usize;
-                let alpha = (src.rgba[src_idx + 3] as f64 * quad.opacity).round().clamp(0.0, 255.0) as u8;
-                let src_px = [src.rgba[src_idx], src.rgba[src_idx + 1], src.rgba[src_idx + 2], alpha];
+                let alpha = (src.rgba[src_idx + 3] as f64 * quad.opacity)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+                let src_px = [
+                    src.rgba[src_idx],
+                    src.rgba[src_idx + 1],
+                    src.rgba[src_idx + 2],
+                    alpha,
+                ];
                 if src_px[3] == 0 {
                     continue;
                 }
@@ -74,7 +89,12 @@ pub fn composite_images(pixels: &mut [u8], width: u32, height: u32, quads: &[Ima
 fn clip_bounds(clip: &Option<ClipRect>) -> (f32, f32, f32, f32) {
     match clip {
         Some(c) => (c.x, c.y, c.x + c.width, c.y + c.height),
-        None => (f32::NEG_INFINITY, f32::NEG_INFINITY, f32::INFINITY, f32::INFINITY),
+        None => (
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+            f32::INFINITY,
+            f32::INFINITY,
+        ),
     }
 }
 

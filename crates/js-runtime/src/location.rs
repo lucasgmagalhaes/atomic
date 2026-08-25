@@ -29,7 +29,10 @@ pub(crate) unsafe fn current_url(ctx: *mut sys::JSContext) -> Option<url::Url> {
     if state.is_null() {
         return None;
     }
-    (*state).url.as_ref().and_then(|raw| url::Url::parse(raw).ok())
+    (*state)
+        .url
+        .as_ref()
+        .and_then(|raw| url::Url::parse(raw).ok())
 }
 
 unsafe fn or_empty(ctx: *mut sys::JSContext, value: Option<String>) -> sys::JSValue {
@@ -53,10 +56,18 @@ unsafe extern "C" fn host_get(ctx: *mut sys::JSContext, _this: sys::JSValue) -> 
     )
 }
 unsafe extern "C" fn hostname_get(ctx: *mut sys::JSContext, _this: sys::JSValue) -> sys::JSValue {
-    or_empty(ctx, current_url(ctx).and_then(|u| u.host_str().map(str::to_string)))
+    or_empty(
+        ctx,
+        current_url(ctx).and_then(|u| u.host_str().map(str::to_string)),
+    )
 }
 unsafe extern "C" fn port_get(ctx: *mut sys::JSContext, _this: sys::JSValue) -> sys::JSValue {
-    or_empty(ctx, current_url(ctx).and_then(|u| u.port()).map(|p| p.to_string()))
+    or_empty(
+        ctx,
+        current_url(ctx)
+            .and_then(|u| u.port())
+            .map(|p| p.to_string()),
+    )
 }
 unsafe extern "C" fn pathname_get(ctx: *mut sys::JSContext, _this: sys::JSValue) -> sys::JSValue {
     or_empty(ctx, current_url(ctx).map(|u| u.path().to_string()))
@@ -74,7 +85,10 @@ unsafe extern "C" fn hash_get(ctx: *mut sys::JSContext, _this: sys::JSValue) -> 
     )
 }
 unsafe extern "C" fn origin_get(ctx: *mut sys::JSContext, _this: sys::JSValue) -> sys::JSValue {
-    or_empty(ctx, current_url(ctx).map(|u| u.origin().ascii_serialization()))
+    or_empty(
+        ctx,
+        current_url(ctx).map(|u| u.origin().ascii_serialization()),
+    )
 }
 
 unsafe extern "C" fn to_string(
@@ -128,12 +142,24 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
         ctx,
         location,
         method_name.as_ptr(),
-        sys::JS_NewCFunction2(ctx, to_string, method_name.as_ptr(), 0, sys::JS_CFUNC_GENERIC, 0),
+        sys::JS_NewCFunction2(
+            ctx,
+            to_string,
+            method_name.as_ptr(),
+            0,
+            sys::JS_CFUNC_GENERIC,
+            0,
+        ),
     );
 
     let global = sys::JS_GetGlobalObject(ctx);
     let location_name = CString::new("location").unwrap();
-    sys::JS_SetPropertyStr(ctx, global, location_name.as_ptr(), sys::JS_DupValue(ctx, location));
+    sys::JS_SetPropertyStr(
+        ctx,
+        global,
+        location_name.as_ptr(),
+        sys::JS_DupValue(ctx, location),
+    );
     sys::JS_FreeValue(ctx, global);
 
     let document = crate::document::get_or_create(ctx);

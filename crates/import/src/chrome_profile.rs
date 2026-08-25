@@ -25,7 +25,12 @@ pub fn default_profile_dir() -> Option<PathBuf> {
 /// not inside a profile directory itself.
 #[cfg(windows)]
 pub fn default_user_data_dir() -> Option<PathBuf> {
-    std::env::var_os("LOCALAPPDATA").map(|dir| PathBuf::from(dir).join("Google").join("Chrome").join("User Data"))
+    std::env::var_os("LOCALAPPDATA").map(|dir| {
+        PathBuf::from(dir)
+            .join("Google")
+            .join("Chrome")
+            .join("User Data")
+    })
 }
 
 #[cfg(not(windows))]

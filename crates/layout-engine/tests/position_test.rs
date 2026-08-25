@@ -14,7 +14,8 @@ fn relative_position_shifts_the_box_without_moving_the_next_sibling() {
     d.append_child(container, b);
     d.set_attribute(a, "id", "a");
 
-    let sheet = parse_stylesheet("div { height: 30px; } #a { position: relative; top: 10px; left: 5px; }");
+    let sheet =
+        parse_stylesheet("div { height: 30px; } #a { position: relative; top: 10px; left: 5px; }");
     let mut tree = build_box_tree(&d, container, &sheet).unwrap();
     layout_block(&mut tree, 800.0, 0.0, 0.0);
 
@@ -78,7 +79,9 @@ fn absolute_position_removes_the_box_from_flow() {
     d.append_child(container, b);
     d.set_attribute(a, "id", "a");
 
-    let sheet = parse_stylesheet("div { height: 30px; } #a { position: absolute; top: 100px; left: 50px; }");
+    let sheet = parse_stylesheet(
+        "div { height: 30px; } #a { position: absolute; top: 100px; left: 50px; }",
+    );
     let mut tree = build_box_tree(&d, container, &sheet).unwrap();
     layout_block(&mut tree, 800.0, 0.0, 0.0);
 
@@ -122,7 +125,8 @@ fn absolute_position_still_resolves_its_own_width_against_the_parent_content_wid
     d.append_child(root, parent);
     d.append_child(parent, child);
 
-    let sheet = parse_stylesheet("div { width: 300px; padding: 20px; } span { position: absolute; }");
+    let sheet =
+        parse_stylesheet("div { width: 300px; padding: 20px; } span { position: absolute; }");
     let mut tree = build_box_tree(&d, parent, &sheet).unwrap();
     layout_block(&mut tree, 800.0, 0.0, 0.0);
 

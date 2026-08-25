@@ -12,7 +12,9 @@ fn spawn_fake_dns_server(answer: Ipv4Addr) -> SocketAddr {
     thread::spawn(move || {
         let mut buf = [0u8; 512];
         loop {
-            let Ok((n, from)) = socket.recv_from(&mut buf) else { return };
+            let Ok((n, from)) = socket.recv_from(&mut buf) else {
+                return;
+            };
             if n < 12 {
                 continue;
             }
@@ -70,7 +72,9 @@ fn spawn_fake_http_server(body: &'static str) -> u16 {
 #[tokio::test]
 async fn resolve_a_returns_the_real_answer_from_a_local_dns_server() {
     let dns_addr = spawn_fake_dns_server(Ipv4Addr::new(203, 0, 113, 42));
-    let ip = net::resolve_a("custom.nimble.test", dns_addr).await.expect("resolution should succeed");
+    let ip = net::resolve_a("custom.nimble.test", dns_addr)
+        .await
+        .expect("resolution should succeed");
     assert_eq!(ip, Ipv4Addr::new(203, 0, 113, 42));
 }
 
@@ -84,8 +88,15 @@ async fn resolve_a_times_out_against_a_server_that_never_answers() {
     // we want an actual timeout, not a fast failure.
     let _keep_alive = silent;
 
-    let result = tokio::time::timeout(std::time::Duration::from_secs(7), net::resolve_a("nimble.test", addr)).await;
-    assert!(result.is_ok(), "resolve_a itself should time out internally, not hang forever");
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(7),
+        net::resolve_a("nimble.test", addr),
+    )
+    .await;
+    assert!(
+        result.is_ok(),
+        "resolve_a itself should time out internally, not hang forever"
+    );
     assert!(result.unwrap().is_err());
 }
 
@@ -100,10 +111,14 @@ fn get_via_dns_uses_the_custom_resolver_not_the_os_one() {
     std::thread::sleep(std::time::Duration::from_millis(50));
 
     let url = format!("http://custom.nimble.test:{http_port}/");
-    let response = net::get_via_dns(&url, &[], dns_addr).expect("request should succeed via the custom resolver");
+    let response = net::get_via_dns(&url, &[], dns_addr)
+        .expect("request should succeed via the custom resolver");
 
     assert_eq!(response.status, 200);
-    assert_eq!(String::from_utf8_lossy(&response.body), "hello from custom dns");
+    assert_eq!(
+        String::from_utf8_lossy(&response.body),
+        "hello from custom dns"
+    );
 }
 
 #[test]

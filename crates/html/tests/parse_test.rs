@@ -58,7 +58,11 @@ fn merges_adjacent_text_into_one_node() {
         .iter()
         .filter(|&&c| matches!(dom.get(c).unwrap().data, NodeData::Text(_)))
         .collect();
-    assert_eq!(text_children.len(), 1, "adjacent text should merge into one node");
+    assert_eq!(
+        text_children.len(),
+        1,
+        "adjacent text should merge into one node"
+    );
     assert_eq!(dom.text_content(p), "hello world");
 }
 
@@ -68,14 +72,26 @@ fn recovers_from_malformed_unclosed_tags() {
     // must still produce a sensible tree instead of erroring out.
     let dom = html::parse("<div><p>one<p>two");
     let div = find_first(&dom, dom.root(), "div").unwrap();
-    let ps: Vec<_> = dom.get(div).unwrap().children.iter().filter(|&&c| find_first(&dom, c, "p") == Some(c)).collect();
-    assert_eq!(ps.len(), 2, "two implicitly-closed <p> siblings should both exist");
+    let ps: Vec<_> = dom
+        .get(div)
+        .unwrap()
+        .children
+        .iter()
+        .filter(|&&c| find_first(&dom, c, "p") == Some(c))
+        .collect();
+    assert_eq!(
+        ps.len(),
+        2,
+        "two implicitly-closed <p> siblings should both exist"
+    );
 }
 
 #[test]
 fn parse_to_html_element_finds_the_html_tag() {
     let (dom, html_el) = html::parse_to_html_element("<p>x</p>");
-    assert!(matches!(&dom.get(html_el).unwrap().data, NodeData::Element { tag, .. } if tag == "html"));
+    assert!(
+        matches!(&dom.get(html_el).unwrap().data, NodeData::Element { tag, .. } if tag == "html")
+    );
 }
 
 #[test]

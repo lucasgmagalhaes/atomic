@@ -149,7 +149,10 @@ fn style_and_script_elements_are_never_rendered_even_with_explicit_display_block
     let sheet = parse_stylesheet("style, script { display: block; width: 100px; height: 100px; }");
     let tree = build_box_tree(&d, container, &sheet).unwrap();
 
-    assert!(tree.children.is_empty(), "style/script must not produce a box");
+    assert!(
+        tree.children.is_empty(),
+        "style/script must not produce a box"
+    );
 }
 
 #[test]
@@ -169,7 +172,11 @@ fn a_style_element_placed_before_content_does_not_push_it_down() {
     let sheet = parse_stylesheet("#box { width: 10px; height: 10px; }");
     let tree = build_box_tree(&d, container, &sheet).unwrap();
 
-    assert_eq!(tree.children.len(), 1, "the <style> element must not produce a sibling box");
+    assert_eq!(
+        tree.children.len(),
+        1,
+        "the <style> element must not produce a sibling box"
+    );
     assert_eq!(tree.children[0].node, div);
 }
 

@@ -7,7 +7,10 @@ fn main() {
     for src in &sources {
         println!("cargo:rerun-if-changed={}", vendor.join(src).display());
     }
-    println!("cargo:rerun-if-changed={}", vendor.join("quickjs.h").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        vendor.join("quickjs.h").display()
+    );
 
     let mut build = cc::Build::new();
     build.include(&vendor).define("_GNU_SOURCE", None);

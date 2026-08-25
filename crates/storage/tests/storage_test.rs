@@ -1,7 +1,10 @@
 use storage::LocalStorage;
 
 fn temp_path(tag: &str) -> std::path::PathBuf {
-    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     std::env::temp_dir().join(format!("nimble-storage-test-{tag}-{nanos}.txt"))
 }
 
@@ -53,10 +56,15 @@ fn handles_values_containing_newlines_and_backslashes() {
     let path = temp_path("escaping");
     {
         let mut store = LocalStorage::open(&path).unwrap();
-        store.set("multiline", "line one\nline two\\with backslash").unwrap();
+        store
+            .set("multiline", "line one\nline two\\with backslash")
+            .unwrap();
     }
     let reopened = LocalStorage::open(&path).unwrap();
-    assert_eq!(reopened.get("multiline"), Some("line one\nline two\\with backslash"));
+    assert_eq!(
+        reopened.get("multiline"),
+        Some("line one\nline two\\with backslash")
+    );
 }
 
 #[test]

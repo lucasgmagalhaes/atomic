@@ -18,11 +18,8 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     let document = crate::document::get_or_create(ctx);
 
     let visibility_name = CString::new("visibilityState").unwrap();
-    let visibility_value = sys::JS_NewStringLen(
-        ctx,
-        b"visible".as_ptr() as *const std::os::raw::c_char,
-        7,
-    );
+    let visibility_value =
+        sys::JS_NewStringLen(ctx, b"visible".as_ptr() as *const std::os::raw::c_char, 7);
     sys::JS_SetPropertyStr(ctx, document, visibility_name.as_ptr(), visibility_value);
 
     let hidden_name = CString::new("hidden").unwrap();

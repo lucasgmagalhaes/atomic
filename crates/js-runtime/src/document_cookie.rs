@@ -49,7 +49,11 @@ unsafe extern "C" fn cookie_get(ctx: *mut sys::JSContext, _this_val: sys::JSValu
     new_js_string(ctx, &header)
 }
 
-unsafe extern "C" fn cookie_set(ctx: *mut sys::JSContext, _this_val: sys::JSValue, val: sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn cookie_set(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    val: sys::JSValue,
+) -> sys::JSValue {
     let state = crate::host_state::get(ctx);
     if state.is_null() {
         return sys::js_undefined();
@@ -72,8 +76,13 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     let document = crate::document::get_or_create(ctx);
     let name = CString::new("cookie").unwrap();
 
-    type Getter = unsafe extern "C" fn(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue;
-    type Setter = unsafe extern "C" fn(ctx: *mut sys::JSContext, this_val: sys::JSValue, val: sys::JSValue) -> sys::JSValue;
+    type Getter =
+        unsafe extern "C" fn(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue;
+    type Setter = unsafe extern "C" fn(
+        ctx: *mut sys::JSContext,
+        this_val: sys::JSValue,
+        val: sys::JSValue,
+    ) -> sys::JSValue;
 
     let getter = sys::JS_NewCFunction2(
         ctx,
@@ -99,7 +108,10 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
         atom,
         getter,
         setter,
-        sys::JS_PROP_HAS_GET | sys::JS_PROP_HAS_SET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE,
+        sys::JS_PROP_HAS_GET
+            | sys::JS_PROP_HAS_SET
+            | sys::JS_PROP_CONFIGURABLE
+            | sys::JS_PROP_ENUMERABLE,
     );
     sys::JS_FreeAtom(ctx, atom);
     sys::JS_FreeValue(ctx, document);

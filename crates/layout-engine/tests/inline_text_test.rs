@@ -102,6 +102,22 @@ fn color_is_inherited_and_reaches_glyphs() {
     layout_block(&mut tree, 800.0, 0.0, 0.0);
 
     let text_box = &tree.children[0];
-    assert_eq!(text_box.style.color, Color { r: 255, g: 0, b: 0, a: 255 });
-    assert_eq!(text_box.glyphs[0].color, Color { r: 255, g: 0, b: 0, a: 255 });
+    assert_eq!(
+        text_box.style.color,
+        Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255
+        }
+    );
+    assert_eq!(
+        text_box.glyphs[0].color,
+        Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255
+        }
+    );
 }

@@ -28,10 +28,14 @@ fn finds_the_deepest_box_containing_the_point() {
     // A point inside the real inner box (offset 20,20 from outer's
     // origin, 50x50) should hit the inner node, not the outer one.
     let hit = hit_test(&tree, 30.0, 30.0).expect("point inside the inner box should hit something");
-    assert_eq!(hit, inner, "a point inside a nested child's real box should resolve to that child, not its parent");
+    assert_eq!(
+        hit, inner,
+        "a point inside a nested child's real box should resolve to that child, not its parent"
+    );
 
     // A point inside outer but outside inner's real box should hit outer.
-    let hit_outer = hit_test(&tree, 150.0, 150.0).expect("point inside outer but outside inner should hit something");
+    let hit_outer = hit_test(&tree, 150.0, 150.0)
+        .expect("point inside outer but outside inner should hit something");
     assert_eq!(hit_outer, outer);
 }
 
@@ -46,8 +50,16 @@ fn a_point_outside_every_box_returns_none() {
     let mut tree = build_box_tree(&d, div, &sheet).unwrap();
     layout_block(&mut tree, 800.0, 0.0, 0.0);
 
-    assert_eq!(hit_test(&tree, 9999.0, 9999.0), None, "a point nowhere near any real box should hit nothing, not the nearest one");
-    assert_eq!(hit_test(&tree, -5.0, 5.0), None, "a negative coordinate outside the box should not match");
+    assert_eq!(
+        hit_test(&tree, 9999.0, 9999.0),
+        None,
+        "a point nowhere near any real box should hit nothing, not the nearest one"
+    );
+    assert_eq!(
+        hit_test(&tree, -5.0, 5.0),
+        None,
+        "a negative coordinate outside the box should not match"
+    );
 }
 
 #[test]
@@ -61,6 +73,10 @@ fn a_point_exactly_on_the_boxs_own_edge_is_included_but_the_far_edge_is_not() {
     let mut tree = build_box_tree(&d, div, &sheet).unwrap();
     layout_block(&mut tree, 800.0, 0.0, 0.0);
 
-    assert_eq!(hit_test(&tree, 0.0, 0.0), Some(div), "the box's own top-left corner should be included");
+    assert_eq!(
+        hit_test(&tree, 0.0, 0.0),
+        Some(div),
+        "the box's own top-left corner should be included"
+    );
     assert_eq!(hit_test(&tree, 100.0, 50.0), None, "the box's right edge (x == x + width) is exclusive, matching real rect-containment convention");
 }

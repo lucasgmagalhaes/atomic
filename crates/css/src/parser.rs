@@ -134,7 +134,9 @@ impl ComplexSelector {
             for simple in &compound.0 {
                 match simple {
                     SimpleSelector::Id(_) => spec.0 += 1,
-                    SimpleSelector::Class(_) | SimpleSelector::Attribute(_) | SimpleSelector::PseudoClass(_) => spec.1 += 1,
+                    SimpleSelector::Class(_)
+                    | SimpleSelector::Attribute(_)
+                    | SimpleSelector::PseudoClass(_) => spec.1 += 1,
                     SimpleSelector::Type(_) => spec.2 += 1,
                     SimpleSelector::Universal => {}
                 }
@@ -508,7 +510,10 @@ impl<'a> Parser<'a> {
             break;
         }
 
-        Some(MediaQuery { type_matches, features })
+        Some(MediaQuery {
+            type_matches,
+            features,
+        })
     }
 
     fn parse_selector_list(&mut self) -> Option<SelectorList> {
@@ -585,7 +590,9 @@ impl<'a> Parser<'a> {
                 Some(Token::Delim('[')) => {
                     self.tokens.next();
                     self.skip_whitespace();
-                    let Some(Token::Ident(name)) = self.tokens.next() else { return None };
+                    let Some(Token::Ident(name)) = self.tokens.next() else {
+                        return None;
+                    };
                     self.skip_whitespace();
                     let match_ = if self.tokens.peek() == Some(&Token::Delim('=')) {
                         self.tokens.next();
@@ -603,11 +610,16 @@ impl<'a> Parser<'a> {
                     if self.tokens.next() != Some(Token::Delim(']')) {
                         return None;
                     }
-                    simples.push(SimpleSelector::Attribute(AttributeSelector { name, match_ }));
+                    simples.push(SimpleSelector::Attribute(AttributeSelector {
+                        name,
+                        match_,
+                    }));
                 }
                 Some(Token::Colon) => {
                     self.tokens.next();
-                    let Some(Token::Ident(name)) = self.tokens.next() else { return None };
+                    let Some(Token::Ident(name)) = self.tokens.next() else {
+                        return None;
+                    };
                     let pseudo = match name.to_ascii_lowercase().as_str() {
                         "first-child" => PseudoClass::FirstChild,
                         "last-child" => PseudoClass::LastChild,

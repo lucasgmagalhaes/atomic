@@ -11,7 +11,9 @@
 //! never matches those selector kinds, rather than panicking; that's a
 //! real, honest limitation for a caller that hasn't been updated yet, not
 //! fake behavior.
-use crate::parser::{Combinator, ComplexSelector, Declaration, PseudoClass, SimpleSelector, Stylesheet};
+use crate::parser::{
+    Combinator, ComplexSelector, Declaration, PseudoClass, SimpleSelector, Stylesheet,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct ElementSnapshot {
@@ -39,13 +41,20 @@ fn compound_matches(compound: &crate::parser::CompoundSelector, el: &ElementSnap
         SimpleSelector::Id(id) => el.id.as_deref() == Some(id.as_str()),
         SimpleSelector::Class(class) => el.classes.iter().any(|c| c == class),
         SimpleSelector::Attribute(attr) => match &attr.match_ {
-            crate::parser::AttributeMatch::Has => el.attributes.iter().any(|(k, _)| *k == attr.name),
-            crate::parser::AttributeMatch::Equals(v) => el.attributes.iter().any(|(k, val)| *k == attr.name && val == v),
+            crate::parser::AttributeMatch::Has => {
+                el.attributes.iter().any(|(k, _)| *k == attr.name)
+            }
+            crate::parser::AttributeMatch::Equals(v) => el
+                .attributes
+                .iter()
+                .any(|(k, val)| *k == attr.name && val == v),
         },
         SimpleSelector::PseudoClass(pseudo) => match pseudo {
             PseudoClass::FirstChild => el.preceding_siblings.is_empty(),
             PseudoClass::LastChild => !el.has_following_sibling,
-            PseudoClass::NthChild(formula) => formula.matches(el.preceding_siblings.len() as i64 + 1),
+            PseudoClass::NthChild(formula) => {
+                formula.matches(el.preceding_siblings.len() as i64 + 1)
+            }
             // No real hover/focus state is tracked anywhere in this engine
             // yet (no input-event plumbing reaches selector matching) -
             // always false rather than faking a match. See the parser
@@ -118,7 +127,13 @@ pub fn selector_matches(selector: &ComplexSelector, chain: &[ElementSnapshot]) -
                 remaining_siblings = rest;
             }
             Combinator::SubsequentSibling => {
-                let Some(idx) = remaining_siblings.iter().enumerate().rev().find(|(_, c)| compound_matches(compound, c)).map(|(idx, _)| idx) else {
+                let Some(idx) = remaining_siblings
+                    .iter()
+                    .enumerate()
+                    .rev()
+                    .find(|(_, c)| compound_matches(compound, c))
+                    .map(|(idx, _)| idx)
+                else {
                     return false;
                 };
                 remaining_siblings = &remaining_siblings[..idx];

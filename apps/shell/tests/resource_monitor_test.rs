@@ -14,7 +14,10 @@ fn tick_accumulates_real_cpu_memory_and_fps_after_the_sample_interval() {
     // `last_sampled_at` in the past) but has no prior sample to diff a
     // CPU delta against yet.
     monitor.tick(pid, 0);
-    assert!(monitor.latest_memory_bytes().unwrap() > 0, "a real process should report non-zero working-set memory");
+    assert!(
+        monitor.latest_memory_bytes().unwrap() > 0,
+        "a real process should report non-zero working-set memory"
+    );
     assert!(monitor.latest_cpu_percent().is_none());
     assert!(monitor.latest_fps().is_none());
 
@@ -27,11 +30,15 @@ fn tick_accumulates_real_cpu_memory_and_fps_after_the_sample_interval() {
     std::hint::black_box(x);
 
     monitor.tick(pid, 60);
-    let cpu = monitor.latest_cpu_percent().expect("second tick has a prior sample to diff against");
+    let cpu = monitor
+        .latest_cpu_percent()
+        .expect("second tick has a prior sample to diff against");
     assert!(cpu >= 0.0);
     assert_eq!(monitor.cpu_history().count(), 1);
 
-    let fps = monitor.latest_fps().expect("frame_generation advanced by 60 over ~1.1s");
+    let fps = monitor
+        .latest_fps()
+        .expect("frame_generation advanced by 60 over ~1.1s");
     assert!(fps > 0.0, "got {fps}");
 }
 
@@ -45,7 +52,11 @@ fn tick_before_the_sample_interval_elapses_is_a_no_op() {
 
     // Called again immediately - well under the 1s sample interval.
     monitor.tick(pid, 999);
-    assert_eq!(monitor.latest_fps(), None, "frame_generation shouldn't register as advanced - the second tick was throttled away");
+    assert_eq!(
+        monitor.latest_fps(),
+        None,
+        "frame_generation shouldn't register as advanced - the second tick was throttled away"
+    );
     assert_eq!(monitor.latest_memory_bytes(), memory_after_first);
     assert_eq!(monitor.cpu_history().count(), 0);
 }

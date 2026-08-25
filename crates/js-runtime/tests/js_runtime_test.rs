@@ -343,7 +343,10 @@ fn form_and_anchor_specific_properties_reflect_boolean_and_href_attributes() {
             "<test>",
         )
         .unwrap();
-    assert_eq!(result, "false,false,true,true,true,false,false,https://example.com/");
+    assert_eq!(
+        result,
+        "false,false,true,true,true,false,false,https://example.com/"
+    );
 }
 
 #[test]
@@ -1228,7 +1231,10 @@ fn tag_name_local_name_and_namespace_uri_reflect_element_identity() {
             "<test>",
         )
         .unwrap();
-    assert_eq!(result, "DIV,DiV,http://www.w3.org/1999/xhtml,undefined,null");
+    assert_eq!(
+        result,
+        "DIV,DiV,http://www.w3.org/1999/xhtml,undefined,null"
+    );
 }
 
 #[test]

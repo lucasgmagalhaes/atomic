@@ -21,7 +21,12 @@ fn pump_until<F: Fn(&Context) -> bool>(ctx: &Context, predicate: F, timeout: Dur
 fn fetch_returns_a_real_promise_object() {
     let rt = Runtime::new();
     let ctx = Context::new(&rt);
-    let result = ctx.eval("Object.prototype.toString.call(fetch('https://example.com/'))", "<test>").unwrap();
+    let result = ctx
+        .eval(
+            "Object.prototype.toString.call(fetch('https://example.com/'))",
+            "<test>",
+        )
+        .unwrap();
     assert_eq!(result, "[object Promise]");
 }
 
@@ -50,21 +55,40 @@ fn fetch_then_resolves_with_a_real_response_once_pumped() {
     )
     .unwrap();
 
-    let done = pump_until(&ctx, |c| c.eval("seen !== null", "<test>").unwrap() == "true", Duration::from_secs(15));
-    assert!(done, "fetch should resolve within 15s against a real network");
+    let done = pump_until(
+        &ctx,
+        |c| c.eval("seen !== null", "<test>").unwrap() == "true",
+        Duration::from_secs(15),
+    );
+    assert!(
+        done,
+        "fetch should resolve within 15s against a real network"
+    );
 
     assert_eq!(ctx.eval("seen.ok", "<test>").unwrap(), "true");
     assert_eq!(ctx.eval("seen.status", "<test>").unwrap(), "200");
-    assert_eq!(ctx.eval("seen.body.includes('Example Domain')", "<test>").unwrap(), "true");
+    assert_eq!(
+        ctx.eval("seen.body.includes('Example Domain')", "<test>")
+            .unwrap(),
+        "true"
+    );
 }
 
 #[test]
 fn fetch_rejects_on_a_missing_url_argument() {
     let rt = Runtime::new();
     let ctx = Context::new(&rt);
-    ctx.eval("globalThis.err = null; fetch().catch((e) => { err = e; });", "<test>").unwrap();
+    ctx.eval(
+        "globalThis.err = null; fetch().catch((e) => { err = e; });",
+        "<test>",
+    )
+    .unwrap();
 
-    let done = pump_until(&ctx, |c| c.eval("err !== null", "<test>").unwrap() == "true", Duration::from_secs(2));
+    let done = pump_until(
+        &ctx,
+        |c| c.eval("err !== null", "<test>").unwrap() == "true",
+        Duration::from_secs(2),
+    );
     assert!(done);
     assert!(ctx.eval("err.includes('url')", "<test>").unwrap() == "true");
 }
@@ -85,8 +109,15 @@ fn async_await_over_fetch_works_once_pumped() {
     )
     .unwrap();
 
-    let done = pump_until(&ctx, |c| c.eval("status !== null", "<test>").unwrap() == "true", Duration::from_secs(15));
-    assert!(done, "async/await over a real fetch should complete within 15s");
+    let done = pump_until(
+        &ctx,
+        |c| c.eval("status !== null", "<test>").unwrap() == "true",
+        Duration::from_secs(15),
+    );
+    assert!(
+        done,
+        "async/await over a real fetch should complete within 15s"
+    );
     assert_eq!(ctx.eval("status", "<test>").unwrap(), "200");
 }
 
@@ -125,12 +156,23 @@ fn xhr_send_completes_via_onload_once_pumped() {
 
     assert_eq!(ctx.eval("loaded", "<test>").unwrap(), "false");
 
-    let done = pump_until(&ctx, |c| c.eval("loaded", "<test>").unwrap() == "true", Duration::from_secs(15));
-    assert!(done, "xhr should complete within 15s against a real network");
+    let done = pump_until(
+        &ctx,
+        |c| c.eval("loaded", "<test>").unwrap() == "true",
+        Duration::from_secs(15),
+    );
+    assert!(
+        done,
+        "xhr should complete within 15s against a real network"
+    );
 
     assert_eq!(ctx.eval("xhr.readyState", "<test>").unwrap(), "4");
     assert_eq!(ctx.eval("xhr.status", "<test>").unwrap(), "200");
-    assert_eq!(ctx.eval("xhr.responseText.includes('Example Domain')", "<test>").unwrap(), "true");
+    assert_eq!(
+        ctx.eval("xhr.responseText.includes('Example Domain')", "<test>")
+            .unwrap(),
+        "true"
+    );
     // `onload` is called with `this` bound to the xhr instance.
     let this_check = ctx
         .eval(
@@ -163,7 +205,11 @@ fn xhr_this_binding_inside_onload_is_the_instance() {
     )
     .unwrap();
 
-    let done = pump_until(&ctx, |c| c.eval("sawThis !== null", "<test>").unwrap() == "true", Duration::from_secs(15));
+    let done = pump_until(
+        &ctx,
+        |c| c.eval("sawThis !== null", "<test>").unwrap() == "true",
+        Duration::from_secs(15),
+    );
     assert!(done);
     assert_eq!(ctx.eval("sawThis", "<test>").unwrap(), "true");
 }

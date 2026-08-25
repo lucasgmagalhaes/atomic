@@ -32,7 +32,13 @@ unsafe fn new_js_string(ctx: *mut sys::JSContext, s: &str) -> sys::JSValue {
     sys::JS_NewStringLen(ctx, s.as_ptr() as *const std::os::raw::c_char, s.len())
 }
 
-unsafe fn define_method(ctx: *mut sys::JSContext, obj: sys::JSValue, name: &str, func: sys::JSCFunction, length: c_int) {
+unsafe fn define_method(
+    ctx: *mut sys::JSContext,
+    obj: sys::JSValue,
+    name: &str,
+    func: sys::JSCFunction,
+    length: c_int,
+) {
     let name_c = CString::new(name).unwrap();
     let f = sys::JS_NewCFunction2(ctx, func, name_c.as_ptr(), length, sys::JS_CFUNC_GENERIC, 0);
     sys::JS_SetPropertyStr(ctx, obj, name_c.as_ptr(), f);
@@ -41,7 +47,10 @@ unsafe fn define_method(ctx: *mut sys::JSContext, obj: sys::JSValue, name: &str,
 /// Settles a fresh Promise immediately: `Ok(value)` resolves with
 /// `value` (transfers ownership), `Err(message)` rejects with a plain
 /// `Error(message)` object.
-unsafe fn settled_promise(ctx: *mut sys::JSContext, result: Result<sys::JSValue, String>) -> sys::JSValue {
+unsafe fn settled_promise(
+    ctx: *mut sys::JSContext,
+    result: Result<sys::JSValue, String>,
+) -> sys::JSValue {
     let mut resolving_funcs = [sys::js_undefined(); 2];
     let promise = sys::JS_NewPromiseCapability(ctx, resolving_funcs.as_mut_ptr());
     let [resolve, reject] = resolving_funcs;
@@ -69,11 +78,23 @@ unsafe fn settled_promise(ctx: *mut sys::JSContext, result: Result<sys::JSValue,
     promise
 }
 
-unsafe extern "C" fn write_text(ctx: *mut sys::JSContext, _this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn write_text(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
     if !crate::permissions_policy::is_allowed(ctx, "clipboard-write") {
-        return settled_promise(ctx, Err("clipboard write is blocked by Permissions Policy".to_string()));
+        return settled_promise(
+            ctx,
+            Err("clipboard write is blocked by Permissions Policy".to_string()),
+        );
     }
-    let text = if argc >= 1 { read_js_string(ctx, *argv) } else { None };
+    let text = if argc >= 1 {
+        read_js_string(ctx, *argv)
+    } else {
+        None
+    };
     let Some(text) = text else {
         return settled_promise(ctx, Err("writeText: missing text argument".to_string()));
     };
@@ -84,9 +105,17 @@ unsafe extern "C" fn write_text(ctx: *mut sys::JSContext, _this_val: sys::JSValu
     }
 }
 
-unsafe extern "C" fn read_text(ctx: *mut sys::JSContext, _this_val: sys::JSValue, _argc: c_int, _argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn read_text(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
+) -> sys::JSValue {
     if !crate::permissions_policy::is_allowed(ctx, "clipboard-read") {
-        return settled_promise(ctx, Err("clipboard read is blocked by Permissions Policy".to_string()));
+        return settled_promise(
+            ctx,
+            Err("clipboard read is blocked by Permissions Policy".to_string()),
+        );
     }
     match platform_apis::clipboard_read_text() {
         Ok(text) => settled_promise(ctx, Ok(new_js_string(ctx, &text))),
@@ -103,7 +132,12 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     let navigator = if navigator.tag == sys::JS_TAG_UNDEFINED {
         sys::JS_FreeValue(ctx, navigator);
         let obj = sys::JS_NewObject(ctx);
-        sys::JS_SetPropertyStr(ctx, global, navigator_name.as_ptr(), sys::JS_DupValue(ctx, obj));
+        sys::JS_SetPropertyStr(
+            ctx,
+            global,
+            navigator_name.as_ptr(),
+            sys::JS_DupValue(ctx, obj),
+        );
         obj
     } else {
         navigator

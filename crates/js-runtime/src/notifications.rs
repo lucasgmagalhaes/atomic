@@ -43,7 +43,10 @@ struct NotificationInner {
     closed: bool,
 }
 
-unsafe fn notification_opaque(rt: *mut sys::JSRuntime, this_val: sys::JSValue) -> *mut NotificationInner {
+unsafe fn notification_opaque(
+    rt: *mut sys::JSRuntime,
+    this_val: sys::JSValue,
+) -> *mut NotificationInner {
     let class_id = crate::class_registry::class_id_for(rt, NOTIFICATION_CLASS_KIND);
     sys::JS_GetOpaque(this_val, class_id) as *mut NotificationInner
 }
@@ -101,7 +104,8 @@ unsafe extern "C" fn notification_constructor(
     if !crate::permissions_policy::is_allowed(ctx, "notifications") {
         return sys::JS_Throw(ctx, permission_error(ctx));
     }
-    let class_id = crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NOTIFICATION_CLASS_KIND);
+    let class_id =
+        crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NOTIFICATION_CLASS_KIND);
     let obj = sys::JS_NewObjectClass(ctx, class_id);
     if sys::js_is_exception(&obj) {
         return obj;
@@ -113,12 +117,23 @@ unsafe extern "C" fn notification_constructor(
         }
         sys::JS_FreeValue(ctx, proto);
     }
-    sys::JS_SetOpaque(obj, Box::into_raw(Box::new(NotificationInner { closed: false })) as *mut c_void);
+    sys::JS_SetOpaque(
+        obj,
+        Box::into_raw(Box::new(NotificationInner { closed: false })) as *mut c_void,
+    );
 
-    let title = if argc >= 1 { read_js_string(ctx, *argv).unwrap_or_default() } else { String::new() };
+    let title = if argc >= 1 {
+        read_js_string(ctx, *argv).unwrap_or_default()
+    } else {
+        String::new()
+    };
     set_str(ctx, obj, "title", &title);
 
-    let options = if argc >= 2 { *argv.add(1) } else { sys::js_undefined() };
+    let options = if argc >= 2 {
+        *argv.add(1)
+    } else {
+        sys::js_undefined()
+    };
     set_str(ctx, obj, "body", &read_option_str(ctx, options, "body"));
     set_str(ctx, obj, "tag", &read_option_str(ctx, options, "tag"));
     set_str(ctx, obj, "icon", &read_option_str(ctx, options, "icon"));
@@ -142,7 +157,12 @@ unsafe fn permission_error(ctx: *mut sys::JSContext) -> sys::JSValue {
     error
 }
 
-unsafe extern "C" fn notification_close(ctx: *mut sys::JSContext, this_val: sys::JSValue, _argc: c_int, _argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn notification_close(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
+) -> sys::JSValue {
     let ptr = notification_opaque(sys::JS_GetRuntime(ctx), this_val);
     if !ptr.is_null() {
         (*ptr).closed = true;
@@ -163,7 +183,12 @@ unsafe fn resolved_string_promise(ctx: *mut sys::JSContext, value: &str) -> sys:
     promise
 }
 
-unsafe extern "C" fn request_permission(ctx: *mut sys::JSContext, _this_val: sys::JSValue, _argc: c_int, _argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn request_permission(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
+) -> sys::JSValue {
     if !crate::permissions_policy::is_allowed(ctx, "notifications") {
         return resolved_string_promise(ctx, "denied");
     }
@@ -175,13 +200,22 @@ unsafe extern "C" fn request_permission(ctx: *mut sys::JSContext, _this_val: sys
     resolved_string_promise(ctx, "granted")
 }
 
-unsafe extern "C" fn permission_get(ctx: *mut sys::JSContext, _this_val: sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn permission_get(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+) -> sys::JSValue {
     new_js_string(ctx, permission_for(ctx))
 }
 
-type Getter = unsafe extern "C" fn(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue;
+type Getter =
+    unsafe extern "C" fn(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue;
 
-unsafe fn define_static_getter(ctx: *mut sys::JSContext, obj: sys::JSValue, name: &str, getter: Getter) {
+unsafe fn define_static_getter(
+    ctx: *mut sys::JSContext,
+    obj: sys::JSValue,
+    name: &str,
+    getter: Getter,
+) {
     let name_c = CString::new(name).unwrap();
     let f = sys::JS_NewCFunction2(
         ctx,
@@ -192,7 +226,14 @@ unsafe fn define_static_getter(ctx: *mut sys::JSContext, obj: sys::JSValue, name
         0,
     );
     let atom = sys::JS_NewAtom(ctx, name_c.as_ptr());
-    sys::JS_DefinePropertyGetSet(ctx, obj, atom, f, sys::js_undefined(), sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE);
+    sys::JS_DefinePropertyGetSet(
+        ctx,
+        obj,
+        atom,
+        f,
+        sys::js_undefined(),
+        sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE,
+    );
     sys::JS_FreeAtom(ctx, atom);
 }
 
@@ -212,18 +253,39 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
 
     let proto = sys::JS_NewObject(ctx);
     let close_name = CString::new("close").unwrap();
-    let close_fn = sys::JS_NewCFunction2(ctx, notification_close, close_name.as_ptr(), 0, sys::JS_CFUNC_GENERIC, 0);
+    let close_fn = sys::JS_NewCFunction2(
+        ctx,
+        notification_close,
+        close_name.as_ptr(),
+        0,
+        sys::JS_CFUNC_GENERIC,
+        0,
+    );
     sys::JS_SetPropertyStr(ctx, proto, close_name.as_ptr(), close_fn);
     sys::JS_SetClassProto(ctx, class_id, proto);
 
     let ctor_name = CString::new("Notification").unwrap();
-    let ctor = sys::JS_NewCFunction2(ctx, notification_constructor, ctor_name.as_ptr(), 2, sys::JS_CFUNC_CONSTRUCTOR_OR_FUNC, 0);
+    let ctor = sys::JS_NewCFunction2(
+        ctx,
+        notification_constructor,
+        ctor_name.as_ptr(),
+        2,
+        sys::JS_CFUNC_CONSTRUCTOR_OR_FUNC,
+        0,
+    );
     let proto_name = CString::new("prototype").unwrap();
     sys::JS_SetPropertyStr(ctx, ctor, proto_name.as_ptr(), sys::JS_DupValue(ctx, proto));
 
     define_static_getter(ctx, ctor, "permission", permission_get);
     let rp_name = CString::new("requestPermission").unwrap();
-    let rp_fn = sys::JS_NewCFunction2(ctx, request_permission, rp_name.as_ptr(), 0, sys::JS_CFUNC_GENERIC, 0);
+    let rp_fn = sys::JS_NewCFunction2(
+        ctx,
+        request_permission,
+        rp_name.as_ptr(),
+        0,
+        sys::JS_CFUNC_GENERIC,
+        0,
+    );
     sys::JS_SetPropertyStr(ctx, ctor, rp_name.as_ptr(), rp_fn);
 
     let global = sys::JS_GetGlobalObject(ctx);

@@ -7,8 +7,11 @@ use js_runtime::{Context, Runtime};
 fn set_timeout_does_not_fire_before_pump() {
     let rt = Runtime::new();
     let ctx = Context::new(&rt);
-    ctx.eval("globalThis.calls = 0; setTimeout(() => { calls++; }, 0);", "<test>")
-        .unwrap();
+    ctx.eval(
+        "globalThis.calls = 0; setTimeout(() => { calls++; }, 0);",
+        "<test>",
+    )
+    .unwrap();
     let calls = ctx.eval("calls", "<test>").unwrap();
     assert_eq!(calls, "0");
 }

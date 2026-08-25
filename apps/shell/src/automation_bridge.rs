@@ -22,7 +22,10 @@ use crate::workspace::WorkspaceManager;
 /// host granted it. Takes `&BrowserView` (not `&mut`) since
 /// `profile_handle` only clones an `Rc` — building this map never needs
 /// exclusive access to the panes themselves.
-pub fn scoped_panes<'p>(workspace: &WorkspaceManager, panes: impl IntoIterator<Item = (&'p str, &'p BrowserView)>) -> HashMap<String, Rc<RefCell<profile::Profile>>> {
+pub fn scoped_panes<'p>(
+    workspace: &WorkspaceManager,
+    panes: impl IntoIterator<Item = (&'p str, &'p BrowserView)>,
+) -> HashMap<String, Rc<RefCell<profile::Profile>>> {
     let active_ids = workspace.active().profiles();
     let mut engine_panes = HashMap::new();
     for (id, browser) in panes {
@@ -49,8 +52,14 @@ pub fn scoped_panes<'p>(workspace: &WorkspaceManager, panes: impl IntoIterator<I
 /// message (covers a genuinely bad script, an unknown pane name, and
 /// `pane.fill`/`pane.click` failing against a real element that doesn't
 /// exist — see the `automation` crate's own doc for what's real there now).
-pub fn run_script<'p>(workspace: &WorkspaceManager, panes: impl IntoIterator<Item = (&'p str, &'p BrowserView)>, script: &str) -> Result<String, String> {
+pub fn run_script<'p>(
+    workspace: &WorkspaceManager,
+    panes: impl IntoIterator<Item = (&'p str, &'p BrowserView)>,
+    script: &str,
+) -> Result<String, String> {
     let runtime = js_runtime::Runtime::new();
     let engine = automation::AutomationEngine::new(&runtime, scoped_panes(workspace, panes));
-    engine.run(script, "shell-script.js").map_err(|e| e.to_string())
+    engine
+        .run(script, "shell-script.js")
+        .map_err(|e| e.to_string())
 }

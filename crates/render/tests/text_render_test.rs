@@ -28,8 +28,13 @@ fn rendering_text_paints_non_background_pixels() {
     // exact glyph shape isn't asserted (font hinting/AA make that
     // fragile), just that *something* got painted and it's red-ish, not
     // still fully transparent.
-    let painted_red = pixels.chunks_exact(4).any(|px| px[0] > 0 && px[3] > 0 && px[1] == 0 && px[2] == 0);
-    assert!(painted_red, "expected at least one red, non-transparent pixel from rendering 'A'");
+    let painted_red = pixels
+        .chunks_exact(4)
+        .any(|px| px[0] > 0 && px[3] > 0 && px[1] == 0 && px[2] == 0);
+    assert!(
+        painted_red,
+        "expected at least one red, non-transparent pixel from rendering 'A'"
+    );
 }
 
 #[test]
@@ -102,14 +107,22 @@ fn clip_restricts_which_pixels_a_glyph_can_paint() {
         .iter()
         .map(|g| ClippedGlyph {
             glyph: g.glyph,
-            clip: Some(ClipRect { x: 150.0, y: 50.0, width: 50.0, height: 50.0 }),
+            clip: Some(ClipRect {
+                x: 150.0,
+                y: 50.0,
+                width: 50.0,
+                height: 50.0,
+            }),
             opacity: 1.0,
         })
         .collect();
 
     let mut clipped_pixels = vec![0u8; (width * height * 4) as usize];
     composite_glyphs(&mut clipped_pixels, width, height, &clipped);
-    assert!(clipped_pixels.iter().all(|&b| b == 0), "clip region doesn't overlap the glyph - nothing should paint");
+    assert!(
+        clipped_pixels.iter().all(|&b| b == 0),
+        "clip region doesn't overlap the glyph - nothing should paint"
+    );
 }
 
 #[test]
@@ -128,11 +141,21 @@ fn zero_opacity_paints_no_glyph_pixels() {
     let glyphs = build_glyph_list(&tree);
     assert!(!glyphs.is_empty());
 
-    let transparent: Vec<ClippedGlyph> = glyphs.iter().map(|g| ClippedGlyph { glyph: g.glyph, clip: None, opacity: 0.0 }).collect();
+    let transparent: Vec<ClippedGlyph> = glyphs
+        .iter()
+        .map(|g| ClippedGlyph {
+            glyph: g.glyph,
+            clip: None,
+            opacity: 0.0,
+        })
+        .collect();
 
     let width = 200u32;
     let height = 100u32;
     let mut pixels = vec![0u8; (width * height * 4) as usize];
     composite_glyphs(&mut pixels, width, height, &transparent);
-    assert!(pixels.iter().all(|&b| b == 0), "opacity 0 should paint nothing");
+    assert!(
+        pixels.iter().all(|&b| b == 0),
+        "opacity 0 should paint nothing"
+    );
 }

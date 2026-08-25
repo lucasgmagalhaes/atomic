@@ -53,10 +53,22 @@ fn rect_to_vertices(rect: &Rect, viewport_width: f32, viewport_height: f32) -> [
         rect.color.a as f32 / 255.0,
     ];
 
-    let tl = Vertex { position: [x0, y0], color };
-    let tr = Vertex { position: [x1, y0], color };
-    let bl = Vertex { position: [x0, y1], color };
-    let br = Vertex { position: [x1, y1], color };
+    let tl = Vertex {
+        position: [x0, y0],
+        color,
+    };
+    let tr = Vertex {
+        position: [x1, y0],
+        color,
+    };
+    let bl = Vertex {
+        position: [x0, y1],
+        color,
+    };
+    let br = Vertex {
+        position: [x1, y1],
+        color,
+    };
 
     [tl, bl, tr, tr, bl, br]
 }
@@ -222,7 +234,11 @@ impl GpuRenderer {
             multiview: None,
         });
 
-        GpuRenderer { device, queue, pipeline }
+        GpuRenderer {
+            device,
+            queue,
+            pipeline,
+        }
     }
 
     /// Renders `rects` onto a `width` × `height` canvas cleared to
@@ -260,11 +276,14 @@ impl GpuRenderer {
             None
         } else {
             use wgpu::util::DeviceExt;
-            Some(self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("quad-vertices"),
-                contents: bytemuck::cast_slice(&vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            }))
+            Some(
+                self.device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("quad-vertices"),
+                        contents: bytemuck::cast_slice(&vertices),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    }),
+            )
         };
 
         let mut encoder = self

@@ -29,7 +29,12 @@ use crate::tree::LayoutBox;
 /// same convention as `layout_block`.
 fn layout_text_box(box_: &mut LayoutBox, containing_width: f64, x: f64, y: f64) -> f64 {
     let text = box_.text.as_deref().unwrap_or("");
-    let result = layout_text(text, box_.style.font_size as f32, Some(containing_width as f32), box_.style.color);
+    let result = layout_text(
+        text,
+        box_.style.font_size as f32,
+        Some(containing_width as f32),
+        box_.style.color,
+    );
 
     box_.dimensions.x = x;
     box_.dimensions.y = y;
@@ -49,7 +54,11 @@ fn layout_inline_box(box_: &mut LayoutBox, containing_width: f64, x: f64, y: f64
     let sources = box_.inline_spans.as_deref().unwrap_or(&[]);
     let spans: Vec<InlineSpan> = sources
         .iter()
-        .map(|s| InlineSpan { text: &s.text, font_size: s.font_size as f32, color: s.color })
+        .map(|s| InlineSpan {
+            text: &s.text,
+            font_size: s.font_size as f32,
+            color: s.color,
+        })
         .collect();
     let result = layout_inline(&spans, Some(containing_width as f32));
 
@@ -121,16 +130,32 @@ fn resolve_outer_width(style: &crate::style::ComputedStyle, containing_width: f6
     let (border_left, border_right) = if style.border_style == BorderStyle::None {
         (0.0, 0.0)
     } else {
-        (resolve_edge(style.border_width.left, containing_width), resolve_edge(style.border_width.right, containing_width))
+        (
+            resolve_edge(style.border_width.left, containing_width),
+            resolve_edge(style.border_width.right, containing_width),
+        )
     };
     let padding_left = resolve_edge(style.padding.left, containing_width);
     let padding_right = resolve_edge(style.padding.right, containing_width);
     let content_width = match style.width {
         Length::Px(px) => px,
         Length::Percent(pct) => containing_width * pct / 100.0,
-        Length::Auto => (containing_width - margin_left - margin_right - border_left - border_right - padding_left - padding_right).max(0.0),
+        Length::Auto => (containing_width
+            - margin_left
+            - margin_right
+            - border_left
+            - border_right
+            - padding_left
+            - padding_right)
+            .max(0.0),
     };
-    margin_left + margin_right + border_left + border_right + padding_left + padding_right + content_width
+    margin_left
+        + margin_right
+        + border_left
+        + border_right
+        + padding_left
+        + padding_right
+        + content_width
 }
 
 pub(crate) fn resolve_edge(length: Length, containing_width: f64) -> f64 {
@@ -190,17 +215,23 @@ pub fn layout_block(box_: &mut LayoutBox, containing_width: f64, x: f64, y: f64)
     // bordered box genuinely takes more space than an unbordered one with
     // otherwise-identical CSS (see `render::build_display_list` for the
     // actual stroke painting).
-    let (border_top, border_right, border_bottom, border_left) = if box_.style.border_style == BorderStyle::None {
-        (0.0, 0.0, 0.0, 0.0)
-    } else {
-        (
-            resolve_edge(box_.style.border_width.top, containing_width),
-            resolve_edge(box_.style.border_width.right, containing_width),
-            resolve_edge(box_.style.border_width.bottom, containing_width),
-            resolve_edge(box_.style.border_width.left, containing_width),
-        )
+    let (border_top, border_right, border_bottom, border_left) =
+        if box_.style.border_style == BorderStyle::None {
+            (0.0, 0.0, 0.0, 0.0)
+        } else {
+            (
+                resolve_edge(box_.style.border_width.top, containing_width),
+                resolve_edge(box_.style.border_width.right, containing_width),
+                resolve_edge(box_.style.border_width.bottom, containing_width),
+                resolve_edge(box_.style.border_width.left, containing_width),
+            )
+        };
+    box_.border = crate::tree::ResolvedBorder {
+        top: border_top,
+        right: border_right,
+        bottom: border_bottom,
+        left: border_left,
     };
-    box_.border = crate::tree::ResolvedBorder { top: border_top, right: border_right, bottom: border_bottom, left: border_left };
 
     // CSS's `width` property (content-box model, the only one this crate
     // models) sizes the *content* box. `auto` follows CSS 2.1 §10.3.3:
@@ -208,12 +239,20 @@ pub fn layout_block(box_: &mut LayoutBox, containing_width: f64, x: f64, y: f64)
     let content_width = match box_.style.width {
         Length::Px(px) => px,
         Length::Percent(pct) => containing_width * pct / 100.0,
-        Length::Auto => (containing_width - margin_left - margin_right - border_left - border_right - padding_left - padding_right).max(0.0),
+        Length::Auto => (containing_width
+            - margin_left
+            - margin_right
+            - border_left
+            - border_right
+            - padding_left
+            - padding_right)
+            .max(0.0),
     };
 
     box_.dimensions.x = x + margin_left;
     box_.dimensions.y = y + margin_top;
-    box_.dimensions.width = content_width + padding_left + padding_right + border_left + border_right;
+    box_.dimensions.width =
+        content_width + padding_left + padding_right + border_left + border_right;
 
     let content_x = box_.dimensions.x + border_left + padding_left;
     let content_y = box_.dimensions.y + border_top + padding_top;
@@ -230,7 +269,8 @@ pub fn layout_block(box_: &mut LayoutBox, containing_width: f64, x: f64, y: f64)
         Length::Percent(_) => content_height,
         Length::Auto => content_height,
     };
-    box_.dimensions.height = resolved_content_height + padding_top + padding_bottom + border_top + border_bottom;
+    box_.dimensions.height =
+        resolved_content_height + padding_top + padding_bottom + border_top + border_bottom;
 
     margin_top + box_.dimensions.height + margin_bottom
 }
@@ -278,7 +318,12 @@ pub fn layout_block(box_: &mut LayoutBox, containing_width: f64, x: f64, y: f64)
 /// unconditionally; tracking BFC establishment wasn't worth adding for
 /// this pass, and "always contains its floats" is arguably more useful
 /// anyway absent a `clearfix`-equivalent a page could reach for.
-pub(crate) fn layout_children(box_: &mut LayoutBox, content_width: f64, content_x: f64, content_y: f64) -> f64 {
+pub(crate) fn layout_children(
+    box_: &mut LayoutBox,
+    content_width: f64,
+    content_x: f64,
+    content_y: f64,
+) -> f64 {
     if box_.style.display == Display::Flex {
         let explicit_height = match box_.style.height {
             Length::Px(px) => Some(px),
@@ -307,7 +352,11 @@ pub(crate) fn layout_children(box_: &mut LayoutBox, content_width: f64, content_
                 continue;
             }
             if child.style.float != Float::None {
-                let float_y = cursor_y.max(if child.style.float == Float::Left { left_edge_y } else { right_edge_y });
+                let float_y = cursor_y.max(if child.style.float == Float::Left {
+                    left_edge_y
+                } else {
+                    right_edge_y
+                });
                 let float_x = if child.style.float == Float::Left {
                     content_x
                 } else {
@@ -330,6 +379,8 @@ pub(crate) fn layout_children(box_: &mut LayoutBox, content_width: f64, content_
             }
             cursor_y += layout_block(child, content_width, content_x, cursor_y);
         }
-        (cursor_y - content_y).max(left_edge_y - content_y).max(right_edge_y - content_y)
+        (cursor_y - content_y)
+            .max(left_edge_y - content_y)
+            .max(right_edge_y - content_y)
     }
 }

@@ -54,9 +54,25 @@ fn inline_element_keeps_its_own_cascaded_color_as_a_distinct_span() {
     let spans = tree.children[0].inline_spans.as_ref().unwrap();
     assert_eq!(spans.len(), 2);
     assert_eq!(spans[0].text, "hello ");
-    assert_eq!(spans[0].color, Color { r: 0, g: 0, b: 0, a: 255 });
+    assert_eq!(
+        spans[0].color,
+        Color {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 255
+        }
+    );
     assert_eq!(spans[1].text, "world");
-    assert_eq!(spans[1].color, Color { r: 255, g: 0, b: 0, a: 255 });
+    assert_eq!(
+        spans[1].color,
+        Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255
+        }
+    );
 }
 
 #[test]
@@ -69,10 +85,26 @@ fn glyphs_from_both_spans_end_up_on_the_same_shaped_box_with_correct_colors() {
     let inline_box = &tree.children[0];
     assert!(!inline_box.glyphs.is_empty());
 
-    let black = Color { r: 0, g: 0, b: 0, a: 255 };
-    let red = Color { r: 255, g: 0, b: 0, a: 255 };
-    assert!(inline_box.glyphs.iter().any(|g| g.color == black), "should have at least one black glyph from \"hello \"");
-    assert!(inline_box.glyphs.iter().any(|g| g.color == red), "should have at least one red glyph from \"world\"");
+    let black = Color {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
+    let red = Color {
+        r: 255,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
+    assert!(
+        inline_box.glyphs.iter().any(|g| g.color == black),
+        "should have at least one black glyph from \"hello \""
+    );
+    assert!(
+        inline_box.glyphs.iter().any(|g| g.color == red),
+        "should have at least one red glyph from \"world\""
+    );
 }
 
 #[test]
@@ -105,7 +137,10 @@ fn a_lone_plain_text_child_still_uses_the_simple_text_box_not_inline_spans() {
     let tree = build_box_tree(&d, p, &sheet).unwrap();
 
     assert_eq!(tree.children.len(), 1);
-    assert_eq!(tree.children[0].text.as_deref(), Some("just text, no siblings"));
+    assert_eq!(
+        tree.children[0].text.as_deref(),
+        Some("just text, no siblings")
+    );
     assert!(tree.children[0].inline_spans.is_none());
 }
 
@@ -135,7 +170,11 @@ fn nested_inline_elements_flatten_into_the_same_run() {
     let sheet = parse_stylesheet("b, i { display: inline; }");
     let tree = build_box_tree(&d, p, &sheet).unwrap();
 
-    assert_eq!(tree.children.len(), 1, "the whole thing should be one merged inline run");
+    assert_eq!(
+        tree.children.len(),
+        1,
+        "the whole thing should be one merged inline run"
+    );
     let spans = tree.children[0].inline_spans.as_ref().unwrap();
     let joined: String = spans.iter().map(|s| s.text.as_str()).collect();
     assert_eq!(joined, "a b c d e");

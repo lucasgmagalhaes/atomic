@@ -96,14 +96,24 @@ pub fn download(url: &str, dest: impl AsRef<Path>) -> Result<Response, Error> {
 
 /// Same as [`download`], with `extra_headers` attached to the request —
 /// e.g. a `Cookie` header, same convention as [`get_with_headers`].
-pub fn download_with_headers(url: &str, extra_headers: &[(&str, &str)], dest: impl AsRef<Path>) -> Result<Response, Error> {
+pub fn download_with_headers(
+    url: &str,
+    extra_headers: &[(&str, &str)],
+    dest: impl AsRef<Path>,
+) -> Result<Response, Error> {
     let response = get_with_headers(url, extra_headers)?;
     std::fs::write(dest, &response.body).map_err(|e| Error::Io(e.to_string()))?;
-    Ok(Response { status: response.status, body: Vec::new(), headers: response.headers })
+    Ok(Response {
+        status: response.status,
+        body: Vec::new(),
+        headers: response.headers,
+    })
 }
 
 async fn get_async(url: &str, extra_headers: &[(&str, &str)]) -> Result<Response, Error> {
-    let uri: hyper::Uri = url.parse().map_err(|e: hyper::http::uri::InvalidUri| Error::InvalidUrl(e.to_string()))?;
+    let uri: hyper::Uri = url
+        .parse()
+        .map_err(|e: hyper::http::uri::InvalidUri| Error::InvalidUrl(e.to_string()))?;
 
     let https = hyper_rustls::HttpsConnectorBuilder::new()
         .with_native_roots()
@@ -117,17 +127,26 @@ async fn get_async(url: &str, extra_headers: &[(&str, &str)]) -> Result<Response
         .body(Empty::<Bytes>::new())
         .map_err(|e| Error::Request(e.to_string()))?;
     for (name, value) in extra_headers {
-        let name = HeaderName::from_bytes(name.as_bytes()).map_err(|e| Error::Request(e.to_string()))?;
+        let name =
+            HeaderName::from_bytes(name.as_bytes()).map_err(|e| Error::Request(e.to_string()))?;
         let value = HeaderValue::from_str(value).map_err(|e| Error::Request(e.to_string()))?;
         request.headers_mut().insert(name, value);
     }
 
-    let res = client.request(request).await.map_err(|e| Error::Request(e.to_string()))?;
+    let res = client
+        .request(request)
+        .await
+        .map_err(|e| Error::Request(e.to_string()))?;
     let status = res.status().as_u16();
     let headers = res
         .headers()
         .iter()
-        .map(|(name, value)| (name.as_str().to_string(), value.to_str().unwrap_or("").to_string()))
+        .map(|(name, value)| {
+            (
+                name.as_str().to_string(),
+                value.to_str().unwrap_or("").to_string(),
+            )
+        })
         .collect();
     let body = res
         .into_body()
@@ -137,5 +156,9 @@ async fn get_async(url: &str, extra_headers: &[(&str, &str)]) -> Result<Response
         .to_bytes()
         .to_vec();
 
-    Ok(Response { status, body, headers })
+    Ok(Response {
+        status,
+        body,
+        headers,
+    })
 }

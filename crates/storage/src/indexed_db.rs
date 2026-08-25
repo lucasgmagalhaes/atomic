@@ -57,7 +57,13 @@ impl IndexedDb {
                 let file_name = file_name.to_string_lossy();
                 if let Some(store_name) = file_name.strip_suffix(".store") {
                     let data = LocalStorage::open(dir.join(file_name.as_ref()))?;
-                    stores.insert(store_name.to_string(), ObjectStore { data, indexes: HashMap::new() });
+                    stores.insert(
+                        store_name.to_string(),
+                        ObjectStore {
+                            data,
+                            indexes: HashMap::new(),
+                        },
+                    );
                 }
             }
             for entry in std::fs::read_dir(&dir)? {
@@ -67,7 +73,10 @@ impl IndexedDb {
                 if let Some(rest) = file_name.strip_suffix(".idx") {
                     if let Some((store_name, index_name)) = rest.split_once('.') {
                         if let Some(store) = stores.get_mut(store_name) {
-                            store.indexes.insert(index_name.to_string(), LocalStorage::open(dir.join(file_name.as_ref()))?);
+                            store.indexes.insert(
+                                index_name.to_string(),
+                                LocalStorage::open(dir.join(file_name.as_ref()))?,
+                            );
                         }
                     }
                 }
@@ -84,7 +93,13 @@ impl IndexedDb {
     pub fn create_object_store(&mut self, name: &str) -> io::Result<&mut ObjectStore> {
         if !self.stores.contains_key(name) {
             let data = LocalStorage::open(self.store_path(name))?;
-            self.stores.insert(name.to_string(), ObjectStore { data, indexes: HashMap::new() });
+            self.stores.insert(
+                name.to_string(),
+                ObjectStore {
+                    data,
+                    indexes: HashMap::new(),
+                },
+            );
         }
         Ok(self.stores.get_mut(name).unwrap())
     }
@@ -175,7 +190,8 @@ impl ObjectStore {
     /// index entry from automatically yet.
     pub fn create_index(&mut self, name: &str, path: impl AsRef<Path>) -> io::Result<()> {
         if !self.indexes.contains_key(name) {
-            self.indexes.insert(name.to_string(), LocalStorage::open(path)?);
+            self.indexes
+                .insert(name.to_string(), LocalStorage::open(path)?);
         }
         Ok(())
     }
@@ -187,12 +203,21 @@ impl ObjectStore {
     /// `index_value` (a non-unique index) — stored as a unit-separator-
     /// joined list under one entry, same trick `cookies` doesn't need but
     /// this does since `LocalStorage`'s value slot is a single string.
-    pub fn put_indexed(&mut self, index_name: &str, key: &str, value: impl Into<Value>, index_value: &str) -> io::Result<()> {
+    pub fn put_indexed(
+        &mut self,
+        index_name: &str,
+        key: &str,
+        value: impl Into<Value>,
+        index_value: &str,
+    ) -> io::Result<()> {
         self.data.set(key, &value.into().to_wire())?;
         let Some(index) = self.indexes.get_mut(index_name) else {
             return Ok(());
         };
-        let mut keys: Vec<String> = index.get(index_value).map(|existing| existing.split(UNIT_SEPARATOR).map(str::to_string).collect()).unwrap_or_default();
+        let mut keys: Vec<String> = index
+            .get(index_value)
+            .map(|existing| existing.split(UNIT_SEPARATOR).map(str::to_string).collect())
+            .unwrap_or_default();
         if !keys.iter().any(|k| k == key) {
             keys.push(key.to_string());
         }
@@ -214,7 +239,12 @@ impl ObjectStore {
             return Vec::new();
         };
         keys.split(UNIT_SEPARATOR)
-            .filter_map(|k| self.data.get(k).and_then(|raw| Value::parse(raw).ok()).map(|v| (k, v)))
+            .filter_map(|k| {
+                self.data
+                    .get(k)
+                    .and_then(|raw| Value::parse(raw).ok())
+                    .map(|v| (k, v))
+            })
             .collect()
     }
 
@@ -225,12 +255,22 @@ impl ObjectStore {
     /// iteration in some engines, this one can't (its key list is a
     /// snapshot), a documented simplification rather than a hidden one.
     pub fn open_cursor(&self, range: &KeyRange, direction: CursorDirection) -> Cursor<'_> {
-        let mut keys: Vec<String> = self.data.keys().filter(|k| range.contains(k)).map(str::to_string).collect();
+        let mut keys: Vec<String> = self
+            .data
+            .keys()
+            .filter(|k| range.contains(k))
+            .map(str::to_string)
+            .collect();
         keys.sort();
         if direction == CursorDirection::Prev {
             keys.reverse();
         }
-        Cursor { store: self, keys, position: 0, started: false }
+        Cursor {
+            store: self,
+            keys,
+            position: 0,
+            started: false,
+        }
     }
 }
 
@@ -254,24 +294,44 @@ pub struct KeyRange {
 
 impl KeyRange {
     pub fn all() -> Self {
-        KeyRange { lower: None, upper: None }
+        KeyRange {
+            lower: None,
+            upper: None,
+        }
     }
 
     pub fn only(key: impl Into<String>) -> Self {
         let key = key.into();
-        KeyRange { lower: Some((key.clone(), false)), upper: Some((key, false)) }
+        KeyRange {
+            lower: Some((key.clone(), false)),
+            upper: Some((key, false)),
+        }
     }
 
     pub fn lower_bound(lower: impl Into<String>, open: bool) -> Self {
-        KeyRange { lower: Some((lower.into(), open)), upper: None }
+        KeyRange {
+            lower: Some((lower.into(), open)),
+            upper: None,
+        }
     }
 
     pub fn upper_bound(upper: impl Into<String>, open: bool) -> Self {
-        KeyRange { lower: None, upper: Some((upper.into(), open)) }
+        KeyRange {
+            lower: None,
+            upper: Some((upper.into(), open)),
+        }
     }
 
-    pub fn bound(lower: impl Into<String>, upper: impl Into<String>, lower_open: bool, upper_open: bool) -> Self {
-        KeyRange { lower: Some((lower.into(), lower_open)), upper: Some((upper.into(), upper_open)) }
+    pub fn bound(
+        lower: impl Into<String>,
+        upper: impl Into<String>,
+        lower_open: bool,
+        upper_open: bool,
+    ) -> Self {
+        KeyRange {
+            lower: Some((lower.into(), lower_open)),
+            upper: Some((upper.into(), upper_open)),
+        }
     }
 
     fn contains(&self, key: &str) -> bool {

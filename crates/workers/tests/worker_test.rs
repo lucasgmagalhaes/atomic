@@ -2,9 +2,7 @@ use workers::Worker;
 
 #[test]
 fn onmessage_return_value_comes_back_through_the_channel() {
-    let worker = Worker::spawn(
-        "function onmessage(e) { return 'echo:' + e.data; }",
-    );
+    let worker = Worker::spawn("function onmessage(e) { return 'echo:' + e.data; }");
     worker.post_message("hello");
     let reply = worker.recv_message().expect("worker should reply");
     assert_eq!(reply, "echo:hello");

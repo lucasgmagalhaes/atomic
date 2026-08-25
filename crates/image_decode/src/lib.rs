@@ -37,5 +37,9 @@ pub fn decode(bytes: &[u8]) -> Option<DecodedImage> {
     let img = image::load_from_memory(bytes).ok()?;
     let rgba = img.to_rgba8();
     let (width, height) = (rgba.width(), rgba.height());
-    Some(DecodedImage { width, height, rgba: rgba.into_raw() })
+    Some(DecodedImage {
+        width,
+        height,
+        rgba: rgba.into_raw(),
+    })
 }

@@ -3,13 +3,19 @@
 use css::{parse_stylesheet, selector_matches, ElementSnapshot};
 
 fn el(tag: &str) -> ElementSnapshot {
-    ElementSnapshot { tag: tag.to_string(), ..Default::default() }
+    ElementSnapshot {
+        tag: tag.to_string(),
+        ..Default::default()
+    }
 }
 
 fn el_with_attrs(tag: &str, attrs: &[(&str, &str)]) -> ElementSnapshot {
     ElementSnapshot {
         tag: tag.to_string(),
-        attributes: attrs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+        attributes: attrs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
         ..Default::default()
     }
 }
@@ -49,7 +55,10 @@ fn child_combinator_can_be_mixed_with_descendant() {
     let matching = vec![el("article"), el("section"), el("div"), el("span")];
     let not_matching = vec![el("article"), el("div"), el("section"), el("span")];
     assert!(selector_matches(&sheet.rules[0].selectors.0[0], &matching));
-    assert!(!selector_matches(&sheet.rules[0].selectors.0[0], &not_matching));
+    assert!(!selector_matches(
+        &sheet.rules[0].selectors.0[0],
+        &not_matching
+    ));
 }
 
 // --- Sibling combinators ---
@@ -95,7 +104,10 @@ fn chained_sibling_combinators_walk_the_same_flat_sibling_list() {
 
     let mut wrong_order = el("c");
     wrong_order.preceding_siblings = vec![el("b"), el("a")];
-    assert!(!selector_matches(&sheet.rules[0].selectors.0[0], &[wrong_order]));
+    assert!(!selector_matches(
+        &sheet.rules[0].selectors.0[0],
+        &[wrong_order]
+    ));
 }
 
 // --- Attribute selectors ---
@@ -105,8 +117,14 @@ fn has_attribute_selector_matches_regardless_of_value() {
     let sheet = parse_stylesheet("[disabled] {}");
     let with_attr = el_with_attrs("input", &[("disabled", "")]);
     let without_attr = el_with_attrs("input", &[]);
-    assert!(selector_matches(&sheet.rules[0].selectors.0[0], &[with_attr]));
-    assert!(!selector_matches(&sheet.rules[0].selectors.0[0], &[without_attr]));
+    assert!(selector_matches(
+        &sheet.rules[0].selectors.0[0],
+        &[with_attr]
+    ));
+    assert!(!selector_matches(
+        &sheet.rules[0].selectors.0[0],
+        &[without_attr]
+    ));
 }
 
 #[test]
@@ -114,8 +132,14 @@ fn attribute_equals_selector_requires_exact_value_match() {
     let sheet = parse_stylesheet(r#"[type="text"] {}"#);
     let matching = el_with_attrs("input", &[("type", "text")]);
     let not_matching = el_with_attrs("input", &[("type", "checkbox")]);
-    assert!(selector_matches(&sheet.rules[0].selectors.0[0], &[matching]));
-    assert!(!selector_matches(&sheet.rules[0].selectors.0[0], &[not_matching]));
+    assert!(selector_matches(
+        &sheet.rules[0].selectors.0[0],
+        &[matching]
+    ));
+    assert!(!selector_matches(
+        &sheet.rules[0].selectors.0[0],
+        &[not_matching]
+    ));
 }
 
 #[test]
@@ -123,8 +147,14 @@ fn attribute_selector_combines_with_type_selector() {
     let sheet = parse_stylesheet(r#"input[type="text"] {}"#);
     let matching = el_with_attrs("input", &[("type", "text")]);
     let wrong_tag = el_with_attrs("textarea", &[("type", "text")]);
-    assert!(selector_matches(&sheet.rules[0].selectors.0[0], &[matching]));
-    assert!(!selector_matches(&sheet.rules[0].selectors.0[0], &[wrong_tag]));
+    assert!(selector_matches(
+        &sheet.rules[0].selectors.0[0],
+        &[matching]
+    ));
+    assert!(!selector_matches(
+        &sheet.rules[0].selectors.0[0],
+        &[wrong_tag]
+    ));
 }
 
 // --- Structural pseudo-classes ---
@@ -185,7 +215,10 @@ fn nth_child_an_plus_b_formula_matches_the_arithmetic_sequence() {
     // 2n+1: positions 1, 3, 5, ...
     for (preceding, expected) in [(0, true), (1, false), (2, true), (3, false)] {
         let snapshot = el_at_position("li", preceding, true);
-        assert_eq!(selector_matches(&sheet.rules[0].selectors.0[0], &[snapshot]), expected);
+        assert_eq!(
+            selector_matches(&sheet.rules[0].selectors.0[0], &[snapshot]),
+            expected
+        );
     }
 }
 
@@ -194,7 +227,10 @@ fn nth_child_bare_n_matches_every_position() {
     let sheet = parse_stylesheet("li:nth-child(n) {}");
     for preceding in 0..5 {
         let snapshot = el_at_position("li", preceding, true);
-        assert!(selector_matches(&sheet.rules[0].selectors.0[0], &[snapshot]));
+        assert!(selector_matches(
+            &sheet.rules[0].selectors.0[0],
+            &[snapshot]
+        ));
     }
 }
 
@@ -215,7 +251,11 @@ fn hover_and_focus_pseudo_classes_parse_but_never_match() {
 #[test]
 fn attribute_and_pseudo_class_selectors_count_as_class_specificity() {
     let sheet = parse_stylesheet("[disabled] {} li:first-child {} div {}");
-    let specs: Vec<_> = sheet.rules.iter().map(|r| r.selectors.0[0].specificity()).collect();
+    let specs: Vec<_> = sheet
+        .rules
+        .iter()
+        .map(|r| r.selectors.0[0].specificity())
+        .collect();
     assert_eq!(specs[0], (0, 1, 0)); // [disabled]
     assert_eq!(specs[1], (0, 1, 1)); // li:first-child -> type + class tier
     assert_eq!(specs[2], (0, 0, 1)); // div

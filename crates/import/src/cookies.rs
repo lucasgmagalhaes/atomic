@@ -58,7 +58,10 @@ fn webkit_time_to_system_time(webkit_micros: i64) -> Option<SystemTime> {
 /// failing the whole import, since one bad cookie shouldn't lose every
 /// other real one.
 pub fn import_cookies(path: &Path, master_key: &[u8]) -> Result<Vec<Cookie>, ImportError> {
-    let temp_path = std::env::temp_dir().join(format!("nimble-import-cookies-{}.sqlite", std::process::id()));
+    let temp_path = std::env::temp_dir().join(format!(
+        "nimble-import-cookies-{}.sqlite",
+        std::process::id()
+    ));
     std::fs::copy(path, &temp_path).map_err(ImportError::Io)?;
 
     let result = (|| {
@@ -75,15 +78,32 @@ pub fn import_cookies(path: &Path, master_key: &[u8]) -> Result<Vec<Cookie>, Imp
                 let is_secure: i64 = row.get(4)?;
                 let is_http_only: i64 = row.get(5)?;
                 let expires_utc: i64 = row.get(6)?;
-                Ok((host, name, encrypted, path, is_secure != 0, is_http_only != 0, expires_utc))
+                Ok((
+                    host,
+                    name,
+                    encrypted,
+                    path,
+                    is_secure != 0,
+                    is_http_only != 0,
+                    expires_utc,
+                ))
             })
             .map_err(ImportError::Sqlite)?;
 
         let mut cookies = Vec::new();
         for row in rows {
-            let (host, name, encrypted, path, is_secure, is_http_only, expires_utc) = row.map_err(ImportError::Sqlite)?;
+            let (host, name, encrypted, path, is_secure, is_http_only, expires_utc) =
+                row.map_err(ImportError::Sqlite)?;
             if let Ok(value) = encrypted_value::decrypt(master_key, &encrypted) {
-                cookies.push(Cookie { host, name, value, path, is_secure, is_http_only, expires: webkit_time_to_system_time(expires_utc) });
+                cookies.push(Cookie {
+                    host,
+                    name,
+                    value,
+                    path,
+                    is_secure,
+                    is_http_only,
+                    expires: webkit_time_to_system_time(expires_utc),
+                });
             }
         }
         Ok(cookies)

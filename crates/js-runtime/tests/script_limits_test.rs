@@ -69,7 +69,9 @@ fn a_memory_limit_turns_overallocation_into_an_exception() {
 
     // 1 MiB cap vs a single 64 MiB typed-array backing store: the
     // allocation that crosses the limit throws instead of succeeding.
-    let err = ctx.eval("new Uint8Array(64 * 1024 * 1024)", "<test>").unwrap_err();
+    let err = ctx
+        .eval("new Uint8Array(64 * 1024 * 1024)", "<test>")
+        .unwrap_err();
     assert!(
         err.0.contains("memory"),
         "over-allocation must surface as quickjs's out-of-memory error, got: {}",

@@ -95,7 +95,10 @@ impl Cookie {
     /// same rule even without the leading dot in practice — matched here).
     fn domain_matches(&self, host: &str) -> bool {
         let domain = self.domain.trim_start_matches('.');
-        host.eq_ignore_ascii_case(domain) || host.to_ascii_lowercase().ends_with(&format!(".{}", domain.to_ascii_lowercase()))
+        host.eq_ignore_ascii_case(domain)
+            || host
+                .to_ascii_lowercase()
+                .ends_with(&format!(".{}", domain.to_ascii_lowercase()))
     }
 
     /// RFC 6265 §5.1.4 default-path-style matching: `self.path` must be a
@@ -105,7 +108,9 @@ impl Cookie {
         if !request_path.starts_with(&self.path) {
             return false;
         }
-        self.path == "/" || request_path.len() == self.path.len() || request_path.as_bytes()[self.path.len()] == b'/'
+        self.path == "/"
+            || request_path.len() == self.path.len()
+            || request_path.as_bytes()[self.path.len()] == b'/'
     }
 }
 
@@ -113,7 +118,10 @@ fn month_index(name: &str) -> Option<u32> {
     const MONTHS: [&str; 12] = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
-    MONTHS.iter().position(|m| m.eq_ignore_ascii_case(name)).map(|i| i as u32)
+    MONTHS
+        .iter()
+        .position(|m| m.eq_ignore_ascii_case(name))
+        .map(|i| i as u32)
 }
 
 /// Howard Hinnant's `days_from_civil`: days since the Unix epoch for a
@@ -243,7 +251,9 @@ impl CookieJar {
     /// [`matching`](Self::matching) and is swept away by
     /// [`clear_expired`](Self::clear_expired).
     pub fn set(&mut self, cookie: Cookie) -> io::Result<()> {
-        self.cookies.retain(|c| !(c.name == cookie.name && c.domain == cookie.domain && c.path == cookie.path));
+        self.cookies.retain(|c| {
+            !(c.name == cookie.name && c.domain == cookie.domain && c.path == cookie.path)
+        });
         self.cookies.push(cookie);
         self.flush()
     }
@@ -271,7 +281,13 @@ impl CookieJar {
     /// `request_is_same_site` is `true` (see module docs for why `Lax`
     /// isn't given its usual "top-level navigation" exception here); a
     /// `None` cookie is never excluded on this basis.
-    pub fn matching_with_context(&self, host: &str, path: &str, secure_context: bool, request_is_same_site: bool) -> Vec<&Cookie> {
+    pub fn matching_with_context(
+        &self,
+        host: &str,
+        path: &str,
+        secure_context: bool,
+        request_is_same_site: bool,
+    ) -> Vec<&Cookie> {
         let now = SystemTime::now();
         self.cookies
             .iter()
@@ -293,16 +309,29 @@ impl CookieJar {
 
     /// Same as [`header_value`](Self::header_value), built from
     /// [`matching_with_context`](Self::matching_with_context) instead.
-    pub fn header_value_with_context(&self, host: &str, path: &str, secure_context: bool, request_is_same_site: bool) -> Option<String> {
+    pub fn header_value_with_context(
+        &self,
+        host: &str,
+        path: &str,
+        secure_context: bool,
+        request_is_same_site: bool,
+    ) -> Option<String> {
         let matches = self.matching_with_context(host, path, secure_context, request_is_same_site);
         if matches.is_empty() {
             return None;
         }
-        Some(matches.iter().map(|c| format!("{}={}", c.name, c.value)).collect::<Vec<_>>().join("; "))
+        Some(
+            matches
+                .iter()
+                .map(|c| format!("{}={}", c.name, c.value))
+                .collect::<Vec<_>>()
+                .join("; "),
+        )
     }
 
     pub fn remove(&mut self, name: &str, domain: &str, path: &str) -> io::Result<()> {
-        self.cookies.retain(|c| !(c.name == name && c.domain == domain && c.path == path));
+        self.cookies
+            .retain(|c| !(c.name == name && c.domain == domain && c.path == path));
         self.flush()
     }
 
@@ -339,7 +368,12 @@ impl CookieJar {
 fn serialize_line(cookie: &Cookie) -> String {
     let expires = cookie
         .expires
-        .map(|t| t.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs().to_string())
+        .map(|t| {
+            t.duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs()
+                .to_string()
+        })
         .unwrap_or_else(|| "-".to_string());
     format!(
         "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
@@ -368,7 +402,10 @@ fn deserialize_line(line: &str) -> Option<Cookie> {
     } else {
         Some(UNIX_EPOCH + Duration::from_secs(fields[4].parse().ok()?))
     };
-    let same_site = fields.get(7).and_then(|s| SameSite::parse(s)).unwrap_or_default();
+    let same_site = fields
+        .get(7)
+        .and_then(|s| SameSite::parse(s))
+        .unwrap_or_default();
     Some(Cookie {
         name: crate::unescape(fields[0]),
         value: crate::unescape(fields[1]),

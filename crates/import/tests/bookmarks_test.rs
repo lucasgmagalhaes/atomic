@@ -54,12 +54,21 @@ fn imports_every_real_bookmark_with_its_folder_path() {
     let bookmarks = import_bookmarks(&path).expect("a real Chrome-shaped file should import");
     assert_eq!(bookmarks.len(), 2);
 
-    let top = bookmarks.iter().find(|b| b.url == "https://example.com/").expect("top-level bookmark should be found");
+    let top = bookmarks
+        .iter()
+        .find(|b| b.url == "https://example.com/")
+        .expect("top-level bookmark should be found");
     assert_eq!(top.name, "Example");
     assert_eq!(top.folder, "Bookmarks bar");
 
-    let nested = bookmarks.iter().find(|b| b.url == "https://example.org/nested").expect("nested bookmark should be found");
-    assert_eq!(nested.name, "Nested \"quoted\" name", "a real quote-escaped name should decode correctly");
+    let nested = bookmarks
+        .iter()
+        .find(|b| b.url == "https://example.org/nested")
+        .expect("nested bookmark should be found");
+    assert_eq!(
+        nested.name, "Nested \"quoted\" name",
+        "a real quote-escaped name should decode correctly"
+    );
     assert_eq!(nested.folder, "Bookmarks bar/Work");
 
     let _ = std::fs::remove_file(&path);

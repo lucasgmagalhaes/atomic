@@ -35,7 +35,10 @@ unsafe fn read_js_string(ctx: *mut sys::JSContext, val: sys::JSValue) -> Option<
     Some(s)
 }
 
-unsafe fn db_opaque(rt: *mut sys::JSRuntime, this_val: sys::JSValue) -> *mut storage::indexed_db::IndexedDb {
+unsafe fn db_opaque(
+    rt: *mut sys::JSRuntime,
+    this_val: sys::JSValue,
+) -> *mut storage::indexed_db::IndexedDb {
     let class_id = crate::class_registry::class_id_for(rt, DB_CLASS_KIND);
     sys::JS_GetOpaque(this_val, class_id) as *mut storage::indexed_db::IndexedDb
 }
@@ -70,7 +73,13 @@ unsafe fn ensure_db_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
     class_id
 }
 
-unsafe fn define_method(ctx: *mut sys::JSContext, proto: sys::JSValue, name: &str, func: sys::JSCFunction, length: c_int) {
+unsafe fn define_method(
+    ctx: *mut sys::JSContext,
+    proto: sys::JSValue,
+    name: &str,
+    func: sys::JSCFunction,
+    length: c_int,
+) {
     let name_c = CString::new(name).unwrap();
     let f = sys::JS_NewCFunction2(ctx, func, name_c.as_ptr(), length, sys::JS_CFUNC_GENERIC, 0);
     sys::JS_SetPropertyStr(ctx, proto, name_c.as_ptr(), f);
@@ -93,7 +102,12 @@ unsafe extern "C" fn create_object_store(
     sys::js_undefined()
 }
 
-unsafe extern "C" fn put(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn put(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
     let db_ptr = db_opaque(sys::JS_GetRuntime(ctx), this_val);
     if db_ptr.is_null() || argc < 3 {
         return sys::js_undefined();
@@ -112,7 +126,12 @@ unsafe extern "C" fn put(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc:
     sys::js_undefined()
 }
 
-unsafe extern "C" fn get(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
     let db_ptr = db_opaque(sys::JS_GetRuntime(ctx), this_val);
     if db_ptr.is_null() || argc < 2 {
         return sys::js_null();
@@ -133,7 +152,12 @@ unsafe extern "C" fn get(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc:
     }
 }
 
-unsafe extern "C" fn delete(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn delete(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
     let db_ptr = db_opaque(sys::JS_GetRuntime(ctx), this_val);
     if db_ptr.is_null() || argc < 2 {
         return sys::js_undefined();
@@ -150,7 +174,12 @@ unsafe extern "C" fn delete(ctx: *mut sys::JSContext, this_val: sys::JSValue, ar
     sys::js_undefined()
 }
 
-unsafe extern "C" fn clear(ctx: *mut sys::JSContext, this_val: sys::JSValue, argc: c_int, argv: *mut sys::JSValue) -> sys::JSValue {
+unsafe extern "C" fn clear(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
     let db_ptr = db_opaque(sys::JS_GetRuntime(ctx), this_val);
     if db_ptr.is_null() || argc < 1 {
         return sys::js_undefined();
@@ -204,7 +233,14 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     let indexed_db = sys::JS_NewObject(ctx);
 
     let name = CString::new("open").unwrap();
-    let open_fn = sys::JS_NewCFunction2(ctx, indexed_db_open, name.as_ptr(), 1, sys::JS_CFUNC_GENERIC, 0);
+    let open_fn = sys::JS_NewCFunction2(
+        ctx,
+        indexed_db_open,
+        name.as_ptr(),
+        1,
+        sys::JS_CFUNC_GENERIC,
+        0,
+    );
     sys::JS_SetPropertyStr(ctx, indexed_db, name.as_ptr(), open_fn);
 
     let global_name = CString::new("indexedDB").unwrap();

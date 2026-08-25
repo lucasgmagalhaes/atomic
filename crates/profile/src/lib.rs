@@ -72,7 +72,12 @@ impl Profile {
     /// Callers building/testing within this workspace can pass
     /// `env!("CARGO_BIN_EXE_profile-worker")`; a real shell would resolve
     /// this from its own install layout instead.
-    pub fn spawn(worker_path: &str, shmem_name: &str, width: u32, height: u32) -> Result<Self, SpawnError> {
+    pub fn spawn(
+        worker_path: &str,
+        shmem_name: &str,
+        width: u32,
+        height: u32,
+    ) -> Result<Self, SpawnError> {
         Self::spawn_with_proxy(worker_path, shmem_name, width, height, None)
     }
 
@@ -90,7 +95,13 @@ impl Profile {
     /// same as this crate not passing one, so the two paths converge on
     /// the exact same child-process invocation rather than one being a
     /// degraded version of the other.
-    pub fn spawn_with_proxy(worker_path: &str, shmem_name: &str, width: u32, height: u32, proxy: Option<&str>) -> Result<Self, SpawnError> {
+    pub fn spawn_with_proxy(
+        worker_path: &str,
+        shmem_name: &str,
+        width: u32,
+        height: u32,
+        proxy: Option<&str>,
+    ) -> Result<Self, SpawnError> {
         Self::spawn_with_proxy_and_dns(worker_path, shmem_name, width, height, proxy, None)
     }
 
@@ -101,7 +112,13 @@ impl Profile {
     /// `net::get_via_dns` — closes the "DNS" half of the spec's Settings/
     /// Network requirement the same way [`spawn_with_proxy`](Self::spawn_with_proxy)
     /// closed the proxy half. `None` behaves exactly like [`spawn`](Self::spawn).
-    pub fn spawn_with_dns(worker_path: &str, shmem_name: &str, width: u32, height: u32, dns_server: Option<&str>) -> Result<Self, SpawnError> {
+    pub fn spawn_with_dns(
+        worker_path: &str,
+        shmem_name: &str,
+        width: u32,
+        height: u32,
+        dns_server: Option<&str>,
+    ) -> Result<Self, SpawnError> {
         Self::spawn_with_proxy_and_dns(worker_path, shmem_name, width, height, None, dns_server)
     }
 
@@ -113,8 +130,22 @@ impl Profile {
     /// out-of-range index is the worker process's problem to report (it
     /// panics on that, same as `GpuRenderer::new_with_adapter` itself
     /// does), not this crate's.
-    pub fn spawn_with_gpu_adapter(worker_path: &str, shmem_name: &str, width: u32, height: u32, gpu_adapter: Option<usize>) -> Result<Self, SpawnError> {
-        Self::spawn_full(worker_path, shmem_name, width, height, None, None, gpu_adapter)
+    pub fn spawn_with_gpu_adapter(
+        worker_path: &str,
+        shmem_name: &str,
+        width: u32,
+        height: u32,
+        gpu_adapter: Option<usize>,
+    ) -> Result<Self, SpawnError> {
+        Self::spawn_full(
+            worker_path,
+            shmem_name,
+            width,
+            height,
+            None,
+            None,
+            gpu_adapter,
+        )
     }
 
     /// The general form every other `spawn_*` delegates to. A proxy and a
@@ -132,7 +163,15 @@ impl Profile {
         proxy: Option<&str>,
         dns_server: Option<&str>,
     ) -> Result<Self, SpawnError> {
-        Self::spawn_full(worker_path, shmem_name, width, height, proxy, dns_server, None)
+        Self::spawn_full(
+            worker_path,
+            shmem_name,
+            width,
+            height,
+            proxy,
+            dns_server,
+            None,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -146,7 +185,10 @@ impl Profile {
         gpu_adapter: Option<usize>,
     ) -> Result<Self, SpawnError> {
         let mut command = Command::new(worker_path);
-        command.arg(shmem_name).arg(width.to_string()).arg(height.to_string());
+        command
+            .arg(shmem_name)
+            .arg(width.to_string())
+            .arg(height.to_string());
         if proxy.is_some() || dns_server.is_some() || gpu_adapter.is_some() {
             command.arg(proxy.unwrap_or(""));
         }
@@ -350,7 +392,11 @@ impl Profile {
     /// `tab_focus` doc for why an `id` is required to reach a target
     /// through this protocol).
     pub fn tab(&mut self, reverse: bool) -> std::io::Result<Result<(), String>> {
-        writeln!(self.stdin, "{}", if reverse { "TAB_REVERSE" } else { "TAB" })?;
+        writeln!(
+            self.stdin,
+            "{}",
+            if reverse { "TAB_REVERSE" } else { "TAB" }
+        )?;
         self.stdin.flush()?;
         let mut line = String::new();
         self.stdout.read_line(&mut line)?;
@@ -422,7 +468,11 @@ impl Profile {
         let line = line.trim();
         match line.strip_prefix("ERROR ") {
             Some(message) => Ok(Err(message.to_string())),
-            None => Ok(Ok(line.strip_prefix("EVALUATED ").unwrap_or(line).trim().to_string())),
+            None => Ok(Ok(line
+                .strip_prefix("EVALUATED ")
+                .unwrap_or(line)
+                .trim()
+                .to_string())),
         }
     }
 
@@ -543,7 +593,11 @@ impl Drop for Profile {
     }
 }
 
-fn open_frame_reader_with_retry(name: &str, width: u32, height: u32) -> Result<ipc::FrameReader, SpawnError> {
+fn open_frame_reader_with_retry(
+    name: &str,
+    width: u32,
+    height: u32,
+) -> Result<ipc::FrameReader, SpawnError> {
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut last_err = None;
     while Instant::now() < deadline {

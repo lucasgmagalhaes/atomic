@@ -89,7 +89,10 @@ fn border_shorthand_accepts_its_three_components_in_any_order() {
     let mut tree = build_box_tree(&d, container, &sheet).unwrap();
     layout_block(&mut tree, 800.0, 0.0, 0.0);
 
-    assert_eq!(tree.children[0].dimensions.width, tree.children[1].dimensions.width);
+    assert_eq!(
+        tree.children[0].dimensions.width,
+        tree.children[1].dimensions.width
+    );
     assert_eq!(tree.children[0].border.top, 4.0);
     assert_eq!(tree.children[1].border.top, 4.0);
 }
@@ -101,7 +104,9 @@ fn resolved_border_widths_are_exposed_on_the_layout_box() {
     let div = d.create_element("div");
     d.append_child(root, div);
 
-    let sheet = parse_stylesheet("div { border-style: solid; border-width: 1px 2px 3px 4px; border-color: black; }");
+    let sheet = parse_stylesheet(
+        "div { border-style: solid; border-width: 1px 2px 3px 4px; border-color: black; }",
+    );
     let mut tree = build_box_tree(&d, div, &sheet).unwrap();
     layout_block(&mut tree, 800.0, 0.0, 0.0);
 

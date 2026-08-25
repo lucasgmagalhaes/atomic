@@ -41,22 +41,28 @@ thread_local! {
 
 unsafe extern "C" fn interrupt_handler(_rt: *mut sys::JSRuntime, opaque: *mut c_void) -> c_int {
     let ctx = opaque as *mut sys::JSContext;
-    BUDGETS.with(|reg| {
-        match reg.borrow().get(&(ctx as usize)).and_then(|s| s.deadline) {
+    BUDGETS.with(
+        |reg| match reg.borrow().get(&(ctx as usize)).and_then(|s| s.deadline) {
             Some(deadline) => (Instant::now() >= deadline) as c_int,
             None => 0,
-        }
-    })
+        },
+    )
 }
 
 pub(crate) unsafe fn install(ctx: *mut sys::JSContext) {
     BUDGETS.with(|reg| {
         let mut map = reg.borrow_mut();
-        let state = map.entry(ctx as usize).or_insert(BudgetState { deadline: None });
+        let state = map
+            .entry(ctx as usize)
+            .or_insert(BudgetState { deadline: None });
         // Re-installing must not resurrect a stale deadline.
         state.deadline = None;
     });
-    sys::JS_SetInterruptHandler(sys::JS_GetRuntime(ctx), Some(interrupt_handler), ctx as *mut c_void);
+    sys::JS_SetInterruptHandler(
+        sys::JS_GetRuntime(ctx),
+        Some(interrupt_handler),
+        ctx as *mut c_void,
+    );
 }
 
 /// Stamps (or clears) the deadline the interrupt handler checks while one

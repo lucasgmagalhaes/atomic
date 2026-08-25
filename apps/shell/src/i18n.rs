@@ -49,7 +49,9 @@ pub fn t(key: &str, locale: Locale) -> &str {
         (RELOAD_BUTTON, Locale::Pt) => "Recarregar",
 
         (ADDRESS_BAR_HINT, Locale::En) => "Enter a URL for the selected pane and press Enter",
-        (ADDRESS_BAR_HINT, Locale::Pt) => "Digite uma URL para o painel selecionado e pressione Enter",
+        (ADDRESS_BAR_HINT, Locale::Pt) => {
+            "Digite uma URL para o painel selecionado e pressione Enter"
+        }
 
         (PROXY_LABEL, Locale::En) => "Proxy (selected pane):",
         (PROXY_LABEL, Locale::Pt) => "Proxy (painel selecionado):",
@@ -63,8 +65,12 @@ pub fn t(key: &str, locale: Locale) -> &str {
         (FAILED_TO_LOAD_PREFIX, Locale::En) => "Failed to load",
         (FAILED_TO_LOAD_PREFIX, Locale::Pt) => "Falha ao carregar",
 
-        (AUTOMATION_HEADER, Locale::En) => "Automation — pane names from the active workspace (\"{}\"): {}",
-        (AUTOMATION_HEADER, Locale::Pt) => "Automação — nomes dos painéis do workspace ativo (\"{}\"): {}",
+        (AUTOMATION_HEADER, Locale::En) => {
+            "Automation — pane names from the active workspace (\"{}\"): {}"
+        }
+        (AUTOMATION_HEADER, Locale::Pt) => {
+            "Automação — nomes dos painéis do workspace ativo (\"{}\"): {}"
+        }
 
         (AUTOMATION_SCRIPT_HINT, Locale::En) => r#"pane("pane-1").goto("https://example.com")"#,
         (AUTOMATION_SCRIPT_HINT, Locale::Pt) => r#"pane("pane-1").goto("https://example.com")"#,

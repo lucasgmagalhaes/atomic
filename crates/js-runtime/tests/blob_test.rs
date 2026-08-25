@@ -51,7 +51,11 @@ fn blob_text_resolves_with_the_real_concatenated_bytes() {
     )
     .unwrap();
 
-    let done = pump_until(&ctx, |c| c.eval("seen !== null", "<test>").unwrap() == "true", Duration::from_secs(2));
+    let done = pump_until(
+        &ctx,
+        |c| c.eval("seen !== null", "<test>").unwrap() == "true",
+        Duration::from_secs(2),
+    );
     assert!(done);
     assert_eq!(ctx.eval("seen", "<test>").unwrap(), "abcd");
 }
@@ -71,9 +75,16 @@ fn blob_array_buffer_resolves_with_a_real_array_buffer() {
     )
     .unwrap();
 
-    let done = pump_until(&ctx, |c| c.eval("seen !== null", "<test>").unwrap() == "true", Duration::from_secs(2));
+    let done = pump_until(
+        &ctx,
+        |c| c.eval("seen !== null", "<test>").unwrap() == "true",
+        Duration::from_secs(2),
+    );
     assert!(done);
-    assert_eq!(ctx.eval("seen", "<test>").unwrap(), "[object ArrayBuffer]|2");
+    assert_eq!(
+        ctx.eval("seen", "<test>").unwrap(),
+        "[object ArrayBuffer]|2"
+    );
 }
 
 #[test]
@@ -89,7 +100,11 @@ fn blob_slice_returns_a_new_blob_over_the_byte_range() {
     )
     .unwrap();
 
-    let done = pump_until(&ctx, |c| c.eval("seen !== null", "<test>").unwrap() == "true", Duration::from_secs(2));
+    let done = pump_until(
+        &ctx,
+        |c| c.eval("seen !== null", "<test>").unwrap() == "true",
+        Duration::from_secs(2),
+    );
     assert!(done);
     assert_eq!(ctx.eval("seen", "<test>").unwrap(), "hello");
 }
@@ -108,7 +123,9 @@ fn blob_can_be_constructed_from_a_uint8array_part() {
 fn blob_can_be_constructed_from_another_blob_part() {
     let rt = Runtime::new();
     let ctx = Context::new(&rt);
-    let result = ctx.eval("new Blob([new Blob(['ab']), 'cd']).size", "<test>").unwrap();
+    let result = ctx
+        .eval("new Blob([new Blob(['ab']), 'cd']).size", "<test>")
+        .unwrap();
     assert_eq!(result, "4");
 }
 
@@ -133,7 +150,10 @@ fn create_object_url_returns_a_blob_url_string() {
     let rt = Runtime::new();
     let ctx = Context::new(&rt);
     let result = ctx
-        .eval("URL.createObjectURL(new Blob(['x'])).startsWith('blob:')", "<test>")
+        .eval(
+            "URL.createObjectURL(new Blob(['x'])).startsWith('blob:')",
+            "<test>",
+        )
         .unwrap();
     assert_eq!(result, "true");
 }
@@ -142,5 +162,7 @@ fn create_object_url_returns_a_blob_url_string() {
 fn revoke_object_url_does_not_throw_on_an_unknown_url() {
     let rt = Runtime::new();
     let ctx = Context::new(&rt);
-    assert!(ctx.eval("URL.revokeObjectURL('blob:does-not-exist'); true", "<test>").is_ok());
+    assert!(ctx
+        .eval("URL.revokeObjectURL('blob:does-not-exist'); true", "<test>")
+        .is_ok());
 }

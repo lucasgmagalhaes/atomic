@@ -20,7 +20,9 @@ pub fn default_profile_dir() -> Option<PathBuf> {
 /// `import::HistoryEntry` provides (see that struct's own doc).
 pub fn import_history_urls(profile_dir: &Path) -> Result<Vec<String>, String> {
     let path = import::chrome_profile::history_path(profile_dir);
-    import::import_history(&path).map(|entries| entries.into_iter().map(|e| e.url).collect()).map_err(|e| e.to_string())
+    import::import_history(&path)
+        .map(|entries| entries.into_iter().map(|e| e.url).collect())
+        .map_err(|e| e.to_string())
 }
 
 pub fn import_bookmarks(profile_dir: &Path) -> Result<Vec<Bookmark>, String> {
@@ -38,12 +40,18 @@ pub fn recover_master_key(user_data_dir: &Path) -> Result<Vec<u8>, String> {
     import::recover_master_key(user_data_dir).map_err(|e| e.to_string())
 }
 
-pub fn import_cookies(profile_dir: &Path, master_key: &[u8]) -> Result<Vec<import::Cookie>, String> {
+pub fn import_cookies(
+    profile_dir: &Path,
+    master_key: &[u8],
+) -> Result<Vec<import::Cookie>, String> {
     let path = import::chrome_profile::cookies_path(profile_dir);
     import::import_cookies(&path, master_key).map_err(|e| e.to_string())
 }
 
-pub fn import_passwords(profile_dir: &Path, master_key: &[u8]) -> Result<Vec<import::Password>, String> {
+pub fn import_passwords(
+    profile_dir: &Path,
+    master_key: &[u8],
+) -> Result<Vec<import::Password>, String> {
     let path = import::chrome_profile::login_data_path(profile_dir);
     import::import_passwords(&path, master_key).map_err(|e| e.to_string())
 }
@@ -55,7 +63,9 @@ pub fn import_passwords(profile_dir: &Path, master_key: &[u8]) -> Result<Vec<imp
 /// is `nimble-profile-<pane-id>`. Kept here (not re-derived ad hoc at each
 /// call site) so the one formula has one real home.
 pub fn pane_storage_root(pane_id: &str) -> PathBuf {
-    std::env::temp_dir().join("nimble-profile-storage").join(format!("nimble-profile-{pane_id}"))
+    std::env::temp_dir()
+        .join("nimble-profile-storage")
+        .join(format!("nimble-profile-{pane_id}"))
 }
 
 /// Writes `cookie` into the selected pane's own real, on-disk
@@ -73,7 +83,10 @@ pub fn write_cookie_into_pane(pane_id: &str, cookie: &import::Cookie) -> std::io
         std::fs::create_dir_all(parent)?;
     }
     let mut jar = storage::cookies::CookieJar::open(&jar_path)?;
-    let mut header = format!("{}={}; Domain={}; Path={}", cookie.name, cookie.value, cookie.host, cookie.path);
+    let mut header = format!(
+        "{}={}; Domain={}; Path={}",
+        cookie.name, cookie.value, cookie.host, cookie.path
+    );
     if cookie.is_secure {
         header.push_str("; Secure");
     }

@@ -2,9 +2,20 @@ use storage::value::{ParseError, Value};
 
 #[test]
 fn round_trips_every_primitive_kind() {
-    for value in [Value::Null, Value::Bool(true), Value::Bool(false), Value::from(3.5), Value::from(-42.0), Value::from("hello")] {
+    for value in [
+        Value::Null,
+        Value::Bool(true),
+        Value::Bool(false),
+        Value::from(3.5),
+        Value::from(-42.0),
+        Value::from("hello"),
+    ] {
         let wire = value.to_wire();
-        assert_eq!(Value::parse(&wire).unwrap(), value, "failed to round-trip {wire:?}");
+        assert_eq!(
+            Value::parse(&wire).unwrap(),
+            value,
+            "failed to round-trip {wire:?}"
+        );
     }
 }
 
@@ -12,8 +23,14 @@ fn round_trips_every_primitive_kind() {
 fn round_trips_nested_arrays_and_objects() {
     let value = Value::Object(vec![
         ("name".to_string(), Value::from("alice")),
-        ("scores".to_string(), Value::Array(vec![Value::from(1.0), Value::from(2.5), Value::Null])),
-        ("meta".to_string(), Value::Object(vec![("active".to_string(), Value::Bool(true))])),
+        (
+            "scores".to_string(),
+            Value::Array(vec![Value::from(1.0), Value::from(2.5), Value::Null]),
+        ),
+        (
+            "meta".to_string(),
+            Value::Object(vec![("active".to_string(), Value::Bool(true))]),
+        ),
     ]);
     let wire = value.to_wire();
     assert_eq!(Value::parse(&wire).unwrap(), value);
@@ -34,7 +51,17 @@ fn parses_a_plain_json_literal_written_by_hand() {
     assert_eq!(
         parsed,
         Value::Object(vec![
-            ("a".to_string(), Value::Array(vec![Value::from(1.0), Value::from(2.5), Value::from(-3.0), Value::Bool(true), Value::Bool(false), Value::Null])),
+            (
+                "a".to_string(),
+                Value::Array(vec![
+                    Value::from(1.0),
+                    Value::from(2.5),
+                    Value::from(-3.0),
+                    Value::Bool(true),
+                    Value::Bool(false),
+                    Value::Null
+                ])
+            ),
             ("b".to_string(), Value::from("hi")),
         ])
     );
@@ -50,10 +77,19 @@ fn parses_unicode_escapes() {
 fn rejects_malformed_input() {
     assert!(matches!(Value::parse(""), Err(ParseError::UnexpectedEnd)));
     assert!(matches!(Value::parse("{"), Err(ParseError::UnexpectedEnd)));
-    assert!(matches!(Value::parse("[1, 2"), Err(ParseError::UnexpectedEnd)));
+    assert!(matches!(
+        Value::parse("[1, 2"),
+        Err(ParseError::UnexpectedEnd)
+    ));
     assert!(matches!(Value::parse("nul"), Err(_)));
-    assert!(matches!(Value::parse("123 456"), Err(ParseError::TrailingData)));
-    assert!(matches!(Value::parse("{\"a\" 1}"), Err(ParseError::UnexpectedChar('1'))));
+    assert!(matches!(
+        Value::parse("123 456"),
+        Err(ParseError::TrailingData)
+    ));
+    assert!(matches!(
+        Value::parse("{\"a\" 1}"),
+        Err(ParseError::UnexpectedChar('1'))
+    ));
 }
 
 #[test]
@@ -77,5 +113,8 @@ fn clone_deep_produces_an_independent_copy() {
         items.push(Value::from(2.0));
     }
     assert_eq!(original, Value::Array(vec![Value::from(1.0)]));
-    assert_eq!(cloned, Value::Array(vec![Value::from(1.0), Value::from(2.0)]));
+    assert_eq!(
+        cloned,
+        Value::Array(vec![Value::from(1.0), Value::from(2.0)])
+    );
 }

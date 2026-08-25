@@ -1,9 +1,10 @@
-//! `CustomEvent`/`KeyboardEvent`/`PointerEvent` — three thin globals built on
-//! top of `events::create_event`. None of these know how `EventState` is
-//! represented; the subclass-specific fields (`detail`, `key`, `pointerId`,
-//! ...) are plain own data properties on top of the base `Event`-class
-//! object, not extra native state, so they ride through the existing
-//! `dispatchEvent`/`EventState` machinery in `events.rs` unmodified.
+//! `CustomEvent`/`KeyboardEvent`/`PointerEvent`/`MouseEvent`/`FocusEvent` —
+//! thin globals built on top of `events::create_event`. None of these know
+//! how `EventState` is represented; the subclass-specific fields (`detail`,
+//! `key`, `pointerId`, `clientX`, `relatedTarget`, ...) are plain own data
+//! properties on top of the base `Event`-class object, not extra native
+//! state, so they ride through the existing `dispatchEvent`/`EventState`
+//! machinery in `events.rs` unmodified.
 use quickjs_sys as sys;
 use std::ffi::CString;
 use std::os::raw::c_int;
@@ -112,6 +113,30 @@ unsafe fn read_number_option(
     n.or(Some(default))
 }
 
+/// Reads `options[name]` as a raw `JSValue`, defaulting to `null` when the
+/// property is absent/`undefined`. Used for `relatedTarget`, which is a
+/// `Node` reference (or `null`), not a primitive — no coercion attempted,
+/// matching this file's other `read_*_option` helpers' "no object-to-X
+/// coercion" scope cut.
+unsafe fn read_value_option(
+    ctx: *mut sys::JSContext,
+    options: sys::JSValue,
+    name: &str,
+) -> Option<sys::JSValue> {
+    if options.tag == sys::JS_TAG_UNDEFINED {
+        return Some(sys::js_null());
+    }
+    let value = get_prop(ctx, options, name);
+    if sys::js_is_exception(&value) {
+        return None;
+    }
+    if value.tag == sys::JS_TAG_UNDEFINED {
+        sys::JS_FreeValue(ctx, value);
+        return Some(sys::js_null());
+    }
+    Some(value)
+}
+
 unsafe fn set_string_prop(ctx: *mut sys::JSContext, obj: sys::JSValue, name: &str, value: &str) {
     let cname = CString::new(name).unwrap();
     sys::JS_SetPropertyStr(ctx, obj, cname.as_ptr(), new_string(ctx, value));
@@ -123,6 +148,18 @@ unsafe fn set_number_prop(ctx: *mut sys::JSContext, obj: sys::JSValue, name: &st
 unsafe fn set_bool_prop(ctx: *mut sys::JSContext, obj: sys::JSValue, name: &str, value: bool) {
     let cname = CString::new(name).unwrap();
     sys::JS_SetPropertyStr(ctx, obj, cname.as_ptr(), sys::js_bool(value));
+}
+/// Consumes `value` (an owned reference) — matches `JS_SetPropertyStr`'s own
+/// "takes ownership of the value" contract, same as every other `set_*_prop`
+/// helper here just with no primitive conversion in the way.
+unsafe fn set_value_prop(
+    ctx: *mut sys::JSContext,
+    obj: sys::JSValue,
+    name: &str,
+    value: sys::JSValue,
+) {
+    let cname = CString::new(name).unwrap();
+    sys::JS_SetPropertyStr(ctx, obj, cname.as_ptr(), value);
 }
 
 /// Fetches `globalThis.<name>.prototype` — same pattern as
@@ -319,6 +356,112 @@ unsafe extern "C" fn pointer_event_constructor(
     event
 }
 
+unsafe extern "C" fn mouse_event_constructor(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let kind = match read_type_arg(ctx, argc, argv) {
+        Ok(k) => k,
+        Err(e) => return e,
+    };
+    let options = options_arg(argc, argv);
+    let Some(bubbles) = read_bool_option(ctx, options, "bubbles", false) else {
+        return sys::js_exception();
+    };
+    let Some(cancelable) = read_bool_option(ctx, options, "cancelable", false) else {
+        return sys::js_exception();
+    };
+    let Some(screen_x) = read_number_option(ctx, options, "screenX", 0.0) else {
+        return sys::js_exception();
+    };
+    let Some(screen_y) = read_number_option(ctx, options, "screenY", 0.0) else {
+        return sys::js_exception();
+    };
+    let Some(client_x) = read_number_option(ctx, options, "clientX", 0.0) else {
+        return sys::js_exception();
+    };
+    let Some(client_y) = read_number_option(ctx, options, "clientY", 0.0) else {
+        return sys::js_exception();
+    };
+    let Some(ctrl_key) = read_bool_option(ctx, options, "ctrlKey", false) else {
+        return sys::js_exception();
+    };
+    let Some(shift_key) = read_bool_option(ctx, options, "shiftKey", false) else {
+        return sys::js_exception();
+    };
+    let Some(alt_key) = read_bool_option(ctx, options, "altKey", false) else {
+        return sys::js_exception();
+    };
+    let Some(meta_key) = read_bool_option(ctx, options, "metaKey", false) else {
+        return sys::js_exception();
+    };
+    let Some(button) = read_number_option(ctx, options, "button", 0.0) else {
+        return sys::js_exception();
+    };
+    let Some(buttons) = read_number_option(ctx, options, "buttons", 0.0) else {
+        return sys::js_exception();
+    };
+    let Some(related_target) = read_value_option(ctx, options, "relatedTarget") else {
+        return sys::js_exception();
+    };
+
+    let event = crate::events::create_event(ctx, &kind, bubbles, cancelable);
+    if sys::js_is_exception(&event) {
+        sys::JS_FreeValue(ctx, related_target);
+        return event;
+    }
+    set_number_prop(ctx, event, "screenX", screen_x);
+    set_number_prop(ctx, event, "screenY", screen_y);
+    set_number_prop(ctx, event, "clientX", client_x);
+    set_number_prop(ctx, event, "clientY", client_y);
+    set_bool_prop(ctx, event, "ctrlKey", ctrl_key);
+    set_bool_prop(ctx, event, "shiftKey", shift_key);
+    set_bool_prop(ctx, event, "altKey", alt_key);
+    set_bool_prop(ctx, event, "metaKey", meta_key);
+    set_number_prop(ctx, event, "button", button);
+    set_number_prop(ctx, event, "buttons", buttons);
+    set_value_prop(ctx, event, "relatedTarget", related_target);
+    let proto = constructor_prototype(ctx, "MouseEvent");
+    sys::JS_SetPrototype(ctx, event, proto);
+    sys::JS_FreeValue(ctx, proto);
+    event
+}
+
+unsafe extern "C" fn focus_event_constructor(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let kind = match read_type_arg(ctx, argc, argv) {
+        Ok(k) => k,
+        Err(e) => return e,
+    };
+    let options = options_arg(argc, argv);
+    let Some(bubbles) = read_bool_option(ctx, options, "bubbles", false) else {
+        return sys::js_exception();
+    };
+    let Some(cancelable) = read_bool_option(ctx, options, "cancelable", false) else {
+        return sys::js_exception();
+    };
+    let Some(related_target) = read_value_option(ctx, options, "relatedTarget") else {
+        return sys::js_exception();
+    };
+
+    let event = crate::events::create_event(ctx, &kind, bubbles, cancelable);
+    if sys::js_is_exception(&event) {
+        sys::JS_FreeValue(ctx, related_target);
+        return event;
+    }
+    set_value_prop(ctx, event, "relatedTarget", related_target);
+    let proto = constructor_prototype(ctx, "FocusEvent");
+    sys::JS_SetPrototype(ctx, event, proto);
+    sys::JS_FreeValue(ctx, proto);
+    event
+}
+
 /// Registers one `name` global: a plain prototype object chained onto
 /// `Event.prototype` (so `instanceof Event` and inherited accessors like
 /// `preventDefault`/`type` keep working — see `events.rs::register`'s own
@@ -357,4 +500,6 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     register_subclass(ctx, "CustomEvent", custom_event_constructor);
     register_subclass(ctx, "KeyboardEvent", keyboard_event_constructor);
     register_subclass(ctx, "PointerEvent", pointer_event_constructor);
+    register_subclass(ctx, "MouseEvent", mouse_event_constructor);
+    register_subclass(ctx, "FocusEvent", focus_event_constructor);
 }

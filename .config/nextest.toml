@@ -1,0 +1,19 @@
+# Repository-wide scheduling for cargo-nextest. Install it with
+# `cargo install cargo-nextest --locked`; Makefile targets automatically use
+# it when present and otherwise retain cargo test compatibility.
+
+[test-groups]
+# profile-worker starts a child process that initializes wgpu. Render and
+# WebGL tests use the same host GPU, so keep that shared hardware stable.
+gpu = { max-threads = 1 }
+# The system clipboard is process-wide and must never be written by two test
+# processes concurrently.
+clipboard = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'package(profile) | package(render) | package(webgl) | package(automation)'
+test-group = 'gpu'
+
+[[profile.default.overrides]]
+filter = 'package(js-runtime) and binary_id(js-runtime::clipboard_test)'
+test-group = 'clipboard'

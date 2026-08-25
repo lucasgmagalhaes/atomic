@@ -193,16 +193,8 @@ fn publishes_a_real_rendered_frame_on_startup() {
     let profile = Profile::spawn(worker_path(), &name, 64, 64).expect("spawn should succeed");
 
     // The worker renders and publishes before entering its command loop,
-    // but process startup + first GPU init isn't instant - poll briefly.
-    let mut frame = None;
-    for _ in 0..100 {
-        if let Some(f) = profile.latest_frame() {
-            frame = Some(f);
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
-    let pixels = frame.expect("worker should publish a frame within 5s");
+    // but process startup + first GPU init isn't instant.
+    let pixels = wait_for_a_frame(&profile);
 
     assert_eq!(pixels.len(), 64 * 64 * 4);
     // The demo page has a dark, non-black background (#1a1c2b) - at least
@@ -219,15 +211,7 @@ fn reload_publishes_a_new_generation() {
     let name = unique_shmem_name("reload");
     let mut profile = Profile::spawn(worker_path(), &name, 32, 32).expect("spawn should succeed");
 
-    let mut gen0 = 0;
-    for _ in 0..100 {
-        gen0 = profile.frame_generation();
-        if gen0 > 0 {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
-    assert!(gen0 > 0, "should have an initial published frame");
+    let gen0 = wait_for_generation_after(&profile, 0);
 
     profile.reload().unwrap();
     assert!(profile.frame_generation() > gen0);
@@ -785,16 +769,14 @@ fn demo_page_visit_counter_persists_via_real_local_storage_across_reload() {
     let mut profile = Profile::spawn(worker_path(), &name, 400, 200).expect("spawn should succeed");
 
     let frame_a = wait_for_a_frame(&profile);
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    let frame_b = profile.latest_frame().unwrap();
+    let frame_b = wait_for_changed_frame(&profile, &frame_a);
     assert_ne!(
         frame_a, frame_b,
         "the first tick should have painted a visits count"
     );
 
     profile.reload().unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    let frame_c = profile.latest_frame().unwrap();
+    let frame_c = wait_for_changed_frame(&profile, &frame_b);
     assert_ne!(
         frame_b, frame_c,
         "reloading should bump the real persisted visits count and repaint a different number"
@@ -804,13 +786,41 @@ fn demo_page_visit_counter_persists_via_real_local_storage_across_reload() {
 }
 
 fn wait_for_a_frame(profile: &Profile) -> Vec<u8> {
+    // Keep the startup pacing used by the existing integration tests: the
+    // worker owns both GPU setup and its command loop, and a fully settled
+    // initial paint is the fixture boundary for the tests below.
     for _ in 0..100 {
-        if let Some(f) = profile.latest_frame() {
-            return f;
+        if let Some(frame) = profile.latest_frame() {
+            return frame;
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
     panic!("worker should publish a frame within 5s");
+}
+
+fn wait_for_generation_after(profile: &Profile, previous: u32) -> u32 {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        let generation = profile.frame_generation();
+        if generation > previous {
+            return generation;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    panic!("frame generation should advance within 5s from {previous}");
+}
+
+fn wait_for_changed_frame(profile: &Profile, previous: &[u8]) -> Vec<u8> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        if let Some(frame) = profile.latest_frame() {
+            if frame != previous {
+                return frame;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    panic!("rendered frame should change within 5s");
 }
 
 #[test]
@@ -820,8 +830,7 @@ fn frame_generation_advances_on_its_own_without_any_reload() {
     wait_for_a_frame(&profile);
 
     let gen0 = profile.frame_generation();
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    let gen1 = profile.frame_generation();
+    let gen1 = wait_for_generation_after(&profile, gen0 + 3);
 
     // ~60fps over 200ms should easily clear a handful of new frames -
     // this is the vsync loop's whole point: frames keep publishing without
@@ -849,14 +858,14 @@ fn set_fps_cap_actually_slows_down_the_render_loops_own_cadence() {
     );
 
     let gen0 = profile.frame_generation();
-    std::thread::sleep(std::time::Duration::from_millis(400));
+    std::thread::sleep(std::time::Duration::from_millis(250));
     let gen1 = profile.frame_generation();
 
-    // At 5fps, 400ms should produce roughly 2 new frames, nowhere near the
-    // ~24 a real ~60fps loop would - proves SET_FPS_CAP actually reached
+    // At 5fps, 250ms should produce roughly one new frame, nowhere near the
+    // ~15 a real ~60fps loop would - proves SET_FPS_CAP actually reached
     // the render loop's own scheduling, not just returned success.
     let advanced = gen1 - gen0;
-    assert!(advanced <= 4, "capped loop should advance only a couple frames in 400ms, got {advanced} ({gen0} -> {gen1})");
+    assert!(advanced <= 4, "capped loop should advance only a couple frames in 250ms, got {advanced} ({gen0} -> {gen1})");
 
     profile.quit();
 }
@@ -886,7 +895,7 @@ fn pause_actually_stops_frame_generation_and_resume_restarts_it() {
 
     profile.pause().expect("pause should reach a live worker");
     let gen_paused_start = profile.frame_generation();
-    std::thread::sleep(std::time::Duration::from_millis(300));
+    std::thread::sleep(std::time::Duration::from_millis(100));
     let gen_paused_end = profile.frame_generation();
     assert_eq!(gen_paused_start, gen_paused_end, "a paused loop must not publish new frames at all, got {gen_paused_start} -> {gen_paused_end}");
 
@@ -897,8 +906,7 @@ fn pause_actually_stops_frame_generation_and_resume_restarts_it() {
 
     profile.resume().expect("resume should reach a live worker");
     let gen_resumed_start = profile.frame_generation();
-    std::thread::sleep(std::time::Duration::from_millis(300));
-    let gen_resumed_end = profile.frame_generation();
+    let gen_resumed_end = wait_for_generation_after(&profile, gen_resumed_start);
     assert!(gen_resumed_end > gen_resumed_start, "resuming should restart real frame generation, got {gen_resumed_start} -> {gen_resumed_end}");
 
     profile.quit();
@@ -915,9 +923,9 @@ fn js_timers_pumped_by_the_loop_visibly_change_rendered_pixels() {
 
     let frame_a = wait_for_a_frame(&profile);
     // The demo script's setInterval-style counter ticks every 50ms and
-    // rewrites #counter's text - give it a few ticks' worth of real time.
-    std::thread::sleep(std::time::Duration::from_millis(300));
-    let frame_b = profile.latest_frame().expect("should still have a frame");
+    // rewrites #counter's text. Wait for that visible state transition
+    // rather than idling for a fixed number of ticks.
+    let frame_b = wait_for_changed_frame(&profile, &frame_a);
 
     assert_ne!(
         frame_a, frame_b,

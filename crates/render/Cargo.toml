@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 image_decode = { path = "../image_decode" }
 layout-engine = { path = "../layout-engine" }
-wgpu = "0.20"
+wgpu = "30.0"
 bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.3"
 

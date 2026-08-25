@@ -1923,6 +1923,77 @@ unsafe fn define_value(ctx: *mut sys::JSContext, proto: sys::JSValue) {
     sys::JS_FreeAtom(ctx, atom);
 }
 
+/// Real `Node.prototype.nodeValue` getter — per spec:
+/// - Text / Comment nodes: the text data
+/// - Document / DocumentFragment / Element: `null`
+unsafe extern "C" fn node_node_value_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    let node_ptr = node_opaque(sys::JS_GetRuntime(ctx), this_val);
+    let dom_ptr = dom_opaque(ctx);
+    if node_ptr.is_null() || dom_ptr.is_null() {
+        return sys::js_undefined();
+    }
+    match (*dom_ptr).node_value(*node_ptr) {
+        Some(text) => new_js_string(ctx, &text),
+        None => sys::js_null(),
+    }
+}
+
+/// Real `Node.prototype.nodeValue` setter — updates text for Text/Comment
+/// nodes, no-op for everything else (Element, Document, DocumentFragment).
+unsafe extern "C" fn node_node_value_set(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    val: sys::JSValue,
+) -> sys::JSValue {
+    let node_ptr = node_opaque(sys::JS_GetRuntime(ctx), this_val);
+    let dom_ptr = dom_opaque(ctx);
+    let Some(text) = read_js_string(ctx, val) else {
+        return sys::js_undefined();
+    };
+    if !node_ptr.is_null() && !dom_ptr.is_null() {
+        (*dom_ptr).set_node_value(*node_ptr, &text);
+    }
+    sys::js_undefined()
+}
+
+/// Defines the `nodeValue` accessor on `proto` — per spec, returns the
+/// text data for Text/Comment nodes, `null` for everything else.
+unsafe fn define_node_value(ctx: *mut sys::JSContext, proto: sys::JSValue) {
+    let name = CString::new("nodeValue").unwrap();
+    let getter = sys::JS_NewCFunction2(
+        ctx,
+        std::mem::transmute::<Getter, sys::JSCFunction>(node_node_value_get),
+        name.as_ptr(),
+        0,
+        sys::JS_CFUNC_GETTER,
+        0,
+    );
+    let setter = sys::JS_NewCFunction2(
+        ctx,
+        std::mem::transmute::<Setter, sys::JSCFunction>(node_node_value_set),
+        name.as_ptr(),
+        1,
+        sys::JS_CFUNC_SETTER,
+        0,
+    );
+    let atom = sys::JS_NewAtom(ctx, name.as_ptr());
+    sys::JS_DefinePropertyGetSet(
+        ctx,
+        proto,
+        atom,
+        getter,
+        setter,
+        sys::JS_PROP_HAS_GET
+            | sys::JS_PROP_HAS_SET
+            | sys::JS_PROP_CONFIGURABLE
+            | sys::JS_PROP_ENUMERABLE,
+    );
+    sys::JS_FreeAtom(ctx, atom);
+}
+
 /// Replaces every child of `id` with the parsed content of `html`, evicting
 /// cached JS state (`NODE_OBJECTS`/`CLASS_LIST_OBJECTS`/etc, and any
 /// listeners living on those cached objects) for every removed node first —
@@ -3187,6 +3258,7 @@ unsafe fn ensure_node_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
     crate::layout_measurement::define_layout_measurement(ctx, proto);
     define_navigation(ctx, proto);
     define_value(ctx, proto);
+    define_node_value(ctx, proto);
     define_inner_outer_html(ctx, proto);
     define_focus_methods(ctx, proto);
     define_mutation_methods(ctx, proto);

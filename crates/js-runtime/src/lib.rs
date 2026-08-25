@@ -35,6 +35,7 @@ mod notifications;
 mod page_visibility;
 mod performance;
 mod permissions_policy;
+mod script_limits;
 mod timers;
 mod trusted_types;
 mod value_bridge;
@@ -97,6 +98,9 @@ pub struct Context<'rt> {
     // pointer field, not the heap allocation, so the raw pointer registered
     // with QuickJS via register() stays valid regardless.
     _host_state: Option<Box<host_state::HostState>>,
+    /// Per-eval time budget (`script_limits`); `None` until a host calls
+    /// `set_time_budget`.
+    _time_budget: Option<std::time::Duration>,
 }
 
 impl<'rt> Context<'rt> {
@@ -130,6 +134,7 @@ impl<'rt> Context<'rt> {
             ptr,
             _runtime: PhantomData,
             _host_state: None,
+            _time_budget: None,
         }
     }
 
@@ -205,13 +210,22 @@ impl<'rt> Context<'rt> {
             CString::new(filename).expect("filename must not contain NUL bytes");
 
         let result = unsafe {
-            sys::JS_Eval(
+            script_limits::set_deadline(
+                self.ptr,
+                self._time_budget.map(|budget| std::time::Instant::now() + budget),
+            );
+            let r = sys::JS_Eval(
                 self.ptr,
                 code_c.as_ptr(),
                 code_c.as_bytes().len(),
                 filename_c.as_ptr(),
                 sys::JS_EVAL_TYPE_GLOBAL,
-            )
+            );
+            // The deadline only governs this one eval call - leaving it
+            // stamped would let later unrelated work (timers, promise
+            // jobs, another host's eval) hit a stale cutoff.
+            script_limits::set_deadline(self.ptr, None);
+            r
         };
 
         if sys::js_is_exception(&result) {
@@ -369,6 +383,36 @@ impl<'rt> Context<'rt> {
             events::dispatch_simple(self.ptr, global, "load", false, false);
             sys::JS_FreeValue(self.ptr, global);
         }
+    }
+
+    /// Bounds how long each [`Context::eval`] call may run: once the
+    /// budget passes, quickjs's interrupt handler aborts the running
+    /// script with an "interrupted" InternalError at its next
+    /// loop/function-entry check, surfacing as `eval`'s usual `Err` (see
+    /// [`script_limits`] for scope: per eval call, not per timer/promise
+    /// callback). Installing a budget is idempotent and cheap; pass
+    /// shorter/longer durations freely, use [`Context::clear_time_budget`]
+    /// to lift it.
+    pub fn set_time_budget(&mut self, budget: std::time::Duration) {
+        unsafe { script_limits::install(self.ptr) };
+        self._time_budget = Some(budget);
+    }
+
+    /// Lifts a budget installed by [`Context::set_time_budget`] - later
+    /// evals run unbounded again (the handler stays installed but never
+    /// interrupts without a deadline).
+    pub fn clear_time_budget(&mut self) {
+        if self._time_budget.take().is_some() {
+            script_limits::set_deadline(self.ptr, None);
+        }
+    }
+
+    /// Caps the runtime's total JS-heap allocation at `bytes` (quickjs-ng's
+    /// `JS_SetMemoryLimit`): an allocation over the cap throws a RangeError
+    /// into whatever script asked for it instead of succeeding. Runtime-wide,
+    /// which here means per-context - every context owns its whole runtime.
+    pub fn set_memory_limit(&self, bytes: usize) {
+        unsafe { sys::JS_SetMemoryLimit(sys::JS_GetRuntime(self.ptr), bytes) };
     }
 
     /// Drains (and returns) every `console.*` message accumulated since
@@ -530,6 +574,7 @@ impl<'rt> Context<'rt> {
 impl Drop for Context<'_> {
     fn drop(&mut self) {
         unsafe {
+            script_limits::cleanup(self.ptr);
             timers::cleanup(self.ptr);
             fetch_async::cleanup(self.ptr);
             blob::cleanup(self.ptr);

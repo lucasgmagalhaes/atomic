@@ -636,6 +636,126 @@ impl Dom {
         out
     }
 
+    /// Real `Node.prototype.contains(other)`: `true` if `other` is `ancestor`
+    /// itself or a descendant of it, walking up from `other` toward the
+    /// root rather than down from `ancestor` — cheaper for the common case
+    /// (`other` is usually much closer to a leaf than `ancestor` is to the
+    /// root) and doesn't need to visit every descendant just to answer a
+    /// yes/no question. `false` if `other` doesn't exist or the walk never
+    /// reaches `ancestor`.
+    pub fn contains(&self, ancestor: NodeId, other: NodeId) -> bool {
+        let mut current = Some(other);
+        while let Some(id) = current {
+            if id == ancestor {
+                return true;
+            }
+            current = self.get(id).and_then(|n| n.parent);
+        }
+        false
+    }
+
+    /// Real `Node.prototype.isConnected`: whether `id` is the document root
+    /// or a descendant of it, i.e. still attached to the document tree
+    /// rather than an orphaned/detached subtree. `false` for a stale or
+    /// unknown id too, same permissive style as [`Dom::attribute`].
+    pub fn is_connected(&self, id: NodeId) -> bool {
+        self.contains(self.root, id)
+    }
+
+    /// Real `Node.prototype.cloneNode(deep)`, same-arena counterpart to
+    /// [`Dom::adopt`] (which clones *across* two different arenas — this
+    /// clones within `self`). `deep: false` clones only `node` itself
+    /// (tag+attributes for an `Element`, full content for `Text`/`Comment`
+    /// — nothing left to shallow-clone there) with no children; `deep: true`
+    /// clones the whole subtree. The clone's `.value` is re-derived from the
+    /// cloned `value` attribute, not copied directly — same documented
+    /// simplification [`Dom::adopt`] already makes and for the same reason
+    /// (every real caller sets `.value` via the `value` attribute, never
+    /// independently, at clone time). A `Document` node isn't a supported
+    /// input (mirrors [`Dom::adopt`]'s same restriction): best effort, only
+    /// the first child (if any, and only when `deep`) is cloned and
+    /// returned, since a single `NodeId` can't represent multiple cloned
+    /// roots. An unknown `node` id clones as an empty text node, same
+    /// graceful-degradation convention [`Dom::adopt`] uses for a missing
+    /// source node.
+    pub fn clone_node(&mut self, node: NodeId, deep: bool) -> NodeId {
+        let Some(data) = self.get(node).map(|n| n.data.clone()) else {
+            return self.create_text("");
+        };
+        match data {
+            NodeData::Element {
+                tag, attributes, ..
+            } => {
+                let new_id = self.create_element(&tag);
+                for (name, value) in &attributes {
+                    self.set_attribute(new_id, name, value);
+                }
+                if deep {
+                    let children = self.get(node).map(|n| n.children.clone()).unwrap_or_default();
+                    for child in children {
+                        let cloned_child = self.clone_node(child, true);
+                        self.append_child(new_id, cloned_child);
+                    }
+                }
+                new_id
+            }
+            NodeData::Text(text) => self.create_text(&text),
+            NodeData::Comment(text) => self.create_comment(&text),
+            NodeData::Document => {
+                if deep {
+                    let first_child = self.get(node).and_then(|n| n.children.first().copied());
+                    if let Some(first_child) = first_child {
+                        return self.clone_node(first_child, true);
+                    }
+                }
+                self.create_text("")
+            }
+        }
+    }
+
+    /// Real `Node.prototype.replaceChild(newChild, oldChild)`: swaps
+    /// `old_child` for `new_child` at the same position under `parent`.
+    /// Returns `false` and mutates nothing if `old_child` isn't currently
+    /// one of `parent`'s children — a checked precondition, same
+    /// "no partial mutation on a failed precondition" contract this crate's
+    /// JS-facing callers already enforce themselves before calling in (see
+    /// `dom_bindings::node_replace_child`, which also rejects `new_child`
+    /// being `parent`'s own ancestor — a `HierarchyRequestError` case this
+    /// low-level method doesn't check, matching how [`Dom::append_child`]/
+    /// [`Dom::insert_before`] leave that check to their JS-facing callers
+    /// too). Replacing a node with itself is a real no-op (`true`, nothing
+    /// moves) rather than removing and reinserting the same id, which would
+    /// otherwise free the very slot the operation is also trying to insert.
+    /// Frees `old_child`'s whole subtree exactly like [`Dom::remove`] — the
+    /// same documented simplification `removeChild`/`remove` already make
+    /// (a real DOM keeps a removed node alive and reattachable; this one
+    /// destroys it).
+    pub fn replace_child(&mut self, parent: NodeId, new_child: NodeId, old_child: NodeId) -> bool {
+        if new_child == old_child {
+            return self
+                .get(parent)
+                .map(|n| n.children.contains(&old_child))
+                .unwrap_or(false);
+        }
+        let Some(position) = self
+            .get(parent)
+            .and_then(|node| node.children.iter().position(|&c| c == old_child))
+        else {
+            return false;
+        };
+        self.mutations = self.mutations.wrapping_add(1);
+        self.detach(new_child);
+        self.remove(old_child);
+        if let Some(node) = self.get_mut(parent) {
+            let insert_pos = position.min(node.children.len());
+            node.children.insert(insert_pos, new_child);
+        }
+        if let Some(node) = self.get_mut(new_child) {
+            node.parent = Some(parent);
+        }
+        true
+    }
+
     /// Deep-clones `node` and its subtree from a *different* `Dom` (`other`)
     /// into `self`, returning the new root's id in `self`. `NodeId`s are
     /// only valid within the arena that created them, so this is the one

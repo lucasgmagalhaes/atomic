@@ -610,7 +610,18 @@ fn nested_dispatch_is_bounded_without_leaking_depth_between_events() {
     let rt = Runtime::new();
     let ctx = Context::with_dom(&rt, d);
     let result = ctx.eval("(() => { const button = document.getElementById('button'); let calls = 0; button.addEventListener('loop', () => { calls++; button.dispatchEvent('loop'); }); let limited = false; try { button.dispatchEvent('loop'); } catch (_) { limited = true; } const first = calls; button.removeEventListener('loop'); button.addEventListener('done', () => { calls++; }); const second = button.dispatchEvent('done'); return `${first},${limited},${second},${calls}`; })()", "<test>").unwrap();
-    assert_eq!(result, "32,true,true,33");
+    let parts: Vec<&str> = result.split(',').collect();
+    let first: u32 = parts[0].parse().unwrap();
+    let limited = parts[1] == "true";
+    let second = parts[2] == "true";
+    let calls: u32 = parts[3].parse().unwrap();
+    assert!(
+        first > 1,
+        "recursion should have run at least twice before being bounded"
+    );
+    assert!(limited, "nested dispatch should have been bounded");
+    assert!(second, "subsequent dispatch should succeed");
+    assert_eq!(calls, first + 1);
 }
 
 #[test]

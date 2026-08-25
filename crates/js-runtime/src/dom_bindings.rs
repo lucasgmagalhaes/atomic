@@ -3718,6 +3718,95 @@ unsafe extern "C" fn document_head_get(
     }
 }
 
+/// Real `document.URL` — the full serialization of the page's current URL,
+/// or `""` if no URL is set.
+unsafe extern "C" fn document_url_get(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+) -> sys::JSValue {
+    match crate::location::current_url(ctx) {
+        Some(url) => new_js_string(ctx, &url.to_string()),
+        None => new_js_string(ctx, ""),
+    }
+}
+
+/// Real `document.baseURI` — same as `document.URL` in this single-context
+/// engine (no `<base>` element parsing).
+unsafe extern "C" fn document_base_uri_get(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+) -> sys::JSValue {
+    match crate::location::current_url(ctx) {
+        Some(url) => new_js_string(ctx, &url.to_string()),
+        None => new_js_string(ctx, ""),
+    }
+}
+
+/// Returns a live snapshot JS array of all matching elements under the
+/// document root — shared helper for `forms`/`images`/`links`/`scripts`.
+unsafe fn document_elements_by_tag(ctx: *mut sys::JSContext, tag: &str) -> sys::JSValue {
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return sys::JS_NewArray(ctx);
+    }
+    match matching_by_tag(&*dom, (*dom).root(), tag, false) {
+        Ok(nodes) => node_array(ctx, nodes),
+        Err(_) => sys::JS_NewArray(ctx),
+    }
+}
+
+/// Real `document.forms` — all `<form>` elements in the document.
+unsafe extern "C" fn document_forms_get(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+) -> sys::JSValue {
+    document_elements_by_tag(ctx, "form")
+}
+
+/// Real `document.images` — all `<img>` elements in the document.
+unsafe extern "C" fn document_images_get(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+) -> sys::JSValue {
+    document_elements_by_tag(ctx, "img")
+}
+
+/// Real `document.links` — all `<a>` and `<area>` elements with an `href`
+/// attribute in the document.
+unsafe extern "C" fn document_links_get(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+) -> sys::JSValue {
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return sys::JS_NewArray(ctx);
+    }
+    let mut result = Vec::new();
+    if let Ok(a_nodes) = matching_by_tag(&*dom, (*dom).root(), "a", false) {
+        for id in a_nodes {
+            if (*dom).attribute(id, "href").is_some() {
+                result.push(id);
+            }
+        }
+    }
+    if let Ok(area_nodes) = matching_by_tag(&*dom, (*dom).root(), "area", false) {
+        for id in area_nodes {
+            if (*dom).attribute(id, "href").is_some() {
+                result.push(id);
+            }
+        }
+    }
+    node_array(ctx, result)
+}
+
+/// Real `document.scripts` — all `<script>` elements in the document.
+unsafe extern "C" fn document_scripts_get(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+) -> sys::JSValue {
+    document_elements_by_tag(ctx, "script")
+}
+
 /// Real `document.readyState`, hardcoded to `"complete"`. This engine has
 /// no `loading`/`interactive` distinction to report — `DOMContentLoaded`/
 /// `load` already fire at the right real moments (`Context::
@@ -4067,6 +4156,34 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     define_title(ctx, document);
     define_ready_state(ctx, document);
     define_document_element(ctx, document);
+    for (name, getter) in [
+        ("URL", document_url_get as Getter),
+        ("baseURI", document_base_uri_get as Getter),
+        ("forms", document_forms_get as Getter),
+        ("images", document_images_get as Getter),
+        ("links", document_links_get as Getter),
+        ("scripts", document_scripts_get as Getter),
+    ] {
+        let cname = CString::new(name).unwrap();
+        let getter_fn = sys::JS_NewCFunction2(
+            ctx,
+            std::mem::transmute::<Getter, sys::JSCFunction>(getter),
+            cname.as_ptr(),
+            0,
+            sys::JS_CFUNC_GETTER,
+            0,
+        );
+        let atom = sys::JS_NewAtom(ctx, cname.as_ptr());
+        sys::JS_DefinePropertyGetSet(
+            ctx,
+            document,
+            atom,
+            getter_fn,
+            sys::js_undefined(),
+            sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE,
+        );
+        sys::JS_FreeAtom(ctx, atom);
+    }
 
     sys::JS_FreeValue(ctx, document);
 }

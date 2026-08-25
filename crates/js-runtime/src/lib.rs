@@ -25,6 +25,7 @@ mod event_subclasses;
 mod events;
 mod fetch;
 mod fetch_async;
+mod form_data;
 mod history;
 mod host_state;
 mod indexed_db_bindings;
@@ -123,6 +124,7 @@ impl<'rt> Context<'rt> {
             indexed_db_bindings::register(ptr);
             local_storage_bindings::register(ptr);
             blob::register(ptr);
+            form_data::register(ptr);
             notifications::register(ptr);
             clipboard::register(ptr);
             web_audio::register(ptr);

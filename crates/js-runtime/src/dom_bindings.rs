@@ -1786,23 +1786,18 @@ unsafe extern "C" fn node_children_get(
     ctx: *mut sys::JSContext,
     this_val: sys::JSValue,
 ) -> sys::JSValue {
-    let array = sys::JS_NewArray(ctx);
     let Some(id) = node_id(ctx, this_val) else {
-        return array;
+        return sys::JS_NewArray(ctx);
     };
     let dom = dom_opaque(ctx);
     if dom.is_null() {
-        return array;
+        return sys::JS_NewArray(ctx);
     }
     let children = (*dom)
         .get(id)
         .map(|node| node.children.clone())
         .unwrap_or_default();
-    for (index, child) in children.into_iter().enumerate() {
-        let class_id = node_class_id_for(ctx, dom, child);
-        sys::JS_SetPropertyUint32(ctx, array, index as u32, node_object(ctx, class_id, child));
-    }
-    array
+    node_list(ctx, children)
 }
 
 unsafe extern "C" fn node_type_get(

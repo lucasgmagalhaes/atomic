@@ -2362,3 +2362,49 @@ fn document_forms_is_html_collection_with_named_item() {
         .unwrap();
     assert_eq!(result, "2,search,login");
 }
+
+#[test]
+fn childnodes_returns_nodelist_with_item_and_length() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let body = d.create_element("body");
+    d.append_child(root, body);
+    let d1 = d.create_element("div");
+    d.append_child(body, d1);
+    let text = d.create_text("hello");
+    d.append_child(body, text);
+    let d2 = d.create_element("div");
+    d.append_child(body, d2);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { const cn = document.body.childNodes; return `${cn.length},${cn.item(0) === cn[0]},${cn.item(1).nodeValue},${cn.item(99)}`; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "3,true,hello,null");
+}
+
+#[test]
+fn childnodes_includes_text_nodes() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let body = d.create_element("body");
+    d.append_child(root, body);
+    let t1 = d.create_text("a");
+    d.append_child(body, t1);
+    let t2 = d.create_text("b");
+    d.append_child(body, t2);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { const cn = document.body.childNodes; return `${cn.length},${cn.item(0).nodeValue},${cn.item(1).nodeValue}`; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "2,a,b");
+}

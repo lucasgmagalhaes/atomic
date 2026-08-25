@@ -1,4 +1,4 @@
-//! `CustomEvent`/`KeyboardEvent`/`PointerEvent`/`MouseEvent`/`FocusEvent`/`InputEvent` —
+//! `CustomEvent`/`KeyboardEvent`/`PointerEvent`/`MouseEvent`/`FocusEvent`/`InputEvent`/`WheelEvent` —
 //! thin globals built on top of `events::create_event`. None of these know
 //! how `EventState` is represented; the subclass-specific fields (`detail`,
 //! `key`, `pointerId`, `clientX`, `relatedTarget`, ...) are plain own data
@@ -505,6 +505,59 @@ unsafe extern "C" fn input_event_constructor(
     event
 }
 
+unsafe extern "C" fn wheel_event_constructor(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let kind = match read_type_arg(ctx, argc, argv) {
+        Ok(k) => k,
+        Err(e) => return e,
+    };
+    let options = options_arg(argc, argv);
+    let Some(bubbles) = read_bool_option(ctx, options, "bubbles", false) else {
+        return sys::js_exception();
+    };
+    let Some(cancelable) = read_bool_option(ctx, options, "cancelable", false) else {
+        return sys::js_exception();
+    };
+    let Some(delta_x) = read_number_option(ctx, options, "deltaX", 0.0) else {
+        return sys::js_exception();
+    };
+    let Some(delta_y) = read_number_option(ctx, options, "deltaY", 0.0) else {
+        return sys::js_exception();
+    };
+    let Some(delta_z) = read_number_option(ctx, options, "deltaZ", 0.0) else {
+        return sys::js_exception();
+    };
+    // 0 = DOM_DELTA_PIXEL, the real spec's own default.
+    let Some(delta_mode) = read_number_option(ctx, options, "deltaMode", 0.0) else {
+        return sys::js_exception();
+    };
+    let Some(client_x) = read_number_option(ctx, options, "clientX", 0.0) else {
+        return sys::js_exception();
+    };
+    let Some(client_y) = read_number_option(ctx, options, "clientY", 0.0) else {
+        return sys::js_exception();
+    };
+
+    let event = crate::events::create_event(ctx, &kind, bubbles, cancelable);
+    if sys::js_is_exception(&event) {
+        return event;
+    }
+    set_number_prop(ctx, event, "deltaX", delta_x);
+    set_number_prop(ctx, event, "deltaY", delta_y);
+    set_number_prop(ctx, event, "deltaZ", delta_z);
+    set_number_prop(ctx, event, "deltaMode", delta_mode);
+    set_number_prop(ctx, event, "clientX", client_x);
+    set_number_prop(ctx, event, "clientY", client_y);
+    let proto = constructor_prototype(ctx, "WheelEvent");
+    sys::JS_SetPrototype(ctx, event, proto);
+    sys::JS_FreeValue(ctx, proto);
+    event
+}
+
 /// Registers one `name` global: a plain prototype object chained onto
 /// `Event.prototype` (so `instanceof Event` and inherited accessors like
 /// `preventDefault`/`type` keep working — see `events.rs::register`'s own
@@ -546,4 +599,5 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     register_subclass(ctx, "MouseEvent", mouse_event_constructor);
     register_subclass(ctx, "FocusEvent", focus_event_constructor);
     register_subclass(ctx, "InputEvent", input_event_constructor);
+    register_subclass(ctx, "WheelEvent", wheel_event_constructor);
 }

@@ -134,6 +134,32 @@ fn input_event_without_options_defaults_data_to_null() {
 }
 
 #[test]
+fn wheel_event_carries_fields_and_defaults() {
+    let rt = Runtime::new();
+    let ctx = context_with_empty_dom(&rt);
+    let result = ctx
+        .eval(
+            "(() => { const e = new WheelEvent('wheel', { deltaX: 1, deltaY: 2, deltaZ: 3, deltaMode: 1, clientX: 10, clientY: 20 }); return `${e.deltaX},${e.deltaY},${e.deltaZ},${e.deltaMode},${e.clientX},${e.clientY},${e instanceof Event},${e instanceof WheelEvent}`; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "1,2,3,1,10,20,true,true");
+}
+
+#[test]
+fn wheel_event_without_options_defaults_to_zero() {
+    let rt = Runtime::new();
+    let ctx = context_with_empty_dom(&rt);
+    let result = ctx
+        .eval(
+            "(() => { const e = new WheelEvent('wheel'); return `${e.deltaX},${e.deltaY},${e.deltaZ},${e.deltaMode}`; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "0,0,0,0");
+}
+
+#[test]
 fn custom_event_dispatches_through_generic_event_target_machinery() {
     let mut d = dom::Dom::new();
     let root = d.root();

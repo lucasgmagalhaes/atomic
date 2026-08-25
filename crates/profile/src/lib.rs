@@ -426,6 +426,29 @@ impl Profile {
         }
     }
 
+    /// Drains the page's accumulated `console.*` output (see
+    /// `profile-worker`'s `CONSOLE` command) as `(level, text)` pairs -
+    /// the same stream a devtools console would show, including uncaught
+    /// script errors reported at `error` level by `Context::eval` itself.
+    /// Draining: a second call only returns messages logged after this
+    /// one.
+    pub fn console(&mut self) -> std::io::Result<Vec<(String, String)>> {
+        writeln!(self.stdin, "CONSOLE")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        let line = line.trim();
+        match line.strip_prefix("MESSAGES ") {
+            Some(rest) => Ok(rest
+                .split(" | ")
+                .filter_map(|entry| entry.split_once(':'))
+                .map(|(level, text)| (level.to_string(), text.to_string()))
+                .collect()),
+            // Bare `MESSAGES` - nothing logged since the last drain.
+            None => Ok(Vec::new()),
+        }
+    }
+
     /// Caps the worker's own vsync render loop at `fps` frames per second
     /// (the mockup's "Settings > Performance > frame cap" knob) - takes
     /// effect on the worker's very next tick, not a respawn (unlike the

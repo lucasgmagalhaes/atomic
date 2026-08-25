@@ -109,12 +109,23 @@
 //!   either outcome, so whatever the script mutated is visible in pixels
 //!   by the time the reply arrives. Replies `EVALUATED <result>` with the
 //!   script's stringified completion value (newlines flattened, same as
-//!   error messages), or `ERROR script raised an exception` if evaluation
-//!   threw. Not gated by CSP: this is host-driven evaluation (a devtools
+//!   error messages), or `ERROR <stringified exception>` if evaluation
+//!   threw - what a devtools console shows for an uncaught error, not just
+//!   that something did (an Error's own message, a thrown string verbatim).
+//!   Not gated by CSP: this is host-driven evaluation (a devtools
 //!   console), not the page loading its own script - a real browser's
 //!   devtools likewise bypasses the page's policy. Scripts can't contain
 //!   newlines (newline-delimited protocol); `profile::Profile::evaluate`
 //!   rejects those before they'd corrupt the stream.
+//! - `CONSOLE` -> drains every `console.*` message the page has produced
+//!   so far (`console.log/info/warn/error/debug`, plus uncaught script
+//!   errors reported at error level by `Context::eval` itself) and replies
+//!   `MESSAGES <entries>` with each rendered as `<level>:<text>`,
+//!   `|`-separated (message text has newlines and `|` flattened, since the
+//!   reply must be one protocol line), or bare `MESSAGES` when nothing was
+//!   logged. Draining: a second `CONSOLE` only returns messages logged
+//!   after the first - devtools-console semantics, and part of what keeps
+//!   the buffer bounded. See `profile::Profile::console`.
 //! - `QUIT` -> exits cleanly
 //! - anything else -> ignored
 use std::collections::HashMap;
@@ -1516,12 +1527,47 @@ fn main() {
                         Ok(value) => {
                             let _ = writeln!(stdout, "EVALUATED {}", value.replace('\n', " "));
                         }
-                        Err(_) => {
-                            let _ = writeln!(stdout, "ERROR script raised an exception");
+                        Err(e) => {
+                            // The real stringified exception (an Error's own
+                            // message, a thrown string verbatim) - a devtools
+                            // console shows what threw, not just that
+                            // something did.
+                            let _ = writeln!(stdout, "ERROR {}", e.0.replace('\n', " "));
                         }
                     }
                     let _ = stdout.flush();
                 }
+            } else if line == "CONSOLE" {
+                // Drains every `console.*` message the page has produced so
+                // far - load-time scripts' output AND anything EVAL'd since
+                // (uncaught script errors land in the same buffer, reported
+                // by `Context::eval` itself). Read-only as far as rendering
+                // goes: no re-render, no frame publish. Draining means a
+                // second CONSOLE only returns messages logged after the
+                // first - devtools-console semantics, and what bounds this
+                // from growing forever across a long session (the buffer is
+                // additionally capped inside js-runtime). Message text is
+                // flattened (newlines -> spaces, our separator -> slashes)
+                // because the reply must be one protocol line.
+                let joined = page
+                    .ctx
+                    .take_console_messages()
+                    .iter()
+                    .map(|m| {
+                        format!(
+                            "{}:{}",
+                            m.level.as_str(),
+                            m.text.replace('\n', " ").replace('|', "/")
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" | ");
+                if joined.is_empty() {
+                    let _ = writeln!(stdout, "MESSAGES");
+                } else {
+                    let _ = writeln!(stdout, "MESSAGES {joined}");
+                }
+                let _ = stdout.flush();
             } else if line == "QUIT" {
                 break 'render_loop;
             }

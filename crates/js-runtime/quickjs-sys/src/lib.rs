@@ -252,6 +252,9 @@ extern "C" {
     /// Sets the per-context prototype used by `JS_NewObjectClass` for
     /// `class_id`. Takes ownership of `obj`.
     pub fn JS_SetClassProto(ctx: *mut JSContext, class_id: JSClassID, obj: JSValue);
+    /// Returns the per-context prototype previously set via
+    /// `JS_SetClassProto` for `class_id`. Returns a new reference.
+    pub fn JS_GetClassProto(ctx: *mut JSContext, class_id: JSClassID) -> JSValue;
 
     /// Only supported for custom classes (`class_id >= JS_CLASS_INIT_COUNT`,
     /// true for every ID `JS_NewClassID` hands out). Returns `< 0` if `obj`

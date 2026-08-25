@@ -28,7 +28,7 @@
 use std::path::Path;
 
 use bytes::Bytes;
-use http_body_util::{BodyExt, Empty};
+use http_body_util::{BodyExt, Full};
 use hyper::header::{HeaderName, HeaderValue};
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
@@ -80,8 +80,27 @@ pub fn get(url: &str) -> Result<Response, Error> {
 /// Same as [`get`], with `extra_headers` (name, value) pairs attached to
 /// the request — e.g. `("Cookie", "session=abc123")`.
 pub fn get_with_headers(url: &str, extra_headers: &[(&str, &str)]) -> Result<Response, Error> {
+    let owned: Vec<(String, String)> = extra_headers
+        .iter()
+        .map(|(n, v)| ((*n).to_string(), (*v).to_string()))
+        .collect();
+    request("GET", url, &owned, None)
+}
+
+/// Performs an arbitrary-method HTTP request with an optional request body,
+/// blocking the calling thread until the response body is fully read.
+/// `extra_headers` pairs are attached verbatim (a caller adding
+/// `Content-Length`/`Content-Type` for a body is responsible for them being
+/// sane; hyper computes/framing handles length itself for `Full<Bytes>`
+/// bodies). No redirect following, same as [`get`].
+pub fn request(
+    method: &str,
+    url: &str,
+    extra_headers: &[(String, String)],
+    body: Option<Vec<u8>>,
+) -> Result<Response, Error> {
     let runtime = tokio::runtime::Runtime::new().map_err(|e| Error::Request(e.to_string()))?;
-    runtime.block_on(get_async(url, extra_headers))
+    runtime.block_on(request_async(method, url, extra_headers, body))
 }
 
 /// Fetches `url` and writes the response body to `dest` (created or
@@ -110,10 +129,17 @@ pub fn download_with_headers(
     })
 }
 
-async fn get_async(url: &str, extra_headers: &[(&str, &str)]) -> Result<Response, Error> {
+async fn request_async(
+    method: &str,
+    url: &str,
+    extra_headers: &[(String, String)],
+    body: Option<Vec<u8>>,
+) -> Result<Response, Error> {
     let uri: hyper::Uri = url
         .parse()
         .map_err(|e: hyper::http::uri::InvalidUri| Error::InvalidUrl(e.to_string()))?;
+    let method = hyper::Method::from_bytes(method.as_bytes())
+        .map_err(|e| Error::Request(format!("invalid method {method:?}: {e}")))?;
 
     let https = hyper_rustls::HttpsConnectorBuilder::new()
         .with_native_roots()
@@ -121,17 +147,18 @@ async fn get_async(url: &str, extra_headers: &[(&str, &str)]) -> Result<Response
         .https_or_http()
         .enable_http1()
         .build();
-    let client: Client<_, Empty<Bytes>> = Client::builder(TokioExecutor::new()).build(https);
+    let client: Client<_, Full<Bytes>> = Client::builder(TokioExecutor::new()).build(https);
 
-    let mut request = hyper::Request::get(uri)
-        .body(Empty::<Bytes>::new())
-        .map_err(|e| Error::Request(e.to_string()))?;
+    let mut builder = hyper::Request::builder().method(method).uri(uri.clone());
     for (name, value) in extra_headers {
         let name =
             HeaderName::from_bytes(name.as_bytes()).map_err(|e| Error::Request(e.to_string()))?;
         let value = HeaderValue::from_str(value).map_err(|e| Error::Request(e.to_string()))?;
-        request.headers_mut().insert(name, value);
+        builder = builder.header(name, value);
     }
+    let request = builder
+        .body(Full::new(Bytes::from(body.unwrap_or_default())))
+        .map_err(|e| Error::Request(e.to_string()))?;
 
     let res = client
         .request(request)

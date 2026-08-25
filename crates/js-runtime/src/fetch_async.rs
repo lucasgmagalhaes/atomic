@@ -39,6 +39,15 @@ struct PendingFetch {
     receiver: mpsc::Receiver<Result<net::Response, net::Error>>,
 }
 
+/// A fully-owned request description handed to the background thread —
+/// nothing in it borrows from JS-land. Fields are read by `fetch_sync`
+/// too, so they're crate-visible.
+pub(crate) struct RequestSpec {
+    pub(crate) method: String,
+    pub(crate) headers: Vec<(String, String)>,
+    pub(crate) body: Option<Vec<u8>>,
+}
+
 struct PendingXhr {
     xhr_obj: sys::JSValue,
     url: String,
@@ -80,6 +89,10 @@ unsafe fn read_js_string(ctx: *mut sys::JSContext, val: sys::JSValue) -> Option<
 
 unsafe fn new_js_string(ctx: *mut sys::JSContext, s: &str) -> sys::JSValue {
     sys::JS_NewStringLen(ctx, s.as_ptr() as *const std::os::raw::c_char, s.len())
+}
+
+unsafe fn throw_type_error(ctx: *mut sys::JSContext, message: &str) -> sys::JSValue {
+    sys::JS_Throw(ctx, new_js_string(ctx, message))
 }
 
 unsafe fn set_str(ctx: *mut sys::JSContext, obj: sys::JSValue, key: &str, val: &str) {
@@ -138,6 +151,109 @@ unsafe fn build_response_object(
     obj
 }
 
+/// Reads the per-spec `RequestInit` subset this engine supports:
+/// `method` (uppercased, default `"GET"`), `headers` (a plain object of
+/// name → string value pairs), and `body` (a string, or a FormData
+/// instance serialized to multipart bytes with its boundary `Content-Type`
+/// auto-set unless the caller already supplied one). Unknown options and
+/// non-string header values are silently ignored (documented deviation).
+/// Pure JS-value parsing with no side effects, so `fetch_sync` reuses it.
+pub(crate) unsafe fn read_request_init(
+    ctx: *mut sys::JSContext,
+    init: sys::JSValue,
+) -> RequestSpec {
+    let mut method = "GET".to_string();
+    let mut headers: Vec<(String, String)> = Vec::new();
+    let mut body: Option<Vec<u8>> = None;
+    if init.tag != sys::JS_TAG_OBJECT {
+        return RequestSpec {
+            method,
+            headers,
+            body,
+        };
+    }
+    let method_val = get_prop(ctx, init, "method");
+    if let Some(text) = read_js_string(ctx, method_val) {
+        if !text.is_empty() {
+            method = text.to_ascii_uppercase();
+        }
+    }
+    sys::JS_FreeValue(ctx, method_val);
+
+    // Caller headers first so a FormData's derived Content-Type can't
+    // clobber one the script set explicitly.
+    let headers_val = get_prop(ctx, init, "headers");
+    if headers_val.tag == sys::JS_TAG_OBJECT {
+        let mut tab: *mut sys::JSPropertyEnum = std::ptr::null_mut();
+        let mut len: u32 = 0;
+        if sys::JS_GetOwnPropertyNames(
+            ctx,
+            &mut tab,
+            &mut len,
+            headers_val,
+            sys::JS_GPN_STRING_ENUM,
+        ) >= 0
+            && !tab.is_null()
+        {
+            for entry in std::slice::from_raw_parts(tab, len as usize) {
+                let mut name_len: usize = 0;
+                let name_ptr = sys::JS_AtomToCStringLen(ctx, &mut name_len, entry.atom);
+                if name_ptr.is_null() {
+                    continue;
+                }
+                let bytes = std::slice::from_raw_parts(name_ptr as *const u8, name_len);
+                let key = String::from_utf8_lossy(bytes).into_owned();
+                sys::JS_FreeCString(ctx, name_ptr);
+                let prop_val = sys::JS_GetProperty(ctx, headers_val, entry.atom);
+                if let Some(value) = read_js_string(ctx, prop_val) {
+                    headers.push((key, value));
+                }
+                sys::JS_FreeValue(ctx, prop_val);
+            }
+            sys::JS_FreePropertyEnum(ctx, tab, len);
+        }
+    }
+    sys::JS_FreeValue(ctx, headers_val);
+
+    let body_val = get_prop(ctx, init, "body");
+    match body_val.tag {
+        sys::JS_TAG_STRING => {
+            if let Some(text) = read_js_string(ctx, body_val) {
+                // Per-spec default content type for a string body.
+                if !headers
+                    .iter()
+                    .any(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+                {
+                    headers.push((
+                        "Content-Type".to_string(),
+                        "text/plain;charset=UTF-8".to_string(),
+                    ));
+                }
+                body = Some(text.into_bytes());
+            }
+        }
+        sys::JS_TAG_OBJECT => {
+            if let Some(serialized) = crate::form_data::serialize(ctx, body_val) {
+                if !headers
+                    .iter()
+                    .any(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+                {
+                    headers.push(("Content-Type".to_string(), serialized.content_type));
+                }
+                body = Some(serialized.body);
+            }
+        }
+        _ => {}
+    }
+    sys::JS_FreeValue(ctx, body_val);
+
+    RequestSpec {
+        method,
+        headers,
+        body,
+    }
+}
+
 unsafe extern "C" fn fetch(
     ctx: *mut sys::JSContext,
     _this_val: sys::JSValue,
@@ -170,16 +286,30 @@ unsafe extern "C" fn fetch(
         sys::JS_FreeValue(ctx, resolve);
         return promise;
     }
+    let mut spec = if argc >= 2 {
+        read_request_init(ctx, *argv.add(1))
+    } else {
+        RequestSpec {
+            method: "GET".to_string(),
+            headers: Vec::new(),
+            body: None,
+        }
+    };
+    // Referrer is a browser-level header — appended last so it can't be
+    // overridden by script-supplied headers (matches fetch_sync).
+    if let Some(referrer) = crate::cors::referrer_header(ctx, &url) {
+        spec.headers.push(("Referer".to_string(), referrer));
+    }
 
-    let referrer = crate::cors::referrer_header(ctx, &url);
     let (tx, rx) = mpsc::channel();
     let request_url = url.clone();
     thread::spawn(move || {
-        let headers: Vec<(&str, &str)> = referrer
-            .as_deref()
-            .map(|r| vec![("Referer", r)])
-            .unwrap_or_default();
-        let _ = tx.send(net::get_with_headers(&url, &headers));
+        let _ = tx.send(net::request(
+            &spec.method,
+            &url,
+            &spec.headers,
+            spec.body.take(),
+        ));
     });
 
     with_state(ctx, |s| {
@@ -222,7 +352,8 @@ unsafe extern "C" fn xhr_open(
 ) -> sys::JSValue {
     if argc >= 2 {
         if let Some(method) = read_js_string(ctx, *argv) {
-            set_str(ctx, this_val, "_method", &method);
+            let upper = method.to_ascii_uppercase();
+            set_str(ctx, this_val, "_method", &upper);
         }
         if let Some(url) = read_js_string(ctx, *argv.add(1)) {
             set_str(ctx, this_val, "_url", &url);
@@ -232,11 +363,46 @@ unsafe extern "C" fn xhr_open(
     sys::js_undefined()
 }
 
+/// `setRequestHeader(name, value)` — accumulates into a plain object
+/// stored on the XHR instance (`_headers`), applied at `send` time.
+unsafe extern "C" fn xhr_set_request_header(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 2 {
+        return throw_type_error(ctx, "setRequestHeader expects a name and a value");
+    }
+    let Some(name) = read_js_string(ctx, *argv) else {
+        return throw_type_error(ctx, "header name must be a string");
+    };
+    let Some(value) = read_js_string(ctx, *argv.add(1)) else {
+        return throw_type_error(ctx, "header value must be a string");
+    };
+    let key = CString::new("_headers").unwrap();
+    let mut headers_obj = sys::JS_GetPropertyStr(ctx, this_val, key.as_ptr());
+    if headers_obj.tag != sys::JS_TAG_OBJECT {
+        sys::JS_FreeValue(ctx, headers_obj);
+        headers_obj = sys::JS_NewObject(ctx);
+        sys::JS_SetPropertyStr(
+            ctx,
+            this_val,
+            key.as_ptr(),
+            sys::JS_DupValue(ctx, headers_obj),
+        );
+    }
+    let cname = CString::new(name).unwrap();
+    sys::JS_SetPropertyStr(ctx, headers_obj, cname.as_ptr(), new_js_string(ctx, &value));
+    sys::JS_FreeValue(ctx, headers_obj);
+    sys::js_undefined()
+}
+
 unsafe extern "C" fn xhr_send(
     ctx: *mut sys::JSContext,
     this_val: sys::JSValue,
-    _argc: c_int,
-    _argv: *mut sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
 ) -> sys::JSValue {
     let url_val = get_prop(ctx, this_val, "_url");
     let Some(url) = read_js_string(ctx, url_val) else {
@@ -244,6 +410,66 @@ unsafe extern "C" fn xhr_send(
         return sys::js_undefined();
     };
     sys::JS_FreeValue(ctx, url_val);
+
+    // Method (uppercased at open() time; default GET when open() never
+    // ran or stored nothing), script headers, and the optional body.
+    let mut method = "GET".to_string();
+    let method_val = get_prop(ctx, this_val, "_method");
+    if let Some(stored) = read_js_string(ctx, method_val) {
+        method = stored;
+    }
+    sys::JS_FreeValue(ctx, method_val);
+    let mut headers: Vec<(String, String)> = Vec::new();
+    let headers_obj = get_prop(ctx, this_val, "_headers");
+    if headers_obj.tag == sys::JS_TAG_OBJECT {
+        let mut tab: *mut sys::JSPropertyEnum = std::ptr::null_mut();
+        let mut len: u32 = 0;
+        if sys::JS_GetOwnPropertyNames(
+            ctx,
+            &mut tab,
+            &mut len,
+            headers_obj,
+            sys::JS_GPN_STRING_ENUM,
+        ) >= 0
+            && !tab.is_null()
+        {
+            for entry in std::slice::from_raw_parts(tab, len as usize) {
+                let mut name_len: usize = 0;
+                let name_ptr = sys::JS_AtomToCStringLen(ctx, &mut name_len, entry.atom);
+                if name_ptr.is_null() {
+                    continue;
+                }
+                let bytes = std::slice::from_raw_parts(name_ptr as *const u8, name_len);
+                let key = String::from_utf8_lossy(bytes).into_owned();
+                sys::JS_FreeCString(ctx, name_ptr);
+                let prop_val = sys::JS_GetProperty(ctx, headers_obj, entry.atom);
+                if let Some(value) = read_js_string(ctx, prop_val) {
+                    headers.push((key, value));
+                }
+                sys::JS_FreeValue(ctx, prop_val);
+            }
+            sys::JS_FreePropertyEnum(ctx, tab, len);
+        }
+    }
+    sys::JS_FreeValue(ctx, headers_obj);
+    let body: Option<Vec<u8>> = if argc >= 1 {
+        match *argv {
+            val if val.tag == sys::JS_TAG_STRING => {
+                read_js_string(ctx, val).map(|text| text.into_bytes())
+            }
+            val => crate::form_data::serialize(ctx, val).map(|serialized| {
+                if !headers
+                    .iter()
+                    .any(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+                {
+                    headers.push(("Content-Type".to_string(), serialized.content_type));
+                }
+                serialized.body
+            }),
+        }
+    } else {
+        None
+    };
 
     if crate::cors::is_mixed_content_blocked(crate::cors::page_origin(ctx).as_deref(), &url)
         || crate::csp::is_request_blocked(ctx, &url)
@@ -267,15 +493,14 @@ unsafe extern "C" fn xhr_send(
         return sys::js_undefined();
     }
 
-    let referrer = crate::cors::referrer_header(ctx, &url);
+    // Referrer last, same as fetch() — browser-level, not script-settable.
+    if let Some(referrer) = crate::cors::referrer_header(ctx, &url) {
+        headers.push(("Referer".to_string(), referrer));
+    }
     let (tx, rx) = mpsc::channel();
     let request_url = url.clone();
     thread::spawn(move || {
-        let headers: Vec<(&str, &str)> = referrer
-            .as_deref()
-            .map(|r| vec![("Referer", r)])
-            .unwrap_or_default();
-        let _ = tx.send(net::get_with_headers(&url, &headers));
+        let _ = tx.send(net::request(&method, &url, &headers, body));
     });
 
     let xhr_obj = sys::JS_DupValue(ctx, this_val);
@@ -313,6 +538,7 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     let proto = sys::JS_NewObject(ctx);
     define_method(ctx, proto, "open", xhr_open, 2);
     define_method(ctx, proto, "send", xhr_send, 0);
+    define_method(ctx, proto, "setRequestHeader", xhr_set_request_header, 2);
 
     let ctor_name = CString::new("XMLHttpRequest").unwrap();
     let ctor = sys::JS_NewCFunction2(

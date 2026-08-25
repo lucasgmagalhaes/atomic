@@ -3839,7 +3839,7 @@ fn validity_flags(
         Some(min) => !value.is_empty() && char_count < min,
         None => false,
     };
-    let mut flags = vec![
+    let flags = vec![
         ("valueMissing", required && value.is_empty()),
         ("typeMismatch", false),
         ("patternMismatch", false),

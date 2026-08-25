@@ -71,8 +71,7 @@ unsafe extern "C" fn fetch_sync(
         return result;
     };
 
-    let page_origin = crate::cors::page_origin(ctx);
-    if crate::cors::is_mixed_content_blocked(page_origin.as_deref(), &url)
+    if crate::cors::is_mixed_content_blocked(crate::cors::page_origin(ctx).as_deref(), &url)
         || crate::csp::is_request_blocked(ctx, &url)
     {
         set_bool(ctx, result, "ok", false);
@@ -81,12 +80,25 @@ unsafe extern "C" fn fetch_sync(
         return result;
     }
 
-    let referrer = crate::cors::referrer_header(ctx, &url);
-    let headers: Vec<(&str, &str)> = referrer
-        .as_deref()
-        .map(|r| vec![("Referer", r)])
-        .unwrap_or_default();
-    match net::get_with_headers(&url, &headers) {
+    let mut spec = if argc >= 2 {
+        crate::fetch_async::read_request_init(ctx, *argv.add(1))
+    } else {
+        crate::fetch_async::RequestSpec {
+            method: "GET".to_string(),
+            headers: Vec::new(),
+            body: None,
+        }
+    };
+    if let Some(referrer) = crate::cors::referrer_header(ctx, &url) {
+        spec.headers.push(("Referer".to_string(), referrer));
+    }
+    let crate::fetch_async::RequestSpec {
+        method,
+        headers,
+        body,
+    } = spec;
+    let page_origin = crate::cors::page_origin(ctx);
+    match net::request(&method, &url, &headers, body) {
         Ok(response)
             if crate::cors::is_response_allowed(
                 page_origin.as_deref(),

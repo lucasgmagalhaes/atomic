@@ -25,14 +25,17 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use quickjs_sys as sys;
 
 /// `Blob` and `File` intentionally share one class/kind - see
-/// `crate::class_registry`'s docs.
-const BLOB_CLASS_KIND: &str = "Blob";
+/// `crate::class_registry`'s docs. `pub(crate)` so `form_data` can build
+/// genuine Blob instances for stored file values.
+pub(crate) const BLOB_CLASS_KIND: &str = "Blob";
 
 static NEXT_BLOB_URL_ID: AtomicU64 = AtomicU64::new(1);
 
-struct BlobInner {
-    bytes: Vec<u8>,
-    mime: String,
+/// Shared opaque layout of every `Blob`/`File` instance (and of the
+/// snapshots `form_data` stores). Fields read directly by `form_data`.
+pub(crate) struct BlobInner {
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) mime: String,
 }
 
 thread_local! {

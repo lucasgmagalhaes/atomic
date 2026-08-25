@@ -1,0 +1,18 @@
+version: 2
+
+updates:
+  # Cargo workspace at the repo root (apps/shell, xtask, crates/*) — a
+  # single entry covers every member, Dependabot resolves the whole
+  # workspace from the root Cargo.toml/Cargo.lock.
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 10
+
+  # Keep the GitHub Actions used by .github/workflows/ci.yml current too.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 10

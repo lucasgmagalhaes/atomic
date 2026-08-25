@@ -53,6 +53,94 @@ struct FormDataInner {
     entries: Vec<Entry>,
 }
 
+static NEXT_BOUNDARY_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// The `multipart/form-data` serialization of one stored entry, per the
+/// HTML spec's encoding algorithm (same shape browsers send for
+/// `new FormData(form)` POSTs).
+fn encode_entry(out: &mut Vec<u8>, boundary: &str, entry: &Entry) {
+    let safe_name = entry.name.replace('"', "%22");
+    match &entry.value {
+        EntryValue::Text(text) => {
+            out.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+            out.extend_from_slice(
+                format!("Content-Disposition: form-data; name=\"{safe_name}\"\r\n\r\n").as_bytes(),
+            );
+            out.extend_from_slice(text.as_bytes());
+            out.extend_from_slice(b"\r\n");
+        }
+        EntryValue::File {
+            bytes,
+            mime,
+            filename,
+        } => {
+            // An empty filename serializes as `filename=""` per spec
+            // (browsers also always include a filename part for file
+            // entries); a "file" with no name at all becomes "blob".
+            let name = if filename.is_empty() {
+                "blob"
+            } else {
+                filename
+            };
+            let safe_filename = name.replace('"', "%22");
+            let mime = if mime.is_empty() {
+                "application/octet-stream"
+            } else {
+                mime
+            };
+            out.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+            out.extend_from_slice(
+                format!(
+                    "Content-Disposition: form-data; name=\"{safe_name}\"; filename=\"{safe_filename}\"\r\n"
+                )
+                .as_bytes(),
+            );
+            out.extend_from_slice(format!("Content-Type: {mime}\r\n\r\n").as_bytes());
+            out.extend_from_slice(bytes);
+            out.extend_from_slice(b"\r\n");
+        }
+    }
+}
+
+/// What `fetch`/`XMLHttpRequest` need to send a FormData body: the encoded
+/// bytes plus the exact `Content-Type` header value (boundary included).
+pub(crate) struct SerializedForm {
+    pub content_type: String,
+    pub body: Vec<u8>,
+}
+
+/// Serializes this FormData instance to `multipart/form-data` bytes.
+/// Returns `None` when `value` isn't a FormData instance (or no class is
+/// registered yet) — callers treat that as "not a form body".
+pub(crate) unsafe fn serialize(
+    ctx: *mut sys::JSContext,
+    value: sys::JSValue,
+) -> Option<SerializedForm> {
+    if value.tag != sys::JS_TAG_OBJECT {
+        return None;
+    }
+    let class_id =
+        crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), FORM_DATA_CLASS_KIND);
+    if class_id == 0 {
+        return None;
+    }
+    let ptr = sys::JS_GetOpaque(value, class_id) as *mut FormDataInner;
+    if ptr.is_null() {
+        return None;
+    }
+    let id = NEXT_BOUNDARY_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let boundary = format!("----nimbleFormData{id:016x}");
+    let mut body = Vec::new();
+    for entry in &(*ptr).entries {
+        encode_entry(&mut body, &boundary, entry);
+    }
+    body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+    Some(SerializedForm {
+        content_type: format!("multipart/form-data; boundary={boundary}"),
+        body,
+    })
+}
+
 unsafe fn read_js_string(ctx: *mut sys::JSContext, val: sys::JSValue) -> Option<String> {
     let mut len: usize = 0;
     let ptr = sys::JS_ToCStringLen2(ctx, &mut len, val, false);

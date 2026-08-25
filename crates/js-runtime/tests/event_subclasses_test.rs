@@ -108,6 +108,32 @@ fn focus_event_carries_related_target_and_defaults() {
 }
 
 #[test]
+fn input_event_carries_fields_and_defaults() {
+    let rt = Runtime::new();
+    let ctx = context_with_empty_dom(&rt);
+    let result = ctx
+        .eval(
+            "(() => { const e = new InputEvent('beforeinput', { data: 'a', inputType: 'insertText', isComposing: true }); return `${e.data},${e.inputType},${e.isComposing},${e instanceof Event}`; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "a,insertText,true,true");
+}
+
+#[test]
+fn input_event_without_options_defaults_data_to_null() {
+    let rt = Runtime::new();
+    let ctx = context_with_empty_dom(&rt);
+    let result = ctx
+        .eval(
+            "(() => { const e = new InputEvent('input'); return `${e.data === null},${e.inputType},${e.isComposing}`; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "true,,false");
+}
+
+#[test]
 fn custom_event_dispatches_through_generic_event_target_machinery() {
     let mut d = dom::Dom::new();
     let root = d.root();

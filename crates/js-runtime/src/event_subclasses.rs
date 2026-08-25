@@ -1,4 +1,4 @@
-//! `CustomEvent`/`KeyboardEvent`/`PointerEvent`/`MouseEvent`/`FocusEvent` —
+//! `CustomEvent`/`KeyboardEvent`/`PointerEvent`/`MouseEvent`/`FocusEvent`/`InputEvent` —
 //! thin globals built on top of `events::create_event`. None of these know
 //! how `EventState` is represented; the subclass-specific fields (`detail`,
 //! `key`, `pointerId`, `clientX`, `relatedTarget`, ...) are plain own data
@@ -462,6 +462,49 @@ unsafe extern "C" fn focus_event_constructor(
     event
 }
 
+unsafe extern "C" fn input_event_constructor(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let kind = match read_type_arg(ctx, argc, argv) {
+        Ok(k) => k,
+        Err(e) => return e,
+    };
+    let options = options_arg(argc, argv);
+    let Some(bubbles) = read_bool_option(ctx, options, "bubbles", false) else {
+        return sys::js_exception();
+    };
+    let Some(cancelable) = read_bool_option(ctx, options, "cancelable", false) else {
+        return sys::js_exception();
+    };
+    let Some(data) = read_value_option(ctx, options, "data") else {
+        return sys::js_exception();
+    };
+    let Some(input_type) = read_string_option(ctx, options, "inputType", "") else {
+        sys::JS_FreeValue(ctx, data);
+        return sys::js_exception();
+    };
+    let Some(is_composing) = read_bool_option(ctx, options, "isComposing", false) else {
+        sys::JS_FreeValue(ctx, data);
+        return sys::js_exception();
+    };
+
+    let event = crate::events::create_event(ctx, &kind, bubbles, cancelable);
+    if sys::js_is_exception(&event) {
+        sys::JS_FreeValue(ctx, data);
+        return event;
+    }
+    set_value_prop(ctx, event, "data", data);
+    set_string_prop(ctx, event, "inputType", &input_type);
+    set_bool_prop(ctx, event, "isComposing", is_composing);
+    let proto = constructor_prototype(ctx, "InputEvent");
+    sys::JS_SetPrototype(ctx, event, proto);
+    sys::JS_FreeValue(ctx, proto);
+    event
+}
+
 /// Registers one `name` global: a plain prototype object chained onto
 /// `Event.prototype` (so `instanceof Event` and inherited accessors like
 /// `preventDefault`/`type` keep working — see `events.rs::register`'s own
@@ -502,4 +545,5 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     register_subclass(ctx, "PointerEvent", pointer_event_constructor);
     register_subclass(ctx, "MouseEvent", mouse_event_constructor);
     register_subclass(ctx, "FocusEvent", focus_event_constructor);
+    register_subclass(ctx, "InputEvent", input_event_constructor);
 }

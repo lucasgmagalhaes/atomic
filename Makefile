@@ -16,7 +16,7 @@ else
 endif
 
 .PHONY: help build build-release test test-verbose check run run-release \
-        fmt fmt-check lint clean update doc graphify
+        fmt fmt-check lint clean update doc graphify auto-loop auto-stop
 
 help:
 	@echo "Nimble - make targets:"
@@ -34,6 +34,8 @@ help:
 	@echo "  doc            cargo doc --workspace --no-deps --open"
 	@echo "  graphify       refresh the local graphify knowledge graph"
 	@echo "  clean          cargo clean"
+	@echo "  auto-loop      run the autonomous coding loop in the foreground (see .opencode/)"
+	@echo "  auto-stop      signal the autonomous loop to stop after its current step"
 
 build:
 	$(CARGO) build --workspace
@@ -76,3 +78,11 @@ graphify:
 
 clean:
 	$(CARGO) clean
+
+auto-loop:
+	@if exist .opencode\STOP del .opencode\STOP
+	powershell -NoProfile -ExecutionPolicy Bypass -File .opencode/autonomous-loop.ps1
+
+auto-stop:
+	@echo stop > .opencode/STOP
+	@echo "STOP flag set - loop will exit after its current step"

@@ -25,6 +25,7 @@ pub enum NodeData {
     },
     Text(String),
     Comment(String),
+    DocumentFragment,
 }
 
 #[derive(Debug, Clone)]
@@ -154,6 +155,10 @@ impl Dom {
 
     pub fn create_comment(&mut self, text: &str) -> NodeId {
         self.insert(NodeData::Comment(text.to_string()))
+    }
+
+    pub fn create_document_fragment(&mut self) -> NodeId {
+        self.insert(NodeData::DocumentFragment)
     }
 
     pub fn append_child(&mut self, parent: NodeId, child: NodeId) {
@@ -607,7 +612,7 @@ impl Dom {
                 out.push_str(tag);
                 out.push('>');
             }
-            NodeData::Document => {
+            NodeData::Document | NodeData::DocumentFragment => {
                 for &child in &node.children {
                     self.serialize_into(child, out);
                 }
@@ -664,6 +669,153 @@ impl Dom {
         self.contains(self.root, id)
     }
 
+    /// Real `Node.prototype.compareDocumentPosition(other)`: returns a
+    /// bitmask describing the two nodes' relative document position.
+    /// Constants match the DOM spec values:
+    ///   0x01 = DOCUMENT_POSITION_DISCONNECTED
+    ///   0x02 = DOCUMENT_POSITION_PRECEDING
+    ///   0x04 = DOCUMENT_POSITION_FOLLOWING
+    ///   0x08 = DOCUMENT_POSITION_CONTAINS
+    ///   0x10 = DOCUMENT_POSITION_CONTAINED_BY
+    pub fn compare_document_position(&self, a: NodeId, b: NodeId) -> i32 {
+        const DISCONNECTED: i32 = 0x01;
+        const PRECEDING: i32 = 0x02;
+        const FOLLOWING: i32 = 0x04;
+        const CONTAINS: i32 = 0x08;
+        const CONTAINED_BY: i32 = 0x10;
+
+        if self.get(a).is_none() || self.get(b).is_none() {
+            return DISCONNECTED | PRECEDING;
+        }
+        if a == b {
+            return 0;
+        }
+
+        // Collect ancestor chain for `a` (including a itself).
+        let mut chain_a = Vec::new();
+        let mut cur = Some(a);
+        while let Some(id) = cur {
+            chain_a.push(id);
+            cur = self.get(id).and_then(|n| n.parent);
+        }
+
+        // Walk `b`'s ancestors looking for a common ancestor.
+        let mut b_cur = Some(b);
+        let mut b_chain = Vec::new();
+        while let Some(id) = b_cur {
+            b_chain.push(id);
+            if let Some(pos) = chain_a.iter().position(|&x| x == id) {
+                let common = id;
+                let a_child = if pos > 0 { chain_a[pos - 1] } else { a };
+                let b_child_pos = b_chain.len().saturating_sub(2);
+                let b_child = if b_chain.len() > 1 {
+                    b_chain[b_child_pos]
+                } else {
+                    b
+                };
+
+                if common == a {
+                    return CONTAINED_BY;
+                }
+                if common == b {
+                    return CONTAINS;
+                }
+
+                // Both are descendants of common — compare positions
+                // within common's children list.
+                if let Some(common_node) = self.get(common) {
+                    let children = &common_node.children;
+                    let a_pos = children.iter().position(|&c| c == a_child);
+                    let b_pos = children.iter().position(|&c| c == b_child);
+                    match (a_pos, b_pos) {
+                        (Some(ap), Some(bp)) => {
+                            return if ap < bp { FOLLOWING } else { PRECEDING };
+                        }
+                        _ => {
+                            return PRECEDING;
+                        }
+                    }
+                } else {
+                    return PRECEDING;
+                }
+            }
+            b_cur = self.get(id).and_then(|n| n.parent);
+        }
+
+        // No common ancestor — disconnected.
+        DISCONNECTED
+    }
+
+    /// Real `Node.prototype.normalize()`: merges adjacent text nodes and
+    /// removes empty text nodes throughout this node's subtree (bottom-up).
+    pub fn normalize(&mut self, id: NodeId) {
+        // First, recursively normalize all children (bottom-up).
+        let children = self.get(id).map(|n| n.children.clone()).unwrap_or_default();
+        for child in children {
+            self.normalize(child);
+        }
+
+        // Now merge/remove within this node's direct children.
+        // Work with a fresh snapshot each pass since removals mutate the vec.
+        loop {
+            let children = self.get(id).map(|n| n.children.clone()).unwrap_or_default();
+            let mut merged = false;
+            let mut i = 0;
+            while i < children.len() {
+                let child = children[i];
+                let is_text = self
+                    .get(child)
+                    .map(|n| matches!(&n.data, NodeData::Text(_)))
+                    .unwrap_or(false);
+                if is_text {
+                    let text = self
+                        .get(child)
+                        .and_then(|n| match &n.data {
+                            NodeData::Text(t) => Some(t.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    // Remove empty text nodes.
+                    if text.is_empty() {
+                        self.remove(child);
+                        merged = true;
+                        break;
+                    }
+                    // Merge with following text siblings.
+                    let mut j = i + 1;
+                    while j < children.len() {
+                        let next = children[j];
+                        let next_is_text = self
+                            .get(next)
+                            .map(|n| matches!(&n.data, NodeData::Text(_)))
+                            .unwrap_or(false);
+                        if !next_is_text {
+                            break;
+                        }
+                        let next_text = self
+                            .get(next)
+                            .and_then(|n| match &n.data {
+                                NodeData::Text(t) => Some(t.clone()),
+                                _ => None,
+                            })
+                            .unwrap_or_default();
+                        self.append_text(child, &next_text);
+                        self.remove(next);
+                        merged = true;
+                        j += 1;
+                    }
+                    if merged {
+                        break;
+                    }
+                }
+                i += 1;
+            }
+            if !merged {
+                break;
+            }
+        }
+    }
+
     /// Real `Node.prototype.cloneNode(deep)`, same-arena counterpart to
     /// [`Dom::adopt`] (which clones *across* two different arenas — this
     /// clones within `self`). `deep: false` clones only `node` itself
@@ -706,6 +858,20 @@ impl Dom {
             }
             NodeData::Text(text) => self.create_text(&text),
             NodeData::Comment(text) => self.create_comment(&text),
+            NodeData::DocumentFragment => {
+                let new_id = self.create_document_fragment();
+                if deep {
+                    let children = self
+                        .get(node)
+                        .map(|n| n.children.clone())
+                        .unwrap_or_default();
+                    for child in children {
+                        let cloned_child = self.clone_node(child, true);
+                        self.append_child(new_id, cloned_child);
+                    }
+                }
+                new_id
+            }
             NodeData::Document => {
                 if deep {
                     let first_child = self.get(node).and_then(|n| n.children.first().copied());
@@ -799,6 +965,14 @@ impl Dom {
             }
             NodeData::Text(text) => self.create_text(text),
             NodeData::Comment(text) => self.create_comment(text),
+            NodeData::DocumentFragment => {
+                let new_id = self.create_document_fragment();
+                for &child in &src.children {
+                    let cloned_child = self.adopt(other, child);
+                    self.append_child(new_id, cloned_child);
+                }
+                new_id
+            }
             NodeData::Document => {
                 // Not a supported input per this method's contract; best
                 // effort: adopt the first child alone since we can only

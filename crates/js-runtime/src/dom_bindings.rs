@@ -1624,6 +1624,7 @@ unsafe extern "C" fn node_type_get(
             dom::NodeData::Element { .. } => 1.0,
             dom::NodeData::Text(_) => 3.0,
             dom::NodeData::Comment(_) => 8.0,
+            dom::NodeData::DocumentFragment => 11.0,
         })
     };
     value.map(sys::js_float64).unwrap_or_else(sys::js_undefined)
@@ -1645,6 +1646,7 @@ unsafe extern "C" fn node_name_get(
             dom::NodeData::Element { tag, .. } => tag.to_ascii_uppercase(),
             dom::NodeData::Text(_) => "#text".to_owned(),
             dom::NodeData::Comment(_) => "#comment".to_owned(),
+            dom::NodeData::DocumentFragment => "#document-fragment".to_owned(),
         })
     };
     name.map(|name| new_js_string(ctx, &name))
@@ -2485,6 +2487,44 @@ unsafe extern "C" fn node_contains(
     sys::js_bool(!dom.is_null() && (*dom).contains(id, other))
 }
 
+unsafe extern "C" fn node_compare_document_position(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_float64(1.0);
+    };
+    if argc < 1 {
+        return sys::js_float64(1.0);
+    }
+    let Some(other) = node_id(ctx, *argv) else {
+        return sys::js_float64(1.0);
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return sys::js_float64(1.0);
+    }
+    sys::js_float64((*dom).compare_document_position(id, other) as f64)
+}
+
+unsafe extern "C" fn node_normalize(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    let dom = dom_opaque(ctx);
+    if !dom.is_null() {
+        (*dom).normalize(id);
+    }
+    sys::js_undefined()
+}
+
 /// Real `Node.prototype.cloneNode(deep)`. Returns a brand-new `Node` object
 /// via [`node_object`], establishing its own object identity in the cache —
 /// same as `document.createElement`/`createTextNode` do for a freshly
@@ -2845,6 +2885,12 @@ unsafe fn define_mutation_methods(ctx: *mut sys::JSContext, proto: sys::JSValue)
             node_insert_adjacent_html as sys::JSCFunction,
             2,
         ),
+        (
+            "compareDocumentPosition",
+            node_compare_document_position as sys::JSCFunction,
+            1,
+        ),
+        ("normalize", node_normalize as sys::JSCFunction, 0),
     ] {
         let name = CString::new(name).unwrap();
         let value = sys::JS_NewCFunction2(
@@ -3207,6 +3253,24 @@ unsafe extern "C" fn document_create_comment(
         return throw_type_error(ctx, "document is unavailable");
     }
     let id = (*dom).create_comment(&text);
+    node_object(
+        ctx,
+        crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NODE_CLASS_KIND),
+        id,
+    )
+}
+
+unsafe extern "C" fn document_create_document_fragment(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return throw_type_error(ctx, "document is unavailable");
+    }
+    let id = (*dom).create_document_fragment();
     node_object(
         ctx,
         crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NODE_CLASS_KIND),
@@ -3657,6 +3721,10 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
             document_query_selector_all as sys::JSCFunction,
         ),
         ("createComment", document_create_comment as sys::JSCFunction),
+        (
+            "createDocumentFragment",
+            document_create_document_fragment as sys::JSCFunction,
+        ),
         (
             "getElementsByTagName",
             document_get_elements_by_tag_name as sys::JSCFunction,

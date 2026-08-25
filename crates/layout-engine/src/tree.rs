@@ -284,7 +284,7 @@ fn collect_inline_spans(
             }
             chain.pop();
         }
-        NodeData::Comment(_) | NodeData::Document => {}
+        NodeData::Comment(_) | NodeData::Document | NodeData::DocumentFragment => {}
     }
 }
 

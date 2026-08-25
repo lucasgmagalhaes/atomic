@@ -1544,3 +1544,165 @@ fn insert_adjacent_html_rejects_bad_position_and_no_parent_cases() {
         .unwrap();
     assert_eq!(result, "true,true,ok");
 }
+
+#[test]
+fn compare_document_position_returns_following_for_later_sibling() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let a = d.create_element("div");
+    let b = d.create_element("span");
+    d.set_attribute(a, "id", "a");
+    d.set_attribute(b, "id", "b");
+    d.append_child(root, a);
+    d.append_child(root, b);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { const a = document.getElementById('a'); const b = document.getElementById('b'); return `${a.compareDocumentPosition(b) & 4},${b.compareDocumentPosition(a) & 2},${a.compareDocumentPosition(a)}`; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "4,2,0");
+}
+
+#[test]
+fn compare_document_position_contains_and_contained_by() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let parent = d.create_element("div");
+    let child = d.create_element("span");
+    d.set_attribute(parent, "id", "parent");
+    d.set_attribute(child, "id", "child");
+    d.append_child(root, parent);
+    d.append_child(parent, child);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { const p = document.getElementById('parent'); const c = document.getElementById('child'); return `${p.compareDocumentPosition(c) & 16},${c.compareDocumentPosition(p) & 8}`; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "16,8");
+}
+
+#[test]
+fn compare_document_position_disconnected_nodes() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let a = d.create_element("div");
+    let b = d.create_element("span");
+    d.set_attribute(a, "id", "a");
+    d.set_attribute(b, "id", "b");
+    d.append_child(root, a);
+    // b is detached
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { const a = document.getElementById('a'); const b = document.getElementById('b'); return `${a.compareDocumentPosition(b) & 1}`; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "1");
+}
+
+#[test]
+fn normalize_merges_adjacent_text_nodes() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let div = d.create_element("div");
+    d.append_child(root, div);
+    let t1 = d.create_text("hello");
+    let t2 = d.create_text(" world");
+    d.append_child(div, t1);
+    d.append_child(div, t2);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { const div = document.querySelector('div'); const before = div.childNodes.length; div.normalize(); return `${before},${div.textContent},${div.childNodes.length}`; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "2,hello world,1");
+}
+
+#[test]
+fn normalize_removes_empty_text_nodes() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let div = d.create_element("div");
+    d.append_child(root, div);
+    let t1 = d.create_text("a");
+    let empty = d.create_text("");
+    let t2 = d.create_text("b");
+    d.append_child(div, t1);
+    d.append_child(div, empty);
+    d.append_child(div, t2);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { const div = document.querySelector('div'); const before = div.childNodes.length; div.normalize(); return `${before},${div.textContent},${div.childNodes.length}`; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "3,ab,1");
+}
+
+#[test]
+fn normalize_does_not_merge_text_with_element_neighbor() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let div = d.create_element("div");
+    d.append_child(root, div);
+    let t1 = d.create_text("hello");
+    let span = d.create_element("span");
+    let t2 = d.create_text(" world");
+    d.append_child(div, t1);
+    d.append_child(div, span);
+    d.append_child(div, t2);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { const div = document.querySelector('div'); div.normalize(); return `${div.childNodes.length}`; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "3");
+}
+
+#[test]
+fn create_document_fragment_is_empty_and_has_correct_node_type() {
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, dom::Dom::new());
+    let result = ctx
+        .eval(
+            "(() => { const frag = document.createDocumentFragment(); return `${frag.nodeType},${frag.nodeName},${frag.childNodes.length}`; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "11,#document-fragment,0");
+}
+
+#[test]
+fn document_fragment_can_hold_children() {
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, dom::Dom::new());
+    let result = ctx
+        .eval(
+            "(() => { const frag = document.createDocumentFragment(); const div = document.createElement('div'); const span = document.createElement('span'); frag.appendChild(div); frag.appendChild(span); return `${frag.childNodes.length},${frag.firstChild.nodeName},${frag.lastChild.nodeName}`; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "2,DIV,SPAN");
+}

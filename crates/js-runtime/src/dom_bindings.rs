@@ -312,6 +312,105 @@ fn matching_nodes(
     Ok(result)
 }
 
+/// `document`/`Node.prototype`'s `getElementsByTagName`, matched directly
+/// against each `Element`'s stored tag rather than routed through the CSS
+/// selector engine (`matching_nodes`) — a plain string compare, so a tag
+/// argument containing selector metacharacters (`.`, `#`, `,`, ...) can
+/// never be reinterpreted as different selector syntax. `"*"` matches every
+/// element, mirroring the real API's universal case. Case-sensitive, same
+/// as this engine's CSS type-selector matching (`cascade.rs`'s
+/// `SimpleSelector::Type`) — a real browser's HTML-document case
+/// insensitivity isn't modeled here, consistent with that existing gap.
+fn matching_by_tag(
+    dom: &dom::Dom,
+    start: dom::NodeId,
+    tag: &str,
+    include_start: bool,
+) -> Result<Vec<dom::NodeId>, &'static str> {
+    let mut result = Vec::new();
+    let mut stack = vec![start];
+    let mut visits = 0usize;
+    while let Some(node_id) = stack.pop() {
+        visits += 1;
+        if visits > MAX_SELECTOR_VISITS {
+            return Err("traversal limit exceeded");
+        }
+        let node = dom.get(node_id).ok_or("invalid DOM node")?;
+        if include_start || node_id != start {
+            if let dom::NodeData::Element { tag: node_tag, .. } = &node.data {
+                if tag == "*" || node_tag == tag {
+                    result.push(node_id);
+                    if result.len() > MAX_SELECTOR_RESULTS {
+                        return Err("result limit exceeded");
+                    }
+                }
+            }
+        }
+        stack.extend(node.children.iter().rev().copied());
+    }
+    Ok(result)
+}
+
+/// `document`/`Node.prototype`'s `getElementsByClassName`, matched by real
+/// token-set membership (every whitespace-separated token in `class_name`
+/// must be present in an element's own `class` attribute tokens) — the
+/// real spec algorithm, not a CSS class-selector compound built and run
+/// through the selector engine, which would let a class name containing a
+/// selector metacharacter (a literal `.`/`#`/`,` in an authored class
+/// token, valid HTML even if unusual) be misinterpreted as more selector
+/// syntax instead of one literal token.
+fn matching_by_class(
+    dom: &dom::Dom,
+    start: dom::NodeId,
+    class_name: &str,
+    include_start: bool,
+) -> Result<Vec<dom::NodeId>, &'static str> {
+    let wanted = class_tokens(class_name);
+    if wanted.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut result = Vec::new();
+    let mut stack = vec![start];
+    let mut visits = 0usize;
+    while let Some(node_id) = stack.pop() {
+        visits += 1;
+        if visits > MAX_SELECTOR_VISITS {
+            return Err("traversal limit exceeded");
+        }
+        let node = dom.get(node_id).ok_or("invalid DOM node")?;
+        if include_start || node_id != start {
+            if let dom::NodeData::Element { attributes, .. } = &node.data {
+                let have = class_tokens(attributes.get("class").map(String::as_str).unwrap_or(""));
+                if wanted.iter().all(|token| have.contains(token)) {
+                    result.push(node_id);
+                    if result.len() > MAX_SELECTOR_RESULTS {
+                        return Err("result limit exceeded");
+                    }
+                }
+            }
+        }
+        stack.extend(node.children.iter().rev().copied());
+    }
+    Ok(result)
+}
+
+/// Wraps each id in `nodes` as a real `Node` object (via the identity
+/// cache) into a fresh JS array, in the given order — the shared tail end
+/// of `query_selector_all`/`elements_by_tag_name`/`elements_by_class_name`.
+unsafe fn node_array(ctx: *mut sys::JSContext, nodes: Vec<dom::NodeId>) -> sys::JSValue {
+    let array = sys::JS_NewArray(ctx);
+    let class_id = crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NODE_CLASS_KIND);
+    for (index, node_id) in nodes.into_iter().enumerate() {
+        sys::JS_SetPropertyUint32(
+            ctx,
+            array,
+            index as u32,
+            node_object(ctx, class_id, node_id),
+        );
+    }
+    array
+}
+
 unsafe fn query_selector_all(
     ctx: *mut sys::JSContext,
     start: dom::NodeId,
@@ -326,17 +425,39 @@ unsafe fn query_selector_all(
         Ok(nodes) => nodes,
         Err(message) => return throw_type_error(ctx, message),
     };
-    let array = sys::JS_NewArray(ctx);
-    let class_id = crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NODE_CLASS_KIND);
-    for (index, node_id) in nodes.into_iter().enumerate() {
-        sys::JS_SetPropertyUint32(
-            ctx,
-            array,
-            index as u32,
-            node_object(ctx, class_id, node_id),
-        );
+    node_array(ctx, nodes)
+}
+
+unsafe fn elements_by_tag_name(
+    ctx: *mut sys::JSContext,
+    start: dom::NodeId,
+    tag: &str,
+    include_start: bool,
+) -> sys::JSValue {
+    let dom_ptr = dom_opaque(ctx);
+    if dom_ptr.is_null() {
+        return sys::JS_NewArray(ctx);
     }
-    array
+    match matching_by_tag(&*dom_ptr, start, tag, include_start) {
+        Ok(nodes) => node_array(ctx, nodes),
+        Err(message) => throw_type_error(ctx, message),
+    }
+}
+
+unsafe fn elements_by_class_name(
+    ctx: *mut sys::JSContext,
+    start: dom::NodeId,
+    class_name: &str,
+    include_start: bool,
+) -> sys::JSValue {
+    let dom_ptr = dom_opaque(ctx);
+    if dom_ptr.is_null() {
+        return sys::JS_NewArray(ctx);
+    }
+    match matching_by_class(&*dom_ptr, start, class_name, include_start) {
+        Ok(nodes) => node_array(ctx, nodes),
+        Err(message) => throw_type_error(ctx, message),
+    }
 }
 
 unsafe extern "C" fn node_finalizer(rt: *mut sys::JSRuntime, val: sys::JSValue) {
@@ -1056,6 +1177,102 @@ unsafe extern "C" fn node_name_get(
         .unwrap_or_else(sys::js_undefined)
 }
 
+/// Real (Element-only, per spec) `tagName` — uppercased, matching how a
+/// real browser reports an HTML element's tag name regardless of source
+/// case. Exposed generically on this engine's one `Node` class rather than
+/// a real `Element` subclass (documented deviation, same as every other
+/// Element-only property this file already exposes on `Node.prototype`,
+/// e.g. `checked`/`href`): `undefined` for a non-`Element` node, matching
+/// `value`'s own "generic host, permissive off-type result" convention.
+unsafe extern "C" fn node_tag_name_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return sys::js_undefined();
+    }
+    match (*dom).get(id).map(|node| &node.data) {
+        Some(dom::NodeData::Element { tag, .. }) => new_js_string(ctx, &tag.to_ascii_uppercase()),
+        _ => sys::js_undefined(),
+    }
+}
+
+/// Real (Element-only) `localName` — the tag exactly as stored, no case
+/// change. This engine stores a tag's case as given at creation time
+/// (`document.createElement`) or already-lowercased by `html5ever`
+/// (parsed markup), so unlike `tagName` there's no forced uppercasing.
+unsafe extern "C" fn node_local_name_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return sys::js_undefined();
+    }
+    match (*dom).get(id).map(|node| &node.data) {
+        Some(dom::NodeData::Element { tag, .. }) => new_js_string(ctx, tag),
+        _ => sys::js_undefined(),
+    }
+}
+
+/// Real (Element-only) `namespaceURI`. This engine never parses or creates
+/// SVG/MathML foreign content (`html::sink`'s own documented scope cut —
+/// no foreign-content handling exists), so every `Element` it can produce
+/// is genuinely in the HTML namespace; `null` for anything else, matching
+/// a real browser's `Node.namespaceURI` for non-`Element` node kinds.
+unsafe extern "C" fn node_namespace_uri_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_null();
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return sys::js_null();
+    }
+    match (*dom).get(id).map(|node| &node.data) {
+        Some(dom::NodeData::Element { .. }) => new_js_string(ctx, "http://www.w3.org/1999/xhtml"),
+        _ => sys::js_null(),
+    }
+}
+
+/// Real `Node.prototype.isConnected`: whether this node is still attached
+/// to the document tree. `false` for a stale/detached node or a `this`
+/// that isn't a node at all — same permissive style every other read-only
+/// accessor here uses for a malformed `this`.
+unsafe extern "C" fn node_is_connected_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_bool(false);
+    };
+    let dom = dom_opaque(ctx);
+    sys::js_bool(!dom.is_null() && (*dom).is_connected(id))
+}
+
+/// Real `Node.prototype.ownerDocument`: this engine has exactly one
+/// `Document` per context (no iframes, see `window.rs`'s own doc comment),
+/// so every node's owner is the same shared `document` object every other
+/// binding in this crate (`window`, `location`, ...) already hands back —
+/// not a `Node`-class wrapper around the DOM's own root, which would be a
+/// different, unrelated object identity from `document.getElementById`
+/// callers already hold.
+unsafe extern "C" fn node_owner_document_get(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+) -> sys::JSValue {
+    crate::document::get_or_create(ctx)
+}
+
 unsafe fn define_navigation(ctx: *mut sys::JSContext, proto: sys::JSValue) {
     for (name, getter) in [
         ("parentNode", node_parent_get as Getter),
@@ -1066,6 +1283,11 @@ unsafe fn define_navigation(ctx: *mut sys::JSContext, proto: sys::JSValue) {
         ("childNodes", node_children_get as Getter),
         ("nodeType", node_type_get as Getter),
         ("nodeName", node_name_get as Getter),
+        ("tagName", node_tag_name_get as Getter),
+        ("localName", node_local_name_get as Getter),
+        ("namespaceURI", node_namespace_uri_get as Getter),
+        ("isConnected", node_is_connected_get as Getter),
+        ("ownerDocument", node_owner_document_get as Getter),
     ] {
         let name = CString::new(name).unwrap();
         let getter = sys::JS_NewCFunction2(
@@ -1656,6 +1878,107 @@ unsafe extern "C" fn node_remove_child(
     sys::JS_DupValue(ctx, child_value)
 }
 
+/// Real `Node.prototype.contains(other)`: `true` when `other` is this node
+/// itself or a descendant of it. A non-`Node` (or missing) argument, or a
+/// `this` that isn't attached to a live document, is `false` rather than a
+/// thrown error — same permissive style `matches`/`closest` already use for
+/// a malformed `this`/argument.
+unsafe extern "C" fn node_contains(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_bool(false);
+    };
+    if argc < 1 {
+        return sys::js_bool(false);
+    }
+    let Some(other) = node_id(ctx, *argv) else {
+        return sys::js_bool(false);
+    };
+    let dom = dom_opaque(ctx);
+    sys::js_bool(!dom.is_null() && (*dom).contains(id, other))
+}
+
+/// Real `Node.prototype.cloneNode(deep)`. Returns a brand-new `Node` object
+/// via [`node_object`], establishing its own object identity in the cache —
+/// same as `document.createElement`/`createTextNode` do for a freshly
+/// created id, not the identity of the node it was cloned from.
+unsafe extern "C" fn node_clone_node(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return throw_type_error(ctx, "cloneNode target must be a node");
+    };
+    let deep = argc > 0 && sys::JS_ToBool(ctx, *argv) != 0;
+    let dom = dom_opaque(ctx);
+    if dom.is_null() || (*dom).get(id).is_none() {
+        return throw_type_error(ctx, "node is no longer attached to this document");
+    }
+    let new_id = (*dom).clone_node(id, deep);
+    node_object(
+        ctx,
+        crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NODE_CLASS_KIND),
+        new_id,
+    )
+}
+
+/// Real `Node.prototype.replaceChild(newChild, oldChild)`. Evicts
+/// `oldChild`'s cached JS state (identity, listeners, `classList`/`dataset`/
+/// `attributes` objects) first — same convention `removeChild`/`remove`
+/// already use before a subtree stops existing — but only once membership
+/// is confirmed, so a rejected call (old child not actually a child) never
+/// evicts a node that's still fully attached elsewhere. Rejects `newChild`
+/// being this node's own ancestor, same `HierarchyRequestError`-style check
+/// `appendChild`/`insertBefore` already make.
+unsafe extern "C" fn node_replace_child(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 2 {
+        return throw_type_error(ctx, "new child and old child are required");
+    }
+    let Some(parent) = node_id(ctx, this_val) else {
+        return throw_type_error(ctx, "replace target must be a node");
+    };
+    let new_value = *argv;
+    let old_value = *argv.add(1);
+    let (Some(new_child), Some(old_child)) = (node_id(ctx, new_value), node_id(ctx, old_value))
+    else {
+        return throw_type_error(ctx, "replaceChild arguments must be nodes");
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null()
+        || (*dom).get(parent).is_none()
+        || (*dom).get(new_child).is_none()
+        || (*dom).get(old_child).is_none()
+    {
+        return throw_type_error(ctx, "node is no longer attached to this document");
+    }
+    if is_ancestor(&*dom, new_child, parent) {
+        return throw_type_error(ctx, "cannot insert an ancestor into its descendant");
+    }
+    let old_child_is_member = (*dom)
+        .get(parent)
+        .map(|node| node.children.contains(&old_child))
+        .unwrap_or(false);
+    if !old_child_is_member {
+        return throw_type_error(ctx, "old child is not a child of this parent");
+    }
+    if old_child != new_child {
+        evict_subtree(ctx, &*dom, old_child);
+    }
+    (*dom).replace_child(parent, new_child, old_child);
+    sys::JS_DupValue(ctx, old_value)
+}
+
 unsafe fn define_mutation_methods(ctx: *mut sys::JSContext, proto: sys::JSValue) {
     for (name, function, arity) in [
         ("appendChild", node_append_child as sys::JSCFunction, 1),
@@ -1671,6 +1994,9 @@ unsafe fn define_mutation_methods(ctx: *mut sys::JSContext, proto: sys::JSValue)
         ("insertBefore", node_insert_before as sys::JSCFunction, 2),
         ("removeChild", node_remove_child as sys::JSCFunction, 1),
         ("remove", node_remove as sys::JSCFunction, 0),
+        ("contains", node_contains as sys::JSCFunction, 1),
+        ("cloneNode", node_clone_node as sys::JSCFunction, 0),
+        ("replaceChild", node_replace_child as sys::JSCFunction, 2),
     ] {
         let name = CString::new(name).unwrap();
         let value = sys::JS_NewCFunction2(
@@ -1730,6 +2056,42 @@ unsafe extern "C" fn node_query_selector_all(
         return sys::JS_NewArray(ctx);
     };
     query_selector_all(ctx, start, &selector, false)
+}
+
+unsafe extern "C" fn node_get_elements_by_tag_name(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 1 {
+        return throw_type_error(ctx, "tag name is required");
+    }
+    let Some(tag) = read_js_string(ctx, *argv) else {
+        return throw_type_error(ctx, "tag name must be a string");
+    };
+    let Some(start) = node_id(ctx, this_val) else {
+        return sys::JS_NewArray(ctx);
+    };
+    elements_by_tag_name(ctx, start, &tag, false)
+}
+
+unsafe extern "C" fn node_get_elements_by_class_name(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 1 {
+        return throw_type_error(ctx, "class name is required");
+    }
+    let Some(class_name) = read_js_string(ctx, *argv) else {
+        return throw_type_error(ctx, "class name must be a string");
+    };
+    let Some(start) = node_id(ctx, this_val) else {
+        return sys::JS_NewArray(ctx);
+    };
+    elements_by_class_name(ctx, start, &class_name, false)
 }
 
 fn node_matches_selector(
@@ -1834,6 +2196,14 @@ unsafe fn define_selector_methods(ctx: *mut sys::JSContext, proto: sys::JSValue)
         ),
         ("matches", node_matches as sys::JSCFunction),
         ("closest", node_closest as sys::JSCFunction),
+        (
+            "getElementsByTagName",
+            node_get_elements_by_tag_name as sys::JSCFunction,
+        ),
+        (
+            "getElementsByClassName",
+            node_get_elements_by_class_name as sys::JSCFunction,
+        ),
     ] {
         let name = CString::new(name).unwrap();
         let value =
@@ -1969,6 +2339,71 @@ unsafe extern "C" fn document_create_text_node(
     )
 }
 
+unsafe extern "C" fn document_create_comment(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 1 {
+        return throw_type_error(ctx, "comment data is required");
+    }
+    let Some(text) = read_js_string(ctx, *argv) else {
+        return throw_type_error(ctx, "comment data must be a string");
+    };
+    if text.len() > MAX_TEXT_NODE_LENGTH {
+        return throw_type_error(ctx, "comment exceeds the maximum length");
+    }
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return throw_type_error(ctx, "document is unavailable");
+    }
+    let id = (*dom).create_comment(&text);
+    node_object(
+        ctx,
+        crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NODE_CLASS_KIND),
+        id,
+    )
+}
+
+unsafe extern "C" fn document_get_elements_by_tag_name(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 1 {
+        return throw_type_error(ctx, "tag name is required");
+    }
+    let Some(tag) = read_js_string(ctx, *argv) else {
+        return throw_type_error(ctx, "tag name must be a string");
+    };
+    let dom_ptr = dom_opaque(ctx);
+    if dom_ptr.is_null() {
+        return sys::JS_NewArray(ctx);
+    }
+    elements_by_tag_name(ctx, (*dom_ptr).root(), &tag, true)
+}
+
+unsafe extern "C" fn document_get_elements_by_class_name(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 1 {
+        return throw_type_error(ctx, "class name is required");
+    }
+    let Some(class_name) = read_js_string(ctx, *argv) else {
+        return throw_type_error(ctx, "class name must be a string");
+    };
+    let dom_ptr = dom_opaque(ctx);
+    if dom_ptr.is_null() {
+        return sys::JS_NewArray(ctx);
+    }
+    elements_by_class_name(ctx, (*dom_ptr).root(), &class_name, true)
+}
+
 unsafe extern "C" fn document_query_selector(
     ctx: *mut sys::JSContext,
     _this_val: sys::JSValue,
@@ -2084,6 +2519,105 @@ unsafe extern "C" fn document_document_element_get(
     }
 }
 
+unsafe extern "C" fn document_head_get(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+) -> sys::JSValue {
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return sys::js_null();
+    }
+    match matching_nodes(&*dom, (*dom).root(), "head", true) {
+        Ok(nodes) => nodes
+            .into_iter()
+            .next()
+            .map(|id| {
+                node_object(
+                    ctx,
+                    crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), NODE_CLASS_KIND),
+                    id,
+                )
+            })
+            .unwrap_or_else(sys::js_null),
+        Err(_) => sys::js_null(),
+    }
+}
+
+/// Real `document.readyState`, hardcoded to `"complete"`. This engine has
+/// no `loading`/`interactive` distinction to report — `DOMContentLoaded`/
+/// `load` already fire at the right real moments (`Context::
+/// dispatch_lifecycle_events`), but nothing tracks a mid-parse state a
+/// script reading this *during* its own execution could observe as
+/// anything other than "the document I'm running in is done". Same
+/// documented-placeholder convention `page_visibility`'s always-`"visible"`
+/// state already uses for an unmodeled real API.
+unsafe extern "C" fn document_ready_state_get(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+) -> sys::JSValue {
+    new_js_string(ctx, "complete")
+}
+
+/// Real `document.title` read side: the text content of the first
+/// `<title>` element in document order, or `""` if none exists — matches
+/// the real DOM's own fallback.
+unsafe extern "C" fn document_title_get(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+) -> sys::JSValue {
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return new_js_string(ctx, "");
+    }
+    match matching_nodes(&*dom, (*dom).root(), "title", true) {
+        Ok(nodes) => match nodes.into_iter().next() {
+            Some(id) => new_js_string(ctx, &(*dom).text_content(id)),
+            None => new_js_string(ctx, ""),
+        },
+        Err(_) => new_js_string(ctx, ""),
+    }
+}
+
+/// Real `document.title` write side: updates the first existing `<title>`
+/// element's text if one exists. Otherwise creates one and appends it to
+/// `<head>` if present, else `<html>` (`documentElement`), else the
+/// document root itself — a narrower fallback chain than the real spec's
+/// (which also handles SVG documents specially), but this engine only ever
+/// parses/builds HTML documents.
+unsafe extern "C" fn document_title_set(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    val: sys::JSValue,
+) -> sys::JSValue {
+    let dom = dom_opaque(ctx);
+    let Some(text) = read_js_string(ctx, val) else {
+        return sys::js_undefined();
+    };
+    if dom.is_null() {
+        return sys::js_undefined();
+    }
+    let existing = matching_nodes(&*dom, (*dom).root(), "title", true)
+        .ok()
+        .and_then(|nodes| nodes.into_iter().next());
+    if let Some(id) = existing {
+        (*dom).set_text_content(id, &text);
+        return sys::js_undefined();
+    }
+    let title_id = (*dom).create_element("title");
+    (*dom).set_text_content(title_id, &text);
+    let parent = matching_nodes(&*dom, (*dom).root(), "head", true)
+        .ok()
+        .and_then(|nodes| nodes.into_iter().next())
+        .or_else(|| {
+            matching_nodes(&*dom, (*dom).root(), "html", true)
+                .ok()
+                .and_then(|nodes| nodes.into_iter().next())
+        })
+        .unwrap_or_else(|| (*dom).root());
+    (*dom).append_child(parent, title_id);
+    sys::js_undefined()
+}
+
 /// Defines the real, read-only `document.activeElement` getter — backed by
 /// `dom::Dom`'s own focus state, so it reflects whatever the most recent
 /// `.focus()`/`.blur()` call (JS-driven or `profile-worker`'s coordinate
@@ -2128,6 +2662,80 @@ unsafe fn define_body(ctx: *mut sys::JSContext, document: sys::JSValue) {
         getter,
         sys::js_undefined(),
         sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE,
+    );
+    sys::JS_FreeAtom(ctx, atom);
+}
+
+unsafe fn define_head(ctx: *mut sys::JSContext, document: sys::JSValue) {
+    let name = CString::new("head").unwrap();
+    let getter = sys::JS_NewCFunction2(
+        ctx,
+        std::mem::transmute::<Getter, sys::JSCFunction>(document_head_get),
+        name.as_ptr(),
+        0,
+        sys::JS_CFUNC_GETTER,
+        0,
+    );
+    let atom = sys::JS_NewAtom(ctx, name.as_ptr());
+    sys::JS_DefinePropertyGetSet(
+        ctx,
+        document,
+        atom,
+        getter,
+        sys::js_undefined(),
+        sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE,
+    );
+    sys::JS_FreeAtom(ctx, atom);
+}
+
+unsafe fn define_ready_state(ctx: *mut sys::JSContext, document: sys::JSValue) {
+    let name = CString::new("readyState").unwrap();
+    let getter = sys::JS_NewCFunction2(
+        ctx,
+        std::mem::transmute::<Getter, sys::JSCFunction>(document_ready_state_get),
+        name.as_ptr(),
+        0,
+        sys::JS_CFUNC_GETTER,
+        0,
+    );
+    let atom = sys::JS_NewAtom(ctx, name.as_ptr());
+    sys::JS_DefinePropertyGetSet(
+        ctx,
+        document,
+        atom,
+        getter,
+        sys::js_undefined(),
+        sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE,
+    );
+    sys::JS_FreeAtom(ctx, atom);
+}
+
+unsafe fn define_title(ctx: *mut sys::JSContext, document: sys::JSValue) {
+    let name = CString::new("title").unwrap();
+    let getter = sys::JS_NewCFunction2(
+        ctx,
+        std::mem::transmute::<Getter, sys::JSCFunction>(document_title_get),
+        name.as_ptr(),
+        0,
+        sys::JS_CFUNC_GETTER,
+        0,
+    );
+    let setter = sys::JS_NewCFunction2(
+        ctx,
+        std::mem::transmute::<Setter, sys::JSCFunction>(document_title_set),
+        name.as_ptr(),
+        1,
+        sys::JS_CFUNC_SETTER,
+        0,
+    );
+    let atom = sys::JS_NewAtom(ctx, name.as_ptr());
+    sys::JS_DefinePropertyGetSet(
+        ctx,
+        document,
+        atom,
+        getter,
+        setter,
+        sys::JS_PROP_HAS_GET | sys::JS_PROP_HAS_SET | sys::JS_PROP_CONFIGURABLE,
     );
     sys::JS_FreeAtom(ctx, atom);
 }
@@ -2200,6 +2808,18 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
             "querySelectorAll",
             document_query_selector_all as sys::JSCFunction,
         ),
+        (
+            "createComment",
+            document_create_comment as sys::JSCFunction,
+        ),
+        (
+            "getElementsByTagName",
+            document_get_elements_by_tag_name as sys::JSCFunction,
+        ),
+        (
+            "getElementsByClassName",
+            document_get_elements_by_class_name as sys::JSCFunction,
+        ),
     ] {
         let name = CString::new(name).unwrap();
         let value =
@@ -2208,6 +2828,9 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     }
     define_active_element(ctx, document);
     define_body(ctx, document);
+    define_head(ctx, document);
+    define_title(ctx, document);
+    define_ready_state(ctx, document);
     define_document_element(ctx, document);
 
     sys::JS_FreeValue(ctx, document);

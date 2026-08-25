@@ -38,6 +38,12 @@ const MAX_TEXT_NODE_LENGTH: usize = 16 * 1024;
 /// bound (same "cap the untrusted string, not the derived work" approach
 /// `MAX_ATTRIBUTE_VALUE_LENGTH`/`MAX_TEXT_NODE_LENGTH` already take).
 const MAX_HTML_LENGTH: usize = 64 * 1024;
+/// Bounds the variadic node/string argument list `prepend`/`append`/
+/// `before`/`after`/`replaceWith` each accept — an unbounded arg count from
+/// a script would otherwise let one call insert an unbounded number of
+/// children in one shot, the same class of concern every other bound in
+/// this file guards against.
+const MAX_CHILD_NODE_ARGS: usize = 256;
 
 thread_local! {
     static NODE_OBJECTS: RefCell<HashMap<usize, HashMap<dom::NodeId, sys::JSValue>>> = RefCell::new(HashMap::new());
@@ -1975,6 +1981,95 @@ unsafe extern "C" fn node_outer_html_set(
     sys::js_undefined()
 }
 
+/// Real `Element.insertAdjacentHTML(position, html)`: parses `html` as a
+/// fragment (same `html::parse_fragment` + `Dom::adopt` pipeline
+/// `innerHTML`/`outerHTML` already use) and inserts the resulting roots at
+/// one of the four real positions relative to this node — `beforebegin`/
+/// `afterend` need a parent to insert into and throw `NoModificationAllowedError`-
+/// style (a plain `TypeError`, same convention every thrown condition in
+/// this file uses) when this node has none, matching the real spec.
+/// Goes through the same `trusted_types::sink_html_string` gate as
+/// `innerHTML`/`outerHTML` — this engine's three real HTML injection sinks
+/// share identical Trusted Types enforcement.
+unsafe extern "C" fn node_insert_adjacent_html(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 2 {
+        return throw_type_error(ctx, "position and html are required");
+    }
+    let Some(position) = read_js_string(ctx, *argv) else {
+        return throw_type_error(ctx, "position must be a string");
+    };
+    if !matches!(
+        position.as_str(),
+        "beforebegin" | "afterbegin" | "beforeend" | "afterend"
+    ) {
+        return throw_type_error(
+            ctx,
+            "position must be one of beforebegin/afterbegin/beforeend/afterend",
+        );
+    }
+    let html = match crate::trusted_types::sink_html_string(ctx, *argv.add(1), "insertAdjacentHTML")
+    {
+        Ok(html) => html,
+        Err(thrown) => return thrown,
+    };
+    if html.len() > MAX_HTML_LENGTH {
+        return throw_type_error(ctx, "insertAdjacentHTML value exceeds the maximum length");
+    }
+    let Some(this_id) = node_id(ctx, this_val) else {
+        return throw_type_error(ctx, "insertAdjacentHTML target must be a node");
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() || (*dom).get(this_id).is_none() {
+        return throw_type_error(ctx, "node is no longer attached to this document");
+    }
+    let parent = (*dom).get(this_id).and_then(|node| node.parent);
+    if matches!(position.as_str(), "beforebegin" | "afterend") && parent.is_none() {
+        return throw_type_error(ctx, "no parent to insert relative to this node");
+    }
+    let (fragment, roots) = html::parse_fragment(&html);
+    match position.as_str() {
+        "beforebegin" => {
+            for root in roots {
+                let cloned = (*dom).adopt(&fragment, root);
+                (*dom).insert_before(this_id, cloned);
+            }
+        }
+        "afterbegin" => {
+            let first_child = first_child_of(&*dom, this_id);
+            for root in roots {
+                let cloned = (*dom).adopt(&fragment, root);
+                match first_child {
+                    Some(sibling) => (*dom).insert_before(sibling, cloned),
+                    None => (*dom).append_child(this_id, cloned),
+                }
+            }
+        }
+        "beforeend" => {
+            for root in roots {
+                let cloned = (*dom).adopt(&fragment, root);
+                (*dom).append_child(this_id, cloned);
+            }
+        }
+        "afterend" => {
+            let reference = next_sibling_of(&*dom, this_id);
+            for root in roots {
+                let cloned = (*dom).adopt(&fragment, root);
+                match reference {
+                    Some(sibling) => (*dom).insert_before(sibling, cloned),
+                    None => (*dom).append_child(parent.unwrap(), cloned),
+                }
+            }
+        }
+        _ => unreachable!(),
+    }
+    sys::js_undefined()
+}
+
 unsafe fn define_inner_outer_html(ctx: *mut sys::JSContext, proto: sys::JSValue) {
     for (name, getter, setter) in [
         (
@@ -2467,6 +2562,257 @@ unsafe extern "C" fn node_replace_child(
     sys::JS_DupValue(ctx, old_value)
 }
 
+fn next_sibling_of(dom: &dom::Dom, id: dom::NodeId) -> Option<dom::NodeId> {
+    let parent = dom.get(id)?.parent?;
+    let siblings = &dom.get(parent)?.children;
+    let index = siblings.iter().position(|&c| c == id)?;
+    siblings.get(index + 1).copied()
+}
+
+fn first_child_of(dom: &dom::Dom, id: dom::NodeId) -> Option<dom::NodeId> {
+    dom.get(id)?.children.first().copied()
+}
+
+/// Resolves the variadic argument list `prepend`/`append`/`before`/`after`/
+/// `replaceWith` all share: each argument is either a real string primitive
+/// (`arg.tag == JS_TAG_STRING`, checked before any coercion — `read_js_string`
+/// itself would happily stringify a `Node` object via its own `toString`,
+/// which is not what a `Node` argument means here) turned into a fresh Text
+/// node, or an existing `Node` object reused by id. Bounded by
+/// `MAX_CHILD_NODE_ARGS`/`MAX_TEXT_NODE_LENGTH`, same convention every other
+/// untrusted-input entry point in this file already follows. On error,
+/// returns the already-thrown exception value for the caller to return
+/// directly.
+unsafe fn read_child_node_args(
+    ctx: *mut sys::JSContext,
+    dom: *mut dom::Dom,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> Result<Vec<dom::NodeId>, sys::JSValue> {
+    if argc as usize > MAX_CHILD_NODE_ARGS {
+        return Err(throw_type_error(ctx, "too many arguments"));
+    }
+    let mut nodes = Vec::with_capacity(argc.max(0) as usize);
+    for i in 0..argc {
+        let arg = *argv.add(i as usize);
+        if arg.tag == sys::JS_TAG_STRING {
+            let Some(text) = read_js_string(ctx, arg) else {
+                return Err(throw_type_error(ctx, "invalid string argument"));
+            };
+            if text.len() > MAX_TEXT_NODE_LENGTH {
+                return Err(throw_type_error(
+                    ctx,
+                    "text argument exceeds the maximum length",
+                ));
+            }
+            nodes.push((*dom).create_text(&text));
+        } else if let Some(id) = node_id(ctx, arg) {
+            if (*dom).get(id).is_none() {
+                return Err(throw_type_error(
+                    ctx,
+                    "node is no longer attached to this document",
+                ));
+            }
+            nodes.push(id);
+        } else {
+            return Err(throw_type_error(
+                ctx,
+                "arguments must be a Node or a string",
+            ));
+        }
+    }
+    Ok(nodes)
+}
+
+/// Real `ParentNode.prepend(...nodes)`: inserts each argument, in order, as
+/// this node's new leading children. A no-op on a `this` that isn't a live
+/// node (real spec permissiveness — same degrade-gracefully convention
+/// every other accessor here already follows for a malformed `this`).
+unsafe extern "C" fn node_prepend(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let Some(this_id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() || (*dom).get(this_id).is_none() {
+        return sys::js_undefined();
+    }
+    let nodes = match read_child_node_args(ctx, dom, argc, argv) {
+        Ok(nodes) => nodes,
+        Err(exception) => return exception,
+    };
+    for &node in &nodes {
+        if is_ancestor(&*dom, node, this_id) {
+            return throw_type_error(ctx, "cannot insert an ancestor into its descendant");
+        }
+    }
+    let first_child = first_child_of(&*dom, this_id);
+    for node in nodes {
+        match first_child {
+            Some(sibling) => (*dom).insert_before(sibling, node),
+            None => (*dom).append_child(this_id, node),
+        }
+    }
+    sys::js_undefined()
+}
+
+/// Real `ParentNode.append(...nodes)`: inserts each argument, in order, as
+/// this node's new trailing children.
+unsafe extern "C" fn node_append(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let Some(this_id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() || (*dom).get(this_id).is_none() {
+        return sys::js_undefined();
+    }
+    let nodes = match read_child_node_args(ctx, dom, argc, argv) {
+        Ok(nodes) => nodes,
+        Err(exception) => return exception,
+    };
+    for &node in &nodes {
+        if is_ancestor(&*dom, node, this_id) {
+            return throw_type_error(ctx, "cannot insert an ancestor into its descendant");
+        }
+    }
+    for node in nodes {
+        (*dom).append_child(this_id, node);
+    }
+    sys::js_undefined()
+}
+
+/// Real `ChildNode.before(...nodes)`: inserts each argument, in order,
+/// immediately before this node in its parent. A no-op if this node has no
+/// parent, matching the real spec's own "if parent is null, then return".
+unsafe extern "C" fn node_before(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let Some(this_id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return sys::js_undefined();
+    }
+    let Some(parent) = (*dom).get(this_id).and_then(|node| node.parent) else {
+        return sys::js_undefined();
+    };
+    let nodes = match read_child_node_args(ctx, dom, argc, argv) {
+        Ok(nodes) => nodes,
+        Err(exception) => return exception,
+    };
+    for &node in &nodes {
+        if is_ancestor(&*dom, node, parent) {
+            return throw_type_error(ctx, "cannot insert an ancestor into its descendant");
+        }
+    }
+    for node in nodes {
+        (*dom).insert_before(this_id, node);
+    }
+    sys::js_undefined()
+}
+
+/// Real `ChildNode.after(...nodes)`: inserts each argument, in order,
+/// immediately after this node in its parent. The anchor (this node's
+/// original next sibling, if any) is captured once before any insertion —
+/// every argument lands ahead of it, in argument order.
+unsafe extern "C" fn node_after(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let Some(this_id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return sys::js_undefined();
+    }
+    let Some(parent) = (*dom).get(this_id).and_then(|node| node.parent) else {
+        return sys::js_undefined();
+    };
+    let nodes = match read_child_node_args(ctx, dom, argc, argv) {
+        Ok(nodes) => nodes,
+        Err(exception) => return exception,
+    };
+    for &node in &nodes {
+        if is_ancestor(&*dom, node, parent) {
+            return throw_type_error(ctx, "cannot insert an ancestor into its descendant");
+        }
+    }
+    let reference = next_sibling_of(&*dom, this_id);
+    for node in nodes {
+        match reference {
+            Some(sibling) => (*dom).insert_before(sibling, node),
+            None => (*dom).append_child(parent, node),
+        }
+    }
+    sys::js_undefined()
+}
+
+/// Real `ChildNode.replaceWith(...nodes)`: removes this node from its
+/// parent and inserts each argument, in order, at the position it
+/// occupied. A no-op if this node has no parent. Frees this node's own
+/// subtree exactly like `removeChild`/`remove` already do — same
+/// documented simplification (a real DOM keeps a removed node alive and
+/// reattachable; this one destroys it).
+unsafe extern "C" fn node_replace_with(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let Some(this_id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return sys::js_undefined();
+    }
+    let Some(parent) = (*dom).get(this_id).and_then(|node| node.parent) else {
+        return sys::js_undefined();
+    };
+    let nodes = match read_child_node_args(ctx, dom, argc, argv) {
+        Ok(nodes) => nodes,
+        Err(exception) => return exception,
+    };
+    for &node in &nodes {
+        if is_ancestor(&*dom, node, parent) {
+            return throw_type_error(ctx, "cannot insert an ancestor into its descendant");
+        }
+    }
+    let reference = next_sibling_of(&*dom, this_id);
+    evict_subtree(ctx, &*dom, this_id);
+    (*dom).remove(this_id);
+    for node in nodes {
+        if (*dom).get(node).is_none() {
+            // Only reachable if `this` itself was passed as one of the
+            // replacement nodes — already freed by the removal above, same
+            // graceful "stale id silently drops" degradation every other
+            // permissive accessor in this file already has.
+            continue;
+        }
+        match reference {
+            Some(sibling) => (*dom).insert_before(sibling, node),
+            None => (*dom).append_child(parent, node),
+        }
+    }
+    sys::js_undefined()
+}
+
 unsafe fn define_mutation_methods(ctx: *mut sys::JSContext, proto: sys::JSValue) {
     for (name, function, arity) in [
         ("appendChild", node_append_child as sys::JSCFunction, 1),
@@ -2489,6 +2835,16 @@ unsafe fn define_mutation_methods(ctx: *mut sys::JSContext, proto: sys::JSValue)
         ("contains", node_contains as sys::JSCFunction, 1),
         ("cloneNode", node_clone_node as sys::JSCFunction, 0),
         ("replaceChild", node_replace_child as sys::JSCFunction, 2),
+        ("prepend", node_prepend as sys::JSCFunction, 0),
+        ("append", node_append as sys::JSCFunction, 0),
+        ("before", node_before as sys::JSCFunction, 0),
+        ("after", node_after as sys::JSCFunction, 0),
+        ("replaceWith", node_replace_with as sys::JSCFunction, 0),
+        (
+            "insertAdjacentHTML",
+            node_insert_adjacent_html as sys::JSCFunction,
+            2,
+        ),
     ] {
         let name = CString::new(name).unwrap();
         let value = sys::JS_NewCFunction2(

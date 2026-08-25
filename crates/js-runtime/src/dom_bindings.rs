@@ -1981,6 +1981,95 @@ unsafe extern "C" fn node_outer_html_set(
     sys::js_undefined()
 }
 
+/// Real `Element.insertAdjacentHTML(position, html)`: parses `html` as a
+/// fragment (same `html::parse_fragment` + `Dom::adopt` pipeline
+/// `innerHTML`/`outerHTML` already use) and inserts the resulting roots at
+/// one of the four real positions relative to this node — `beforebegin`/
+/// `afterend` need a parent to insert into and throw `NoModificationAllowedError`-
+/// style (a plain `TypeError`, same convention every thrown condition in
+/// this file uses) when this node has none, matching the real spec.
+/// Goes through the same `trusted_types::sink_html_string` gate as
+/// `innerHTML`/`outerHTML` — this engine's three real HTML injection sinks
+/// share identical Trusted Types enforcement.
+unsafe extern "C" fn node_insert_adjacent_html(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 2 {
+        return throw_type_error(ctx, "position and html are required");
+    }
+    let Some(position) = read_js_string(ctx, *argv) else {
+        return throw_type_error(ctx, "position must be a string");
+    };
+    if !matches!(
+        position.as_str(),
+        "beforebegin" | "afterbegin" | "beforeend" | "afterend"
+    ) {
+        return throw_type_error(
+            ctx,
+            "position must be one of beforebegin/afterbegin/beforeend/afterend",
+        );
+    }
+    let html = match crate::trusted_types::sink_html_string(ctx, *argv.add(1), "insertAdjacentHTML")
+    {
+        Ok(html) => html,
+        Err(thrown) => return thrown,
+    };
+    if html.len() > MAX_HTML_LENGTH {
+        return throw_type_error(ctx, "insertAdjacentHTML value exceeds the maximum length");
+    }
+    let Some(this_id) = node_id(ctx, this_val) else {
+        return throw_type_error(ctx, "insertAdjacentHTML target must be a node");
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() || (*dom).get(this_id).is_none() {
+        return throw_type_error(ctx, "node is no longer attached to this document");
+    }
+    let parent = (*dom).get(this_id).and_then(|node| node.parent);
+    if matches!(position.as_str(), "beforebegin" | "afterend") && parent.is_none() {
+        return throw_type_error(ctx, "no parent to insert relative to this node");
+    }
+    let (fragment, roots) = html::parse_fragment(&html);
+    match position.as_str() {
+        "beforebegin" => {
+            for root in roots {
+                let cloned = (*dom).adopt(&fragment, root);
+                (*dom).insert_before(this_id, cloned);
+            }
+        }
+        "afterbegin" => {
+            let first_child = first_child_of(&*dom, this_id);
+            for root in roots {
+                let cloned = (*dom).adopt(&fragment, root);
+                match first_child {
+                    Some(sibling) => (*dom).insert_before(sibling, cloned),
+                    None => (*dom).append_child(this_id, cloned),
+                }
+            }
+        }
+        "beforeend" => {
+            for root in roots {
+                let cloned = (*dom).adopt(&fragment, root);
+                (*dom).append_child(this_id, cloned);
+            }
+        }
+        "afterend" => {
+            let reference = next_sibling_of(&*dom, this_id);
+            for root in roots {
+                let cloned = (*dom).adopt(&fragment, root);
+                match reference {
+                    Some(sibling) => (*dom).insert_before(sibling, cloned),
+                    None => (*dom).append_child(parent.unwrap(), cloned),
+                }
+            }
+        }
+        _ => unreachable!(),
+    }
+    sys::js_undefined()
+}
+
 unsafe fn define_inner_outer_html(ctx: *mut sys::JSContext, proto: sys::JSValue) {
     for (name, getter, setter) in [
         (
@@ -2751,6 +2840,11 @@ unsafe fn define_mutation_methods(ctx: *mut sys::JSContext, proto: sys::JSValue)
         ("before", node_before as sys::JSCFunction, 0),
         ("after", node_after as sys::JSCFunction, 0),
         ("replaceWith", node_replace_with as sys::JSCFunction, 0),
+        (
+            "insertAdjacentHTML",
+            node_insert_adjacent_html as sys::JSCFunction,
+            2,
+        ),
     ] {
         let name = CString::new(name).unwrap();
         let value = sys::JS_NewCFunction2(

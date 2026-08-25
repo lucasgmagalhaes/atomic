@@ -1483,3 +1483,64 @@ fn child_node_insertion_methods_reject_a_string_arg_treated_as_a_node_cycle() {
         .unwrap();
     assert_eq!(result, "true,true,true");
 }
+
+#[test]
+fn insert_adjacent_html_inserts_at_all_four_real_positions() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let outer = d.create_element("section");
+    d.set_attribute(outer, "id", "outer");
+    let target = d.create_element("div");
+    d.set_attribute(target, "id", "target");
+    let existing_child = d.create_element("span");
+    d.set_attribute(existing_child, "id", "existing");
+    d.append_child(root, outer);
+    d.append_child(outer, target);
+    d.append_child(target, existing_child);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { \
+                const target = document.getElementById('target'); \
+                target.insertAdjacentHTML('beforebegin', '<p id=\"before\">before</p>'); \
+                target.insertAdjacentHTML('afterend', '<p id=\"after\">after</p>'); \
+                target.insertAdjacentHTML('afterbegin', '<b id=\"first\">first</b>'); \
+                target.insertAdjacentHTML('beforeend', '<b id=\"last\">last</b>'); \
+                const outer = document.getElementById('outer'); \
+                return `${Array.from(outer.childNodes).map(n => n.id).join(',')},${Array.from(target.childNodes).map(n => n.id).join(',')}`; \
+            })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "before,target,after,first,existing,last");
+}
+
+#[test]
+fn insert_adjacent_html_rejects_bad_position_and_no_parent_cases() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let target = d.create_element("div");
+    d.set_attribute(target, "id", "target");
+    d.append_child(root, target);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { \
+                const target = document.getElementById('target'); \
+                let badPositionRejected = false; \
+                try { target.insertAdjacentHTML('nowhere', '<b></b>'); } catch (_) { badPositionRejected = true; } \
+                const detached = document.createElement('div'); \
+                let noParentRejected = false; \
+                try { detached.insertAdjacentHTML('beforebegin', '<b></b>'); } catch (_) { noParentRejected = true; } \
+                detached.insertAdjacentHTML('afterbegin', '<b id=\"ok\">ok</b>'); \
+                return `${badPositionRejected},${noParentRejected},${detached.firstChild.id}`; \
+            })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "true,true,ok");
+}

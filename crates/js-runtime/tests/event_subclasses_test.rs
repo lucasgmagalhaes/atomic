@@ -196,3 +196,81 @@ fn keyboard_event_with_non_string_coercible_type_throws() {
         .eval("new KeyboardEvent(Symbol('x'))", "<test>")
         .is_err());
 }
+
+#[test]
+fn submit_event_carries_submitter_and_defaults() {
+    let rt = Runtime::new();
+    let ctx = context_with_empty_dom(&rt);
+    let result = ctx
+        .eval(
+            "(() => { const e = new SubmitEvent('submit', { submitter: null, bubbles: true }); return `${e.submitter === null},${e.bubbles},${e instanceof Event},${e instanceof SubmitEvent}`; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "true,true,true,true");
+}
+
+#[test]
+fn submit_event_without_options_defaults_submitter_to_null() {
+    let rt = Runtime::new();
+    let ctx = context_with_empty_dom(&rt);
+    let result = ctx
+        .eval(
+            "(() => { const e = new SubmitEvent('submit'); return `${e.submitter === null},${e.bubbles}`; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "true,false");
+}
+
+#[test]
+fn drag_event_carries_fields_and_defaults() {
+    let rt = Runtime::new();
+    let ctx = context_with_empty_dom(&rt);
+    let result = ctx
+        .eval(
+            "(() => { const e = new DragEvent('dragstart', { clientX: 10, clientY: 20, button: 1, dataTransfer: null }); return `${e.clientX},${e.clientY},${e.button},${e.buttons},${e.dataTransfer === null},${e.relatedTarget === null},${e instanceof Event},${e instanceof DragEvent}`; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "10,20,1,0,true,true,true,true");
+}
+
+#[test]
+fn drag_event_without_options_defaults() {
+    let rt = Runtime::new();
+    let ctx = context_with_empty_dom(&rt);
+    let result = ctx
+        .eval(
+            "(() => { const e = new DragEvent('drop'); return `${e.clientX},${e.clientY},${e.button},${e.dataTransfer === null}`; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "0,0,0,true");
+}
+
+#[test]
+fn touch_event_carries_fields_and_defaults() {
+    let rt = Runtime::new();
+    let ctx = context_with_empty_dom(&rt);
+    let result = ctx
+        .eval(
+            "(() => { const t = [{ identifier: 0, clientX: 5, clientY: 10 }]; const e = new TouchEvent('touchstart', { touches: t, targetTouches: t, changedTouches: t, altKey: true }); return `${e.touches.length},${e.targetTouches.length},${e.changedTouches.length},${e.altKey},${e.metaKey},${e.ctrlKey},${e.shiftKey},${e instanceof Event},${e instanceof TouchEvent}`; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "1,1,1,true,false,false,false,true,true");
+}
+
+#[test]
+fn touch_event_without_options_defaults() {
+    let rt = Runtime::new();
+    let ctx = context_with_empty_dom(&rt);
+    let result = ctx
+        .eval(
+            "(() => { const e = new TouchEvent('touchend'); return `${e.touches === null},${e.targetTouches === null},${e.changedTouches === null},${e.altKey},${e.metaKey}`; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "true,true,true,false,false");
+}

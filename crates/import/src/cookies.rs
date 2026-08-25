@@ -58,14 +58,10 @@ fn webkit_time_to_system_time(webkit_micros: i64) -> Option<SystemTime> {
 /// failing the whole import, since one bad cookie shouldn't lose every
 /// other real one.
 pub fn import_cookies(path: &Path, master_key: &[u8]) -> Result<Vec<Cookie>, ImportError> {
-    let temp_path = std::env::temp_dir().join(format!(
-        "nimble-import-cookies-{}.sqlite",
-        std::process::id()
-    ));
-    std::fs::copy(path, &temp_path).map_err(ImportError::Io)?;
+    let snapshot = crate::snapshot_sqlite(path, "cookies").map_err(ImportError::Io)?;
 
-    let result = (|| {
-        let conn = rusqlite::Connection::open(&temp_path).map_err(ImportError::Sqlite)?;
+    (|| {
+        let conn = rusqlite::Connection::open(snapshot.path()).map_err(ImportError::Sqlite)?;
         let mut stmt = conn
             .prepare("SELECT host_key, name, encrypted_value, path, is_secure, is_httponly, expires_utc FROM cookies")
             .map_err(ImportError::Sqlite)?;
@@ -107,8 +103,5 @@ pub fn import_cookies(path: &Path, master_key: &[u8]) -> Result<Vec<Cookie>, Imp
             }
         }
         Ok(cookies)
-    })();
-
-    let _ = std::fs::remove_file(&temp_path);
-    result
+    })()
 }

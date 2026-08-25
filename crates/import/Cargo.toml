@@ -7,6 +7,7 @@ edition = "2021"
 rusqlite = { version = "0.40", features = ["bundled"] }
 aes-gcm = "0.11.1"
 base64 = "0.23.1"
+platform-apis = { path = "../platform-apis" }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }

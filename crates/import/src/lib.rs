@@ -32,6 +32,81 @@ mod json;
 pub mod master_key;
 pub mod passwords;
 
+use std::fs::{File, OpenOptions};
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+
+/// A private, exclusively-created copy of a Chrome SQLite database. Chrome
+/// may hold its original database open; the copy also prevents a concurrent
+/// import from reading another operation's snapshot.
+pub(crate) struct SqliteSnapshot {
+    path: PathBuf,
+}
+
+impl SqliteSnapshot {
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for SqliteSnapshot {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn open_private_file(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
+}
+
+/// Copies `source` to a fresh, owner-private temporary file. The filename is
+/// unpredictable and `create_new` reserves it atomically, preventing both
+/// snapshot collisions between concurrent imports and temp-file replacement.
+pub(crate) fn snapshot_sqlite(source: &Path, label: &str) -> io::Result<SqliteSnapshot> {
+    let mut input = File::open(source)?;
+    for _ in 0..16 {
+        let mut random = [0u8; 16];
+        platform_apis::fill_random(&mut random).map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("failed to create import snapshot name: {error}"),
+            )
+        })?;
+        let mut suffix = String::with_capacity(random.len() * 2);
+        for byte in random {
+            use std::fmt::Write as _;
+            write!(&mut suffix, "{byte:02x}").expect("writing to a String cannot fail");
+        }
+        let path = std::env::temp_dir().join(format!("nimble-import-{label}-{suffix}.sqlite"));
+        let mut output = match open_private_file(&path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        };
+
+        let result = io::copy(&mut input, &mut output).and_then(|_| output.flush());
+        drop(output);
+        match result {
+            Ok(()) => return Ok(SqliteSnapshot { path }),
+            Err(error) => {
+                let _ = std::fs::remove_file(&path);
+                return Err(error);
+            }
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "could not reserve a unique import snapshot file",
+    ))
+}
+
 pub use bookmarks::{import_bookmarks, Bookmark};
 pub use cookies::{import_cookies, Cookie};
 pub use history::{import_history, HistoryEntry};

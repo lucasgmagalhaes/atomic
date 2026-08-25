@@ -2179,6 +2179,7 @@ version = "0.1.0"
 dependencies = [
  "aes-gcm",
  "base64",
+ "platform-apis",
  "rusqlite",
  "windows-sys 0.61.2",
 ]

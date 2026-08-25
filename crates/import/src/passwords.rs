@@ -32,14 +32,10 @@ impl std::error::Error for ImportError {}
 /// row that can't be decrypted (wrong key, `v20`) doesn't lose every other
 /// real credential.
 pub fn import_passwords(path: &Path, master_key: &[u8]) -> Result<Vec<Password>, ImportError> {
-    let temp_path = std::env::temp_dir().join(format!(
-        "nimble-import-logins-{}.sqlite",
-        std::process::id()
-    ));
-    std::fs::copy(path, &temp_path).map_err(ImportError::Io)?;
+    let snapshot = crate::snapshot_sqlite(path, "logins").map_err(ImportError::Io)?;
 
-    let result = (|| {
-        let conn = rusqlite::Connection::open(&temp_path).map_err(ImportError::Sqlite)?;
+    (|| {
+        let conn = rusqlite::Connection::open(snapshot.path()).map_err(ImportError::Sqlite)?;
         let mut stmt = conn
             .prepare("SELECT origin_url, username_value, password_value FROM logins")
             .map_err(ImportError::Sqlite)?;
@@ -64,8 +60,5 @@ pub fn import_passwords(path: &Path, master_key: &[u8]) -> Result<Vec<Password>,
             }
         }
         Ok(passwords)
-    })();
-
-    let _ = std::fs::remove_file(&temp_path);
-    result
+    })()
 }

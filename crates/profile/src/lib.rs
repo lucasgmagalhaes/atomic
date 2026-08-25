@@ -383,6 +383,49 @@ impl Profile {
         }
     }
 
+    /// Evaluates arbitrary JS in the current page's own context — the
+    /// generic "drive the page like a devtools console" command every
+    /// other method here is a fixed special case of (`click` builds and
+    /// evals one hardcoded dispatch snippet, `fill` a hardcoded assignment,
+    /// etc.). The worker re-renders and republishes the frame before
+    /// replying, so whatever the script mutated — DOM structure, an adopted
+    /// stylesheet via `insertRule`, anything — is already visible in real
+    /// painted pixels by the time this returns (see the adopted-stylesheet
+    /// test in this crate's integration tests for exactly that assertion).
+    /// `Ok(Ok(result))` carries the script's stringified completion value;
+    /// `Ok(Err(message))` means evaluation threw (the worker is still alive
+    /// and any mutations made before the throw are kept and rendered). Not
+    /// gated by CSP — host-driven evaluation, not the page loading its own
+    /// script. `script` must not contain a newline (this crate's stdin/
+    /// stdout protocol is newline-delimited) or NUL bytes (which would
+    /// panic the worker's string conversion); either is rejected here
+    /// before it would corrupt or crash the worker, reported the same way
+    /// a worker-side failure would be. Scripts are also length-capped at
+    /// 64KB, matching this engine's other untrusted-string input bounds.
+    /// The outer `io::Result` only covers the protocol itself failing (a
+    /// dead worker, a broken pipe) — same convention as [`navigate`](Self::navigate).
+    pub fn evaluate(&mut self, script: &str) -> std::io::Result<Result<String, String>> {
+        if script.contains('\n') {
+            return Ok(Err("script must not contain a newline".to_string()));
+        }
+        if script.contains('\0') {
+            return Ok(Err("script must not contain NUL bytes".to_string()));
+        }
+        const MAX_SCRIPT_LENGTH: usize = 64 * 1024;
+        if script.len() > MAX_SCRIPT_LENGTH {
+            return Ok(Err("script exceeds the maximum length".to_string()));
+        }
+        writeln!(self.stdin, "EVAL {script}")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        let line = line.trim();
+        match line.strip_prefix("ERROR ") {
+            Some(message) => Ok(Err(message.to_string())),
+            None => Ok(Ok(line.strip_prefix("EVALUATED ").unwrap_or(line).trim().to_string())),
+        }
+    }
+
     /// Caps the worker's own vsync render loop at `fps` frames per second
     /// (the mockup's "Settings > Performance > frame cap" knob) - takes
     /// effect on the worker's very next tick, not a respawn (unlike the

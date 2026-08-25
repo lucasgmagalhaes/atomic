@@ -100,6 +100,21 @@
 //!   how painting/hit-testing account for it. Replies `SCROLLED`, or
 //!   `ERROR <message>` if `dy` doesn't parse as a number. Reset to `0` by
 //!   `RELOAD`/`NAVIGATE`, same as `focused_id`. No horizontal scroll.
+//! - `EVAL <script>` -> evaluates arbitrary JS in the current page's own
+//!   context (the automation/devtools-console entry point this protocol
+//!   previously had no equivalent of - every other command was a fixed,
+//!   hard-coded mutation, so a test couldn't trigger e.g. a stylesheet
+//!   mutation and watch it repaint; see `profile::Profile::evaluate`).
+//!   The current frame is re-rendered and republished after evaluation in
+//!   either outcome, so whatever the script mutated is visible in pixels
+//!   by the time the reply arrives. Replies `EVALUATED <result>` with the
+//!   script's stringified completion value (newlines flattened, same as
+//!   error messages), or `ERROR script raised an exception` if evaluation
+//!   threw. Not gated by CSP: this is host-driven evaluation (a devtools
+//!   console), not the page loading its own script - a real browser's
+//!   devtools likewise bypasses the page's policy. Scripts can't contain
+//!   newlines (newline-delimited protocol); `profile::Profile::evaluate`
+//!   rejects those before they'd corrupt the stream.
 //! - `QUIT` -> exits cleanly
 //! - anything else -> ignored
 use std::collections::HashMap;
@@ -1482,6 +1497,31 @@ fn main() {
                     }
                 }
                 let _ = stdout.flush();
+            } else if let Some(script) = line.strip_prefix("EVAL ") {
+                let script = script.trim();
+                // Rendered in both outcomes - a script that mutated the DOM
+                // (or an adopted stylesheet) before throwing still changed
+                // real state worth painting, same convention CLICK's handler
+                // follows when the dispatch itself fails. A NUL byte is
+                // rejected up front rather than passed to `Context::eval`,
+                // whose `CString::new` conversion panics on one - a hostile/
+                // buggy stdin writer must not be able to crash this process.
+                if script.contains('\0') {
+                    let _ = writeln!(stdout, "ERROR script must not contain NUL bytes");
+                    let _ = stdout.flush();
+                } else {
+                    let result = page.ctx.eval(script, "<pane eval>");
+                    writer.publish(&page.render(&renderer, width, height, scroll_top));
+                    match result {
+                        Ok(value) => {
+                            let _ = writeln!(stdout, "EVALUATED {}", value.replace('\n', " "));
+                        }
+                        Err(_) => {
+                            let _ = writeln!(stdout, "ERROR script raised an exception");
+                        }
+                    }
+                    let _ = stdout.flush();
+                }
             } else if line == "QUIT" {
                 break 'render_loop;
             }

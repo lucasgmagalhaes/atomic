@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # crates/js-runtime/quickjs-sys vendors QuickJS-ng as a real git
           # submodule (crates/js-runtime/quickjs-sys/vendor/quickjs-ng) -

@@ -1706,3 +1706,64 @@ fn document_fragment_can_hold_children() {
         .unwrap();
     assert_eq!(result, "2,DIV,SPAN");
 }
+
+#[test]
+fn import_node_deep_clones_a_node() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let div = d.create_element("div");
+    d.set_attribute(div, "id", "src");
+    d.append_child(root, div);
+    let child = d.create_element("span");
+    d.append_child(div, child);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { const src = document.getElementById('src'); const clone = document.importNode(src, true); return `${clone.id},${clone.nodeName},${clone.childNodes.length},${clone !== src}`; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "src,DIV,1,true");
+}
+
+#[test]
+fn import_node_shallow_omits_children() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let div = d.create_element("div");
+    d.set_attribute(div, "id", "src");
+    d.append_child(root, div);
+    let child = d.create_element("span");
+    d.append_child(div, child);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { const src = document.getElementById('src'); const clone = document.importNode(src, false); return `${clone.childNodes.length}`; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "0");
+}
+
+#[test]
+fn adopt_node_returns_same_node_in_single_document() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let div = d.create_element("div");
+    d.set_attribute(div, "id", "mydiv");
+    d.append_child(root, div);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { const node = document.getElementById('mydiv'); const adopted = document.adoptNode(node); return `${adopted === node},${adopted.id}`; })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "true,mydiv");
+}

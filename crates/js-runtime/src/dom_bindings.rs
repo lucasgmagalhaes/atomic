@@ -210,6 +210,8 @@ const HTML_BUTTON_CLASS_KIND: &str = "HTMLButtonElement";
 const HTML_ANCHOR_CLASS_KIND: &str = "HTMLAnchorElement";
 const HTML_IMAGE_CLASS_KIND: &str = "HTMLImageElement";
 const HTML_CANVAS_CLASS_KIND: &str = "HTMLCanvasElement";
+const HTML_FORM_CLASS_KIND: &str = "HTMLFormElement";
+const HTML_SELECT_CLASS_KIND: &str = "HTMLSelectElement";
 
 const ALL_NODE_CLASS_KINDS: &[&str] = &[
     NODE_CLASS_KIND,
@@ -220,6 +222,8 @@ const ALL_NODE_CLASS_KINDS: &[&str] = &[
     HTML_ANCHOR_CLASS_KIND,
     HTML_IMAGE_CLASS_KIND,
     HTML_CANVAS_CLASS_KIND,
+    HTML_FORM_CLASS_KIND,
+    HTML_SELECT_CLASS_KIND,
 ];
 
 /// Returns the class ID for a node based on its `NodeData` variant and tag.
@@ -242,6 +246,8 @@ unsafe fn node_class_id_for(
                 "a" => HTML_ANCHOR_CLASS_KIND,
                 "img" => HTML_IMAGE_CLASS_KIND,
                 "canvas" => HTML_CANVAS_CLASS_KIND,
+                "form" => HTML_FORM_CLASS_KIND,
+                "select" => HTML_SELECT_CLASS_KIND,
                 _ => HTML_ELEMENT_CLASS_KIND,
             };
             let id = crate::class_registry::class_id_for(rt, kind);
@@ -3398,6 +3404,297 @@ unsafe fn ensure_node_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
     class_id
 }
 
+/// All element descendants of `start` whose tag is in `tags`, in document
+/// order (iterative DFS, same traversal limits the selector engine uses).
+fn descendants_matching_tags(
+    dom: &dom::Dom,
+    start: dom::NodeId,
+    tags: &[&str],
+) -> Vec<dom::NodeId> {
+    let mut result = Vec::new();
+    let mut stack = vec![start];
+    let mut visits = 0usize;
+    while let Some(id) = stack.pop() {
+        visits += 1;
+        if visits > MAX_SELECTOR_VISITS || result.len() > MAX_SELECTOR_RESULTS {
+            break;
+        }
+        if let Some(node) = dom.get(id) {
+            if id != start {
+                if let dom::NodeData::Element { tag, .. } = &node.data {
+                    if tags.contains(&tag.as_str()) {
+                        result.push(id);
+                    }
+                }
+            }
+            stack.extend(node.children.iter().rev().copied());
+        }
+    }
+    result
+}
+
+/// Defines `HTMLFormElement`-specific properties: `elements` (an
+/// HTMLCollection of this form's controls), plus no-op `submit()`/`reset()`
+/// methods (no network layer to submit to — they exist so real-world form
+/// code doesn't throw).
+unsafe fn define_form_properties(ctx: *mut sys::JSContext, proto: sys::JSValue) {
+    let cname = CString::new("elements").unwrap();
+    let getter = sys::JS_NewCFunction2(
+        ctx,
+        std::mem::transmute::<Getter, sys::JSCFunction>(form_elements_get),
+        cname.as_ptr(),
+        0,
+        sys::JS_CFUNC_GETTER,
+        0,
+    );
+    let atom = sys::JS_NewAtom(ctx, cname.as_ptr());
+    sys::JS_DefinePropertyGetSet(
+        ctx,
+        proto,
+        atom,
+        getter,
+        sys::js_undefined(),
+        sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE,
+    );
+    sys::JS_FreeAtom(ctx, atom);
+
+    for name in ["submit", "reset"] {
+        let cname = CString::new(name).unwrap();
+        let value = sys::JS_NewCFunction2(
+            ctx,
+            std::mem::transmute::<sys::JSCFunction, sys::JSCFunction>(element_scroll_noop),
+            cname.as_ptr(),
+            0,
+            sys::JS_CFUNC_GENERIC,
+            0,
+        );
+        sys::JS_SetPropertyStr(ctx, proto, cname.as_ptr(), value);
+    }
+}
+
+unsafe extern "C" fn form_elements_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::JS_NewArray(ctx);
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return sys::JS_NewArray(ctx);
+    }
+    let controls = descendants_matching_tags(&*dom, id, &["input", "select", "textarea", "button"]);
+    html_collection(ctx, controls)
+}
+
+/// Defines `HTMLSelectElement`-specific properties: `options`
+/// (HTMLCollection of its `<option>`s), `selectedIndex`, and `value`.
+///
+/// Documented deviation from browsers for a fresh single-line `<select>`:
+/// nothing is implicitly auto-selected here, so an untouched select reads
+/// `selectedIndex === -1` / `value === ""` until a script (or markup)
+/// selects one explicitly.
+unsafe fn define_select_properties(ctx: *mut sys::JSContext, proto: sys::JSValue) {
+    let cname = CString::new("options").unwrap();
+    let getter = sys::JS_NewCFunction2(
+        ctx,
+        std::mem::transmute::<Getter, sys::JSCFunction>(select_options_get),
+        cname.as_ptr(),
+        0,
+        sys::JS_CFUNC_GETTER,
+        0,
+    );
+    let atom = sys::JS_NewAtom(ctx, cname.as_ptr());
+    sys::JS_DefinePropertyGetSet(
+        ctx,
+        proto,
+        atom,
+        getter,
+        sys::js_undefined(),
+        sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE,
+    );
+    sys::JS_FreeAtom(ctx, atom);
+
+    for (name, getter_fn, setter_fn) in [
+        (
+            "selectedIndex",
+            select_selected_index_get as Getter,
+            select_selected_index_set as Setter,
+        ),
+        (
+            "value",
+            select_value_get as Getter,
+            select_value_set as Setter,
+        ),
+    ] {
+        let cname = CString::new(name).unwrap();
+        let getter = sys::JS_NewCFunction2(
+            ctx,
+            std::mem::transmute::<Getter, sys::JSCFunction>(getter_fn),
+            cname.as_ptr(),
+            0,
+            sys::JS_CFUNC_GETTER,
+            0,
+        );
+        let setter = sys::JS_NewCFunction2(
+            ctx,
+            std::mem::transmute::<Setter, sys::JSCFunction>(setter_fn),
+            cname.as_ptr(),
+            1,
+            sys::JS_CFUNC_SETTER,
+            0,
+        );
+        let atom = sys::JS_NewAtom(ctx, cname.as_ptr());
+        sys::JS_DefinePropertyGetSet(
+            ctx,
+            proto,
+            atom,
+            getter,
+            setter,
+            sys::JS_PROP_HAS_GET
+                | sys::JS_PROP_HAS_SET
+                | sys::JS_PROP_CONFIGURABLE
+                | sys::JS_PROP_ENUMERABLE,
+        );
+        sys::JS_FreeAtom(ctx, atom);
+    }
+}
+
+unsafe extern "C" fn select_options_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::JS_NewArray(ctx);
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return sys::JS_NewArray(ctx);
+    }
+    html_collection(ctx, descendants_matching_tags(&*dom, id, &["option"]))
+}
+
+/// An option's effective per-spec value: its `value` attribute when present,
+/// otherwise its text content.
+fn option_effective_value(dom: &dom::Dom, option_id: dom::NodeId) -> String {
+    match dom.attribute(option_id, "value") {
+        Some(v) => v.to_string(),
+        None => dom.text_content(option_id),
+    }
+}
+
+unsafe extern "C" fn select_selected_index_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::JSValue {
+            u: sys::JSValueUnion { int32: -1 },
+            tag: sys::JS_TAG_INT,
+        };
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return sys::JSValue {
+            u: sys::JSValueUnion { int32: -1 },
+            tag: sys::JS_TAG_INT,
+        };
+    }
+    for (index, option) in descendants_matching_tags(&*dom, id, &["option"])
+        .into_iter()
+        .enumerate()
+    {
+        if (*dom).attribute(option, "selected").is_some() {
+            return sys::JSValue {
+                u: sys::JSValueUnion {
+                    int32: index as i32,
+                },
+                tag: sys::JS_TAG_INT,
+            };
+        }
+    }
+    sys::JSValue {
+        u: sys::JSValueUnion { int32: -1 },
+        tag: sys::JS_TAG_INT,
+    }
+}
+
+unsafe extern "C" fn select_selected_index_set(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    val: sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return sys::js_undefined();
+    }
+    let index = if val.tag == sys::JS_TAG_INT {
+        val.u.int32
+    } else {
+        -1
+    };
+    let options = descendants_matching_tags(&*dom, id, &["option"]);
+    for option in &options {
+        (*dom).remove_attribute(*option, "selected");
+    }
+    if index >= 0 {
+        if let Some(option) = options.get(index as usize) {
+            (*dom).set_attribute(*option, "selected", "");
+        }
+    }
+    sys::js_undefined()
+}
+
+unsafe extern "C" fn select_value_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return new_js_string(ctx, "");
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return new_js_string(ctx, "");
+    }
+    for option in descendants_matching_tags(&*dom, id, &["option"]) {
+        if (*dom).attribute(option, "selected").is_some() {
+            return new_js_string(ctx, &option_effective_value(&*dom, option));
+        }
+    }
+    new_js_string(ctx, "")
+}
+
+unsafe extern "C" fn select_value_set(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    val: sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    let dom = dom_opaque(ctx);
+    let Some(wanted) = read_js_string(ctx, val) else {
+        return sys::js_undefined();
+    };
+    if dom.is_null() {
+        return sys::js_undefined();
+    }
+    let options = descendants_matching_tags(&*dom, id, &["option"]);
+    for option in &options {
+        (*dom).remove_attribute(*option, "selected");
+    }
+    for option in &options {
+        if option_effective_value(&*dom, *option) == wanted {
+            (*dom).set_attribute(*option, "selected", "");
+            break;
+        }
+    }
+    sys::js_undefined()
+}
+
 /// Defines scroll-related properties and methods on `Element.prototype`.
 /// This engine has no real viewport, so these are stubs: `scrollTop`/`scrollLeft`
 /// always return 0, setters are no-ops, and `scroll()`/`scrollTo()`/`scrollBy()`/
@@ -3563,6 +3860,11 @@ unsafe fn ensure_html_subclass(ctx: *mut sys::JSContext, kind: &'static str) -> 
     let proto = sys::JS_NewObject(ctx);
     sys::JS_SetPrototype(ctx, proto, html_element_proto);
     sys::JS_FreeValue(ctx, html_element_proto);
+    if kind == HTML_FORM_CLASS_KIND {
+        define_form_properties(ctx, proto);
+    } else if kind == HTML_SELECT_CLASS_KIND {
+        define_select_properties(ctx, proto);
+    }
     sys::JS_SetClassProto(ctx, class_id, proto);
 
     class_id
@@ -3660,6 +3962,24 @@ unsafe extern "C" fn html_image_constructor(
 }
 
 unsafe extern "C" fn html_canvas_constructor(
+    _ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    this_val
+}
+
+unsafe extern "C" fn html_form_constructor(
+    _ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    this_val
+}
+
+unsafe extern "C" fn html_select_constructor(
     _ctx: *mut sys::JSContext,
     this_val: sys::JSValue,
     _argc: c_int,
@@ -4332,6 +4652,8 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     ensure_html_subclass(ctx, HTML_ANCHOR_CLASS_KIND);
     ensure_html_subclass(ctx, HTML_IMAGE_CLASS_KIND);
     ensure_html_subclass(ctx, HTML_CANVAS_CLASS_KIND);
+    ensure_html_subclass(ctx, HTML_FORM_CLASS_KIND);
+    ensure_html_subclass(ctx, HTML_SELECT_CLASS_KIND);
 
     let rt = sys::JS_GetRuntime(ctx);
     let node_class_id = crate::class_registry::class_id_for(rt, NODE_CLASS_KIND);
@@ -4375,6 +4697,14 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
         (
             HTML_CANVAS_CLASS_KIND,
             html_canvas_constructor as sys::JSCFunction,
+        ),
+        (
+            HTML_FORM_CLASS_KIND,
+            html_form_constructor as sys::JSCFunction,
+        ),
+        (
+            HTML_SELECT_CLASS_KIND,
+            html_select_constructor as sys::JSCFunction,
         ),
     ] {
         let class_id = crate::class_registry::class_id_for(rt, kind);

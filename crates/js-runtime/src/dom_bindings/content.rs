@@ -97,6 +97,61 @@ pub(super) unsafe fn define_value(ctx: *mut sys::JSContext, proto: sys::JSValue)
     define_getter_setter(ctx, proto, "value", node_value_get, node_value_set);
 }
 
+unsafe extern "C" fn node_default_value_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return new_js_string(ctx, "");
+    };
+    let dom_ptr = dom_opaque(ctx);
+    if dom_ptr.is_null() {
+        return new_js_string(ctx, "");
+    }
+    new_js_string(ctx, (*dom_ptr).attribute(id, "value").unwrap_or_default())
+}
+
+unsafe extern "C" fn node_default_value_set(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    val: sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    let Some(text) = read_js_string(ctx, val) else {
+        return sys::js_undefined();
+    };
+    let dom_ptr = dom_opaque(ctx);
+    if !dom_ptr.is_null() {
+        (*dom_ptr).set_attribute(id, "value", &text);
+    }
+    sys::js_undefined()
+}
+
+/// Defines the `defaultValue` accessor on `proto` — real, and genuinely
+/// independent of `value` (see [`define_value`]): `value` is the live
+/// `dom::Dom::value`/`set_value` field, `defaultValue` reflects the
+/// `value` *attribute* directly, exactly matching real
+/// `HTMLInputElement`/`HTMLTextAreaElement` semantics (an untouched
+/// control's `.value` starts equal to `.defaultValue`, then diverges
+/// independently once either is set). `Element.reset()`
+/// (`forms.rs`'s `form_reset`) uses this to restore a control's live
+/// `.value` to its markup default — the one form-reset case this engine
+/// can do for real, since `.checked`/`.selected` (`attributes.rs`) are
+/// still simplified as direct attribute reflection with no separate
+/// "default" storage to restore from (a pre-existing, documented
+/// simplification, not one this pass introduces).
+pub(super) unsafe fn define_default_value(ctx: *mut sys::JSContext, proto: sys::JSValue) {
+    define_getter_setter(
+        ctx,
+        proto,
+        "defaultValue",
+        node_default_value_get,
+        node_default_value_set,
+    );
+}
+
 /// Real `Node.prototype.nodeValue` getter — per spec:
 /// - Text / Comment nodes: the text data
 /// - Document / DocumentFragment / Element: `null`

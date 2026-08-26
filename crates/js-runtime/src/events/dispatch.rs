@@ -221,13 +221,33 @@ unsafe fn run_phases(
     event: sys::JSValue,
     first_exception: &mut Option<sys::JSValue>,
 ) {
-    let node_class = crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), "Node");
+    // Per-node, not a single fixed "Node" class id: `node_object`'s cache
+    // is keyed by `NodeId` alone (one JS object per node, regardless of
+    // which class it was built with — see its own doc), so building a
+    // dispatch-time wrapper with the generic `Node` class instead of the
+    // node's real subclass (`HTMLFormElement`, `HTMLInputElement`, ...)
+    // would silently overwrite that node's cached identity with one
+    // missing every subclass-specific method (`form.reset()`,
+    // `select.selectedIndex`, ...) the next time anything looks it up —
+    // a real bug this fixes, caught by `form_reset_submit_test.rs`: an
+    // `"input"` event bubbling from a text field through its `<form>`
+    // ancestor used to leave that form's cached object without
+    // `reset`/`requestSubmit` for every later access, not just this one.
+    let host_dom: *mut dom::Dom = {
+        let state_ptr = crate::host_state::get(ctx);
+        if state_ptr.is_null() {
+            std::ptr::null_mut()
+        } else {
+            &mut (*state_ptr).dom as *mut dom::Dom
+        }
+    };
     let run_at = |ctx: *mut sys::JSContext,
                   id: dom::NodeId,
                   phase: Phase,
                   first_exception: &mut Option<sys::JSValue>| {
         let p = state(ctx, event);
         (*p).current_target = Some(id);
+        let node_class = crate::dom_bindings::node_class_id_for(ctx, host_dom, id);
         let node = crate::dom_bindings::node_object(ctx, node_class, id);
         dispatch_at(ctx, node, event, phase, first_exception);
         sys::JS_FreeValue(ctx, node);

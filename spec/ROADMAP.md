@@ -40,7 +40,7 @@ Read [architecture/compatibility.md](architecture/compatibility.md) and [matrix/
 18. `[ ]` Script loading modes (parser-blocking/`defer`/`async`).
 19. `[ ]` ES Modules (resolver, import maps, dynamic `import()`, module cache).
 20. `[ ]` Default actions (links, buttons, forms, focus navigation, selection, scrolling, cancellation).
-21. `[~]` Form semantics — validity/constraint API, `labels`, `FormData` done; real submission/reset semantics and selection APIs (`setSelectionRange`) are not (see [matrix/dom.md](matrix/dom.md)).
+21. `[~]` Form semantics — validity/constraint API, `labels`, `FormData` done; real `reset()`/`requestSubmit()` done (2026-08-26: cancelable `"reset"`/`"submit"` events, `reset()` restores `input`/`textarea` `.value` from the new `defaultValue`, `requestSubmit()` gates on real per-control validity); `<select>`/checkbox/radio reset and selection APIs (`setSelectionRange`) still not (see [matrix/dom.md](matrix/dom.md)).
 
 ## P3 — Rendering
 

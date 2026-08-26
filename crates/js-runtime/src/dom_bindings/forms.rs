@@ -15,9 +15,13 @@ use super::selectors::{descendants_matching_tags, matching_by_tag};
 use super::util::{new_js_string, read_js_string, throw_type_error, Getter, Setter};
 
 /// Defines `HTMLFormElement`-specific properties: `elements` (an
-/// HTMLCollection of this form's controls), plus no-op `submit()`/`reset()`
-/// methods (no network layer to submit to — they exist so real-world form
-/// code doesn't throw).
+/// HTMLCollection of this form's controls), real `reset()`/`requestSubmit()`
+/// (see [`form_reset`]/[`form_request_submit`]'s own docs), and a still-noop
+/// `submit()` — per spec `submit()` doesn't fire a `"submit"` event or run
+/// constraint validation either (unlike `requestSubmit()`), so the *only*
+/// thing missing from it is the actual network request/navigation this
+/// engine has no page-navigation-from-script layer to perform; existing
+/// real-world form code calling it just doesn't throw.
 pub(super) unsafe fn define_form_properties(ctx: *mut sys::JSContext, proto: sys::JSValue) {
     let cname = CString::new("elements").unwrap();
     let getter = sys::JS_NewCFunction2(
@@ -39,16 +43,23 @@ pub(super) unsafe fn define_form_properties(ctx: *mut sys::JSContext, proto: sys
     );
     sys::JS_FreeAtom(ctx, atom);
 
-    for name in ["submit", "reset"] {
+    let submit_name = CString::new("submit").unwrap();
+    let submit_fn = sys::JS_NewCFunction2(
+        ctx,
+        std::mem::transmute::<sys::JSCFunction, sys::JSCFunction>(element_scroll_noop),
+        submit_name.as_ptr(),
+        0,
+        sys::JS_CFUNC_GENERIC,
+        0,
+    );
+    sys::JS_SetPropertyStr(ctx, proto, submit_name.as_ptr(), submit_fn);
+
+    for (name, func) in [
+        ("reset", form_reset as sys::JSCFunction),
+        ("requestSubmit", form_request_submit as sys::JSCFunction),
+    ] {
         let cname = CString::new(name).unwrap();
-        let value = sys::JS_NewCFunction2(
-            ctx,
-            std::mem::transmute::<sys::JSCFunction, sys::JSCFunction>(element_scroll_noop),
-            cname.as_ptr(),
-            0,
-            sys::JS_CFUNC_GENERIC,
-            0,
-        );
+        let value = sys::JS_NewCFunction2(ctx, func, cname.as_ptr(), 0, sys::JS_CFUNC_GENERIC, 0);
         sys::JS_SetPropertyStr(ctx, proto, cname.as_ptr(), value);
     }
 }
@@ -66,6 +77,91 @@ unsafe extern "C" fn form_elements_get(
     }
     let controls = descendants_matching_tags(&*dom, id, &["input", "select", "textarea", "button"]);
     html_collection(ctx, controls)
+}
+
+/// Real `HTMLFormElement.reset()`: dispatches a cancelable `"reset"` event
+/// on the form first (per spec order) and, unless canceled, restores every
+/// `<input>`/`<textarea>` descendant's live `.value` to its `.defaultValue`
+/// (the `value` attribute — see `content::define_default_value`'s doc).
+/// Restoring goes straight through `dom::Dom::set_value`, not the JS
+/// `value` setter (`content::node_value_set`), so it does *not* fire an
+/// `"input"` event per control — matches real `reset()`, which only fires
+/// its own one `"reset"` event, not a cascade of `"input"`s.
+///
+/// Scope cut: `<select>`/checkbox/radio controls aren't touched. This
+/// engine's `.selected`/`.checked` (`attributes.rs`) are still simplified
+/// as *direct* reflection of the `selected`/`checked` attributes (a
+/// pre-existing deviation, not one this pass introduces) — so once script
+/// mutates either, the markup-authored default is already gone with
+/// nothing left to restore from. Giving those controls real independent
+/// default-state storage is a separate, larger follow-up.
+unsafe extern "C" fn form_reset(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    if !crate::events::dispatch(ctx, this_val, "reset") {
+        return sys::js_undefined();
+    }
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return sys::js_undefined();
+    }
+    for control in descendants_matching_tags(&*dom, id, &["input", "textarea"]) {
+        let default = (*dom)
+            .attribute(control, "value")
+            .unwrap_or_default()
+            .to_string();
+        (*dom).set_value(control, &default);
+    }
+    sys::js_undefined()
+}
+
+/// Real `HTMLFormElement.requestSubmit()`: per spec, interactively
+/// validates every named control first (real `checkValidity()`, reused
+/// directly rather than duplicated — each failing control gets its own
+/// real `"invalid"` event, same as calling `checkValidity()` on it
+/// directly would); if every control is valid, dispatches a real
+/// cancelable `"submit"` event on the form. Whether or not anything
+/// listens or cancels it, no actual network request/navigation happens —
+/// same documented gap `submit()` already has (no page-navigation-from-
+/// script layer in this engine), the real, spec-shaped part here is the
+/// validation-gate-then-event sequencing a script can observe and act on.
+unsafe extern "C" fn form_request_submit(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return sys::js_undefined();
+    }
+    let node_class = crate::class_registry::class_id_for(
+        sys::JS_GetRuntime(ctx),
+        super::node_registry::NODE_CLASS_KIND,
+    );
+    let mut all_valid = true;
+    for control in descendants_matching_tags(&*dom, id, &["input", "select", "textarea"]) {
+        let control_obj = super::node_registry::node_object(ctx, node_class, control);
+        let result = check_validity(ctx, control_obj, 0, std::ptr::null_mut());
+        let valid = result.tag == sys::JS_TAG_BOOL && result.u.int32 != 0;
+        sys::JS_FreeValue(ctx, control_obj);
+        if !valid {
+            all_valid = false;
+        }
+    }
+    if all_valid {
+        crate::events::dispatch(ctx, this_val, "submit");
+    }
+    sys::js_undefined()
 }
 
 /// Defines `HTMLSelectElement`-specific properties: `options`

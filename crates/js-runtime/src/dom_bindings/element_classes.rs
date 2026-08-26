@@ -13,7 +13,8 @@ use super::attributes::{define_attribute_properties, define_attributes_collectio
 use super::class_list::define_class_list;
 use super::collections::define_selector_methods;
 use super::content::{
-    define_inner_outer_html, define_node_value, define_text_content, define_value,
+    define_default_value, define_inner_outer_html, define_node_value, define_text_content,
+    define_value,
 };
 use super::dataset::define_dataset;
 use super::forms::{
@@ -65,6 +66,7 @@ unsafe fn ensure_node_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
     crate::layout_measurement::define_layout_measurement(ctx, proto);
     define_navigation(ctx, proto);
     define_value(ctx, proto);
+    define_default_value(ctx, proto);
     define_node_value(ctx, proto);
     define_validation_and_labels(ctx, proto);
     define_inner_outer_html(ctx, proto);

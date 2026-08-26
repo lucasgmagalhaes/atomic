@@ -61,7 +61,7 @@ mod scroll_focus;
 mod selectors;
 mod util;
 
-pub(crate) use node_registry::{cleanup, node_id, node_object, parent_node_id};
+pub(crate) use node_registry::{cleanup, node_class_id_for, node_id, node_object, parent_node_id};
 
 /// Registers the `Node`/`Element`/`HTMLElement`/HTML-subclass interface
 /// hierarchy (`element_classes::install_classes`) and the global `document`

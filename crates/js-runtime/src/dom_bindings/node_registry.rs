@@ -124,7 +124,7 @@ const ALL_NODE_CLASS_KINDS: &[&str] = &[
 /// Returns the class ID for a node based on its `NodeData` variant and tag.
 /// Elements get their specific subclass (HTMLInputElement, etc.), text/comment/
 /// document-fragment nodes get the base `Node` class.
-pub(super) unsafe fn node_class_id_for(
+pub(crate) unsafe fn node_class_id_for(
     ctx: *mut sys::JSContext,
     dom: *mut dom::Dom,
     id: dom::NodeId,

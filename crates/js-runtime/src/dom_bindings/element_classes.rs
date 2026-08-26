@@ -48,6 +48,12 @@ unsafe fn ensure_node_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
     exotic: std::ptr::null_mut(),
   };
   let class_id = crate::class_registry::ensure_class(rt, NODE_CLASS_KIND, &def);
+  let existing = sys::JS_GetClassProto(ctx, class_id);
+  let already_registered = existing.tag == sys::JS_TAG_OBJECT;
+  sys::JS_FreeValue(ctx, existing);
+  if already_registered {
+    return class_id;
+  }
 
   let proto = sys::JS_NewObject(ctx);
   define_text_content(ctx, proto);
@@ -83,6 +89,12 @@ unsafe fn ensure_element_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
     exotic: std::ptr::null_mut(),
   };
   let class_id = crate::class_registry::ensure_class(rt, ELEMENT_CLASS_KIND, &def);
+  let existing = sys::JS_GetClassProto(ctx, class_id);
+  let already_registered = existing.tag == sys::JS_TAG_OBJECT;
+  sys::JS_FreeValue(ctx, existing);
+  if already_registered {
+    return class_id;
+  }
 
   let node_proto = sys::JS_GetClassProto(ctx, ensure_node_class(ctx));
   let proto = sys::JS_NewObject(ctx);
@@ -106,6 +118,12 @@ unsafe fn ensure_html_element_class(ctx: *mut sys::JSContext) -> sys::JSClassID 
     exotic: std::ptr::null_mut(),
   };
   let class_id = crate::class_registry::ensure_class(rt, HTML_ELEMENT_CLASS_KIND, &def);
+  let existing = sys::JS_GetClassProto(ctx, class_id);
+  let already_registered = existing.tag == sys::JS_TAG_OBJECT;
+  sys::JS_FreeValue(ctx, existing);
+  if already_registered {
+    return class_id;
+  }
 
   let element_proto = sys::JS_GetClassProto(ctx, ensure_element_class(ctx));
   let proto = sys::JS_NewObject(ctx);
@@ -129,6 +147,12 @@ unsafe fn ensure_html_subclass(ctx: *mut sys::JSContext, kind: &'static str) -> 
     exotic: std::ptr::null_mut(),
   };
   let class_id = crate::class_registry::ensure_class(rt, kind, &def);
+  let existing = sys::JS_GetClassProto(ctx, class_id);
+  let already_registered = existing.tag == sys::JS_TAG_OBJECT;
+  sys::JS_FreeValue(ctx, existing);
+  if already_registered {
+    return class_id;
+  }
 
   let html_element_proto = sys::JS_GetClassProto(ctx, ensure_html_element_class(ctx));
   let proto = sys::JS_NewObject(ctx);

@@ -100,6 +100,14 @@
 //!   how painting/hit-testing account for it. Replies `SCROLLED`, or
 //!   `ERROR <message>` if `dy` doesn't parse as a number. Reset to `0` by
 //!   `RELOAD`/`NAVIGATE`, same as `focused_id`. No horizontal scroll.
+//!   The page's own script sees and can drive the same value now too
+//!   (`window.scrollY`/`pageYOffset`/`scroll`/`scrollTo`/`scrollBy` —
+//!   `js_runtime::window`, `ROADMAP.md` P3 item 22): [`sync_scroll`] runs
+//!   before every command's paint, reading back whatever the page's own
+//!   script last requested (`Context::scroll_y`) and re-clamping it the
+//!   same way this command already did, so a `SCROLL` from the shell and a
+//!   `window.scrollTo(...)` from the page converge on the one authoritative
+//!   offset instead of racing.
 //! - `EVAL <script>` -> evaluates arbitrary JS in the current page's own
 //!   context (the automation/devtools-console entry point this protocol
 //!   previously had no equivalent of - every other command was a fixed,
@@ -168,6 +176,25 @@ use network::{parse_dns_arg, parse_proxy_arg};
 
 const TARGET_FPS: u32 = 60;
 const FRAME_INTERVAL: Duration = Duration::from_nanos(1_000_000_000 / TARGET_FPS as u64);
+
+/// Reconciles `scroll_top` (the loop's own render/hit-test offset) with
+/// whatever `page.ctx`'s real `window.scrollY` currently holds — a page's
+/// own script (a `scrollTo` call, or a `"load"`/timer/click-handler that
+/// runs one) can change that independently of any `SCROLL` command, so this
+/// must run before every paint, not just after `SCROLL` itself. Clamps
+/// against real content height (same `[0, content_height - viewport_height]`
+/// range `SCROLL`'s own handling already enforced) and writes the clamped
+/// result back into `page.ctx` too, so a page that requested an
+/// out-of-range offset observes the corrected value on its very next read
+/// — the host is authoritative, script only requests, same split a real
+/// compositor-driven scroll has.
+fn sync_scroll(page: &mut page::Page, width: u32, height: u32, scroll_top: &mut f64) {
+    let requested = page.ctx.scroll_y();
+    let max_scroll = (page.content_height(width) - height as f64).max(0.0);
+    let clamped = requested.clamp(0.0, max_scroll);
+    *scroll_top = clamped;
+    page.ctx.set_scroll_y(clamped);
+}
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -293,6 +320,7 @@ fn main() {
                 page = loaded;
                 focused_id = None;
                 scroll_top = 0.0;
+                sync_scroll(&mut page, width, height, &mut scroll_top);
                 writer.publish(&page.render(&renderer, width, height, scroll_top));
                 match error {
                     Some(message) => {
@@ -321,6 +349,7 @@ fn main() {
                 page = loaded;
                 focused_id = None;
                 scroll_top = 0.0;
+                sync_scroll(&mut page, width, height, &mut scroll_top);
                 writer.publish(&page.render(&renderer, width, height, scroll_top));
                 match error {
                     Some(message) => {
@@ -333,6 +362,7 @@ fn main() {
                 let _ = stdout.flush();
             } else if let Some(rest) = line.strip_prefix("CLICK ") {
                 let result = dispatch_click(&page.ctx, rest.trim());
+                sync_scroll(&mut page, width, height, &mut scroll_top);
                 writer.publish(&page.render(&renderer, width, height, scroll_top));
                 match result {
                     Ok(()) => {
@@ -352,6 +382,7 @@ fn main() {
                 match coords {
                     Some((x, y)) => {
                         let result = dispatch_click_at(&mut page, width, x, y, scroll_top);
+                        sync_scroll(&mut page, width, height, &mut scroll_top);
                         writer.publish(&page.render(&renderer, width, height, scroll_top));
                         match result {
                             Ok(focus) => {
@@ -372,6 +403,7 @@ fn main() {
                 match &focused_id {
                     Some(id) => {
                         let result = type_key(&page.ctx, id, key);
+                        sync_scroll(&mut page, width, height, &mut scroll_top);
                         writer.publish(&page.render(&renderer, width, height, scroll_top));
                         match result {
                             Ok(()) => {
@@ -393,6 +425,7 @@ fn main() {
             } else if line == "TAB" || line == "TAB_REVERSE" {
                 let reverse = line == "TAB_REVERSE";
                 let result = tab_focus(&mut page, reverse);
+                sync_scroll(&mut page, width, height, &mut scroll_top);
                 writer.publish(&page.render(&renderer, width, height, scroll_top));
                 match result {
                     Ok(Some(id)) => {
@@ -413,6 +446,7 @@ fn main() {
                 let selector = parts.next().unwrap_or("").trim();
                 let value = parts.next().unwrap_or("");
                 let result = fill_element(&page.ctx, selector, value);
+                sync_scroll(&mut page, width, height, &mut scroll_top);
                 writer.publish(&page.render(&renderer, width, height, scroll_top));
                 match result {
                     Ok(()) => {
@@ -426,8 +460,8 @@ fn main() {
             } else if let Some(rest) = line.strip_prefix("SCROLL ") {
                 match rest.trim().parse::<f64>() {
                     Ok(dy) => {
-                        let max_scroll = (page.content_height(width) - height as f64).max(0.0);
-                        scroll_top = (scroll_top + dy).clamp(0.0, max_scroll);
+                        page.ctx.set_scroll_y(page.ctx.scroll_y() + dy);
+                        sync_scroll(&mut page, width, height, &mut scroll_top);
                         writer.publish(&page.render(&renderer, width, height, scroll_top));
                         let _ = writeln!(stdout, "SCROLLED");
                     }
@@ -461,6 +495,7 @@ fn main() {
                     let _ = stdout.flush();
                 } else {
                     let result = page.ctx.eval(script, "<pane eval>");
+                    sync_scroll(&mut page, width, height, &mut scroll_top);
                     writer.publish(&page.render(&renderer, width, height, scroll_top));
                     match result {
                         Ok(value) => {
@@ -523,6 +558,7 @@ fn main() {
         }
 
         page.ctx.run_pending_timers();
+        sync_scroll(&mut page, width, height, &mut scroll_top);
         writer.publish(&page.render(&renderer, width, height, scroll_top));
 
         // Fixed-cadence scheduling, not `sleep(frame_interval)` in a loop -

@@ -56,7 +56,7 @@ Read [architecture/compatibility.md](architecture/compatibility.md) and [matrix/
 
 Read [matrix/css-layout.md](matrix/css-layout.md) and [matrix/paint.md](matrix/paint.md).
 
-22. `[ ]` Real scrolling (scroll position/APIs are documented no-op stubs today — no real viewport exists).
+22. `[~]` Real scrolling — done (2026-08-26) for the document/viewport level: `window.scrollY`/`pageYOffset`/`scroll`/`scrollTo`/`scrollBy` (`js_runtime::window`) now read/write the same real scroll offset `profile-worker`'s `SCROLL` command already painted with, two-way (`Context::scroll_y`/`set_scroll_y`, `sync_scroll` in `profile_worker::main` reconciles them before every paint, host-clamped against real content height either way) — proven end to end (`crates/profile/tests/profile_test.rs`'s `window_scroll_to_from_page_script_moves_the_real_painted_viewport`: a page script's own `window.scrollTo(...)` moves the actual painted pixels, not just a JS-facing number). Still `[ ]`: per-element `scrollTop`/`scrollLeft`/`scroll()` on an arbitrary `overflow: auto/scroll` container (`Element.prototype`'s own scroll methods, `dom_bindings/scroll_focus.rs`, stay no-op stubs — only the one document-level viewport is real), and horizontal scroll (`scrollX`/`pageXOffset` always `0`, matching `layout-engine`'s own no-horizontal-overflow scope).
 23. `[ ]` Viewport.
 24. `[ ]` Stacking contexts.
 25. `[ ]` z-index.

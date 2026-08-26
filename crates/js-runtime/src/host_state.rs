@@ -85,6 +85,19 @@ pub(crate) struct HostState {
     /// operation; `None` means the host did not provide a policy and leaves
     /// the feature available.
     pub permissions_policy: Option<String>,
+    /// Real document/viewport vertical scroll offset — backs `window.scrollY`/
+    /// `pageYOffset` and is the target of `window.scroll`/`scrollTo`/
+    /// `scrollBy` (see `crate::window`). Two-way, unlike every other field
+    /// here: a host both writes it (`Context::set_scroll_y`, after its own
+    /// input handling moves the viewport — `profile-worker`'s `SCROLL`
+    /// command) *and* reads it back (`Context::scroll_y`) after running a
+    /// command's script, since a page's own `scroll`-event handler or a
+    /// script calling `scrollTo` can change it too; the host is the one
+    /// that clamps it against real content height before the next paint,
+    /// since only the host knows that (`Page::content_height`). No
+    /// horizontal scroll modeled — `scrollX`/`pageXOffset` always read `0`,
+    /// matching `layout-engine`'s own "no horizontal overflow" scope.
+    pub scroll_y: f64,
 }
 
 /// Reads the `HostState` behind `ctx`'s opaque slot, or null if unset

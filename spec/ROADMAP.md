@@ -4,6 +4,15 @@
 
 **Before picking up any `[ ]`/`[~]` item: read [RULES.md](RULES.md) first.** It's short. Each item below links to its architecture write-up (the *how*) and matrix section (the *current detail*).
 
+## Product scope decision (2026-08-26)
+
+Discussed and settled: this engine targets a **hybrid niche**, not general-purpose web browsing and not purely a learning exercise either. Concretely:
+
+- **Target content**: controlled/curated sites this product is built for (idle games, dashboards, kiosk-style content) — not "any site on the internet." Full WPT/general-web conformance is explicitly *not* the near-term goal; `architecture/compatibility.md`'s WPT subset targets should stay scoped to what the actual target content needs, not chased for its own sake.
+- **Where this engine can genuinely compete on performance**: memory footprint per idle tab/profile, cold-start time, idle CPU — real, measurable wins from QuickJS-ng (no JIT/huge heap) plus a minimal per-profile process versus Chromium's much heavier baseline.
+- **Where it cannot compete**: raw JS execution throughput (V8's JIT vs QuickJS's interpreter), complex layout/paint throughput (Skia + GPU compositor vs this engine's current whole-frame repaint — see P1/P3's still-`[ ]` items: paint damage tracking, compositing layers, incremental layout). Don't market or optimize toward beating Chromium on these axes — it's not realistic for a small engine.
+- **Implication for prioritization**: features that unblock "a well-behaved modern site renders correctly" (ES Modules, real scrolling/viewport, stacking contexts/z-index — P2/P3) matter more than exotic web-platform completeness (Shadow DOM, Custom Elements, CSS Grid — P5) *unless* the target content actually needs them.
+
 ---
 
 ## P0 — Architectural Foundations

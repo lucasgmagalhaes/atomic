@@ -53,8 +53,8 @@ use quickjs_sys as sys;
 type Key = (usize, &'static str);
 
 fn registry() -> &'static Mutex<HashMap<Key, sys::JSClassID>> {
-  static REGISTRY: OnceLock<Mutex<HashMap<Key, sys::JSClassID>>> = OnceLock::new();
-  REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+    static REGISTRY: OnceLock<Mutex<HashMap<Key, sys::JSClassID>>> = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 /// Returns `rt`'s class ID for `kind`, registering a fresh one (via a
@@ -65,22 +65,22 @@ fn registry() -> &'static Mutex<HashMap<Key, sys::JSClassID>> {
 /// `File` intentionally share one class/kind, so `File`'s call after
 /// `Blob`'s on the same runtime is a pure cache hit).
 pub(crate) unsafe fn ensure_class(
-  rt: *mut sys::JSRuntime,
-  kind: &'static str,
-  def: &sys::JSClassDef,
+    rt: *mut sys::JSRuntime,
+    kind: &'static str,
+    def: &sys::JSClassDef,
 ) -> sys::JSClassID {
-  let mut map = registry()
-    .lock()
-    .unwrap_or_else(|poisoned| poisoned.into_inner());
-  let key = (rt as usize, kind);
-  if let Some(&id) = map.get(&key) {
-    return id;
-  }
-  let mut fresh: sys::JSClassID = 0;
-  let id = sys::JS_NewClassID(rt, &mut fresh);
-  sys::JS_NewClass(rt, id, def);
-  map.insert(key, id);
-  id
+    let mut map = registry()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let key = (rt as usize, kind);
+    if let Some(&id) = map.get(&key) {
+        return id;
+    }
+    let mut fresh: sys::JSClassID = 0;
+    let id = sys::JS_NewClassID(rt, &mut fresh);
+    sys::JS_NewClass(rt, id, def);
+    map.insert(key, id);
+    id
 }
 
 /// Looks up `rt`'s already-registered class ID for `kind`, for
@@ -90,20 +90,20 @@ pub(crate) unsafe fn ensure_class(
 /// `kind` was never registered for this runtime — safely fails whatever
 /// `JS_GetOpaque` check follows, rather than panicking.
 pub(crate) fn class_id_for(rt: *mut sys::JSRuntime, kind: &'static str) -> sys::JSClassID {
-  registry()
-    .lock()
-    .unwrap_or_else(|poisoned| poisoned.into_inner())
-    .get(&(rt as usize, kind))
-    .copied()
-    .unwrap_or(0)
+    registry()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(&(rt as usize, kind))
+        .copied()
+        .unwrap_or(0)
 }
 
 /// Removes every entry for `rt` — must be called from `Runtime::drop`
 /// before the runtime's memory can be reused by a new one (see module
 /// docs).
 pub(crate) fn cleanup_runtime(rt: *mut sys::JSRuntime) {
-  registry()
-    .lock()
-    .unwrap_or_else(|poisoned| poisoned.into_inner())
-    .retain(|(rt_ptr, _), _| *rt_ptr != rt as usize);
+    registry()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .retain(|(rt_ptr, _), _| *rt_ptr != rt as usize);
 }

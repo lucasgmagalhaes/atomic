@@ -6,8 +6,8 @@ use shell::i18n::{self, Locale};
 use super::NimbleApp;
 
 impl NimbleApp {
-  pub(super) fn draw_toolbar(&mut self, ctx: &egui::Context) {
-    egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
+    pub(super) fn draw_toolbar(&mut self, ctx: &egui::Context) {
+        egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Workspace:");
                 let active_index = self.workspace.active_index();
@@ -94,5 +94,5 @@ impl NimbleApp {
                 ui.colored_label(egui::Color32::RED, format!("{prefix} {}: {error}", selected.current_url()));
             }
         });
-  }
+    }
 }

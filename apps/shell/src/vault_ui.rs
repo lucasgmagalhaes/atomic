@@ -20,7 +20,7 @@ use std::path::PathBuf;
 use security::vault::CredentialVault;
 
 pub fn default_vault_dir() -> PathBuf {
-  std::env::temp_dir().join("nimble-vault")
+    std::env::temp_dir().join("nimble-vault")
 }
 
 /// Opens (creating if needed) the vault at `dir/vault.enc` with its key at
@@ -29,7 +29,7 @@ pub fn default_vault_dir() -> PathBuf {
 /// vault (see that module's doc on why that's not real OS-keychain
 /// integration).
 pub fn open(dir: &std::path::Path) -> std::io::Result<CredentialVault> {
-  CredentialVault::open_or_create(dir.join("vault.enc"), dir.join("vault.key"))
+    CredentialVault::open_or_create(dir.join("vault.enc"), dir.join("vault.key"))
 }
 
 /// Same as [`open`], but the master key is sourced from the real OS
@@ -46,5 +46,5 @@ pub fn open(dir: &std::path::Path) -> std::io::Result<CredentialVault> {
 /// failure against whatever key the other mode expects) instead of what it
 /// actually is - two independent vaults, not a migration between them.
 pub fn open_with_keychain(dir: &std::path::Path) -> std::io::Result<CredentialVault> {
-  CredentialVault::open_or_create_with_keychain(dir.join("vault-keychain.enc"))
+    CredentialVault::open_or_create_with_keychain(dir.join("vault-keychain.enc"))
 }

@@ -20,7 +20,7 @@ use crate::tree::{Dimensions, LayoutBox};
 use dom::NodeId;
 
 fn contains(d: &Dimensions, x: f64, y: f64) -> bool {
-  x >= d.x && x < d.x + d.width && y >= d.y && y < d.y + d.height
+    x >= d.x && x < d.x + d.width && y >= d.y && y < d.y + d.height
 }
 
 /// Finds the deepest (most specific) box under `(x, y)`, walking children
@@ -33,13 +33,13 @@ fn contains(d: &Dimensions, x: f64, y: f64) -> bool {
 /// `None` if `(x, y)` falls outside `root` entirely (e.g. a click below
 /// the tallest content, in empty viewport space).
 pub fn hit_test(root: &LayoutBox, x: f64, y: f64) -> Option<NodeId> {
-  if !contains(&root.dimensions, x, y) {
-    return None;
-  }
-  for child in root.children.iter().rev() {
-    if let Some(hit) = hit_test(child, x, y) {
-      return Some(hit);
+    if !contains(&root.dimensions, x, y) {
+        return None;
     }
-  }
-  Some(root.node)
+    for child in root.children.iter().rev() {
+        if let Some(hit) = hit_test(child, x, y) {
+            return Some(hit);
+        }
+    }
+    Some(root.node)
 }

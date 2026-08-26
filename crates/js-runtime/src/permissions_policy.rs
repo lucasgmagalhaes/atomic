@@ -16,14 +16,13 @@
 //! allowed (real spec default for a top-level document is `*` unless the
 //! policy says otherwise).
 fn find_directive<'a>(policy: &'a str, feature: &str) -> Option<&'a str> {
-  policy.split(',').find_map(|part| {
-    let part = part.trim();
-    let (name, rest) = part.split_once('=')?;
-    name
-      .trim()
-      .eq_ignore_ascii_case(feature)
-      .then(|| rest.trim())
-  })
+    policy.split(',').find_map(|part| {
+        let part = part.trim();
+        let (name, rest) = part.split_once('=')?;
+        name.trim()
+            .eq_ignore_ascii_case(feature)
+            .then(|| rest.trim())
+    })
 }
 
 /// Whether `feature` (e.g. `"clipboard-write"`, `"notifications"`) is
@@ -32,19 +31,19 @@ fn find_directive<'a>(policy: &'a str, feature: &str) -> Option<&'a str> {
 /// `Context::set_permissions_policy`) always allows — same
 /// degrade-gracefully pattern `csp`/`cors` already use for missing state.
 pub(crate) fn is_feature_allowed(policy: Option<&str>, feature: &str) -> bool {
-  let Some(policy) = policy else {
-    return true;
-  };
-  let Some(allowlist) = find_directive(policy, feature) else {
-    return true;
-  };
-  let allowlist = allowlist.trim_matches(|c| c == '(' || c == ')').trim();
-  if allowlist.is_empty() {
-    return false;
-  }
-  allowlist
-    .split_whitespace()
-    .any(|token| token == "*" || token.trim_matches('"') == "self")
+    let Some(policy) = policy else {
+        return true;
+    };
+    let Some(allowlist) = find_directive(policy, feature) else {
+        return true;
+    };
+    let allowlist = allowlist.trim_matches(|c| c == '(' || c == ')').trim();
+    if allowlist.is_empty() {
+        return false;
+    }
+    allowlist
+        .split_whitespace()
+        .any(|token| token == "*" || token.trim_matches('"') == "self")
 }
 
 /// Checks the response policy attached to `ctx`'s document. Keeping this at
@@ -53,6 +52,6 @@ pub(crate) fn is_feature_allowed(policy: Option<&str>, feature: &str) -> bool {
 /// it. Contexts without a DOM-host state have no response policy and remain
 /// unrestricted, matching `csp`'s existing degradation behavior.
 pub(crate) unsafe fn is_allowed(ctx: *mut quickjs_sys::JSContext, feature: &str) -> bool {
-  let state = crate::host_state::get(ctx);
-  state.is_null() || is_feature_allowed((*state).permissions_policy.as_deref(), feature)
+    let state = crate::host_state::get(ctx);
+    state.is_null() || is_feature_allowed((*state).permissions_policy.as_deref(), feature)
 }

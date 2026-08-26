@@ -43,22 +43,22 @@ use std::rc::Rc;
 /// (named, *shared* `profile::Profile` handles — see below) it's allowed
 /// to control, and the cron/event state `tick()` drives.
 pub struct AutomationEngine<'rt> {
-  ctx: Context<'rt>,
-  // Boxed so the heap address stays valid for the raw pointer stashed via
-  // `JS_SetContextOpaque` even though `AutomationEngine` itself may move
-  // (e.g. returned out of `new`) — same convention as js-runtime's own
-  // `Context::_host_state`.
-  //
-  // `Rc<RefCell<Profile>>`, not a borrowed `&mut` — a real host
-  // (`apps/shell`) needs to keep displaying/polling the same profile
-  // while a script also drives it, and (for a long-lived engine kept
-  // alive across GUI frames — see [`rebind`](Self::rebind)) needs to
-  // hand this engine a *fresh* set of panes every frame without holding
-  // a borrow of its own pane list open the whole time. Shared ownership
-  // with runtime-checked mutable access is the safe way to let both
-  // sides reach the same `Profile` without a self-referential struct or
-  // raw pointers into a `Vec` that might reallocate between frames.
-  panes: Box<HashMap<String, Rc<RefCell<profile::Profile>>>>,
+    ctx: Context<'rt>,
+    // Boxed so the heap address stays valid for the raw pointer stashed via
+    // `JS_SetContextOpaque` even though `AutomationEngine` itself may move
+    // (e.g. returned out of `new`) — same convention as js-runtime's own
+    // `Context::_host_state`.
+    //
+    // `Rc<RefCell<Profile>>`, not a borrowed `&mut` — a real host
+    // (`apps/shell`) needs to keep displaying/polling the same profile
+    // while a script also drives it, and (for a long-lived engine kept
+    // alive across GUI frames — see [`rebind`](Self::rebind)) needs to
+    // hand this engine a *fresh* set of panes every frame without holding
+    // a borrow of its own pane list open the whole time. Shared ownership
+    // with runtime-checked mutable access is the safe way to let both
+    // sides reach the same `Profile` without a self-referential struct or
+    // raw pointers into a `Vec` that might reallocate between frames.
+    panes: Box<HashMap<String, Rc<RefCell<profile::Profile>>>>,
 }
 
 // A plain alias, not a wrapper — so `every` keeps `setInterval`'s real
@@ -71,91 +71,94 @@ pub struct AutomationEngine<'rt> {
 const PRELUDE: &str = r#"globalThis.every = setInterval;"#;
 
 impl<'rt> AutomationEngine<'rt> {
-  /// `panes` are the profiles this script is allowed to name via
-  /// `pane("name")` — deliberately explicit rather than "every profile in
-  /// the workspace": a script's blast radius should be whatever the host
-  /// (e.g. the Settings > Automation "script sandbox" scope the spec
-  /// flags as a gap on line 260) grants it, not everything running. A
-  /// host with a `workspace::WorkspaceManager` (`apps/shell`) would build
-  /// this from the active workspace's profile ids, keeping only the ones
-  /// it actually has a live `Profile` for.
-  pub fn new(runtime: &'rt Runtime, panes: HashMap<String, Rc<RefCell<profile::Profile>>>) -> Self {
-    let ctx = Context::new(runtime);
-    let mut panes = Box::new(panes);
-    unsafe {
-      pane::register(
-        ctx.as_raw(),
-        panes.as_mut() as *mut HashMap<String, Rc<RefCell<profile::Profile>>>,
-      );
-      events::register(ctx.as_raw());
-      cron::register(ctx.as_raw());
+    /// `panes` are the profiles this script is allowed to name via
+    /// `pane("name")` — deliberately explicit rather than "every profile in
+    /// the workspace": a script's blast radius should be whatever the host
+    /// (e.g. the Settings > Automation "script sandbox" scope the spec
+    /// flags as a gap on line 260) grants it, not everything running. A
+    /// host with a `workspace::WorkspaceManager` (`apps/shell`) would build
+    /// this from the active workspace's profile ids, keeping only the ones
+    /// it actually has a live `Profile` for.
+    pub fn new(
+        runtime: &'rt Runtime,
+        panes: HashMap<String, Rc<RefCell<profile::Profile>>>,
+    ) -> Self {
+        let ctx = Context::new(runtime);
+        let mut panes = Box::new(panes);
+        unsafe {
+            pane::register(
+                ctx.as_raw(),
+                panes.as_mut() as *mut HashMap<String, Rc<RefCell<profile::Profile>>>,
+            );
+            events::register(ctx.as_raw());
+            cron::register(ctx.as_raw());
+        }
+        let engine = AutomationEngine { ctx, panes };
+        engine
+            .ctx
+            .eval(PRELUDE, "automation-prelude.js")
+            .expect("prelude is static and must not fail to eval");
+        engine
     }
-    let engine = AutomationEngine { ctx, panes };
-    engine
-      .ctx
-      .eval(PRELUDE, "automation-prelude.js")
-      .expect("prelude is static and must not fail to eval");
-    engine
-  }
 
-  /// Replaces which real profiles `pane("name")` resolves to, in place —
-  /// the primitive a long-lived host (`apps/shell`'s GUI loop, ticking
-  /// this same engine every frame so a script's `every`/`on`/`cron`
-  /// callbacks actually keep firing, not just registering once and never
-  /// running — see `apps/shell/src/main.rs`'s `tick_automation_engine`)
-  /// needs to keep pane membership current as panes are added/closed/
-  /// moved between workspaces, *without* dropping and recreating the
-  /// engine (which would lose every registered `every`/`on`/cron
-  /// callback and any JS-side state a script built up).
-  ///
-  /// Replaces the `HashMap`'s *contents*, not the `Box` itself — the
-  /// native `pane` binding's opaque pointer (set once in [`new`](Self::new))
-  /// points at the `Box`'s stable heap address, which this must not
-  /// move.
-  pub fn rebind(&mut self, panes: HashMap<String, Rc<RefCell<profile::Profile>>>) {
-    *self.panes = panes;
-  }
+    /// Replaces which real profiles `pane("name")` resolves to, in place —
+    /// the primitive a long-lived host (`apps/shell`'s GUI loop, ticking
+    /// this same engine every frame so a script's `every`/`on`/`cron`
+    /// callbacks actually keep firing, not just registering once and never
+    /// running — see `apps/shell/src/main.rs`'s `tick_automation_engine`)
+    /// needs to keep pane membership current as panes are added/closed/
+    /// moved between workspaces, *without* dropping and recreating the
+    /// engine (which would lose every registered `every`/`on`/cron
+    /// callback and any JS-side state a script built up).
+    ///
+    /// Replaces the `HashMap`'s *contents*, not the `Box` itself — the
+    /// native `pane` binding's opaque pointer (set once in [`new`](Self::new))
+    /// points at the `Box`'s stable heap address, which this must not
+    /// move.
+    pub fn rebind(&mut self, panes: HashMap<String, Rc<RefCell<profile::Profile>>>) {
+        *self.panes = panes;
+    }
 
-  /// Runs a user script's top-level code once (registers its
-  /// `every`/`on`/cron callbacks; doesn't fire any of them yet).
-  pub fn run(&self, source: &str, filename: &str) -> Result<String, EvalError> {
-    self.ctx.eval(source, filename)
-  }
+    /// Runs a user script's top-level code once (registers its
+    /// `every`/`on`/cron callbacks; doesn't fire any of them yet).
+    pub fn run(&self, source: &str, filename: &str) -> Result<String, EvalError> {
+        self.ctx.eval(source, filename)
+    }
 
-  /// One cooperative tick: pumps due timers/`requestAnimationFrame`
-  /// (`every` included, since it's just `setInterval`) and due cron
-  /// triggers. Same "no real event loop yet, the host must call this"
-  /// deviation `js_runtime::Context::run_pending_timers` already
-  /// documents — a real per-schedule engine belongs with `profile`/`ipc`'s
-  /// eventual per-tab event loop, not invented ahead of it here.
-  pub fn tick(&self) {
-    self.ctx.run_pending_timers();
-    unsafe { cron::pump(self.ctx.as_raw()) };
-  }
+    /// One cooperative tick: pumps due timers/`requestAnimationFrame`
+    /// (`every` included, since it's just `setInterval`) and due cron
+    /// triggers. Same "no real event loop yet, the host must call this"
+    /// deviation `js_runtime::Context::run_pending_timers` already
+    /// documents — a real per-schedule engine belongs with `profile`/`ipc`'s
+    /// eventual per-tab event loop, not invented ahead of it here.
+    pub fn tick(&self) {
+        self.ctx.run_pending_timers();
+        unsafe { cron::pump(self.ctx.as_raw()) };
+    }
 
-  /// Fires every `on(name, ...)` listener registered for `name` — the
-  /// host's hook for events a script can't observe on its own (e.g. a
-  /// watchdog noticing a pane went unresponsive). Not a DOM event: this
-  /// context has no `dom::Dom` (see `Context::new` vs `Context::with_dom`
-  /// in `js-runtime`), so there's no `dispatchEvent` overlap to conflict
-  /// with.
-  pub fn emit(&self, name: &str) {
-    unsafe { events::emit(self.ctx.as_raw(), name) };
-  }
+    /// Fires every `on(name, ...)` listener registered for `name` — the
+    /// host's hook for events a script can't observe on its own (e.g. a
+    /// watchdog noticing a pane went unresponsive). Not a DOM event: this
+    /// context has no `dom::Dom` (see `Context::new` vs `Context::with_dom`
+    /// in `js-runtime`), so there's no `dispatchEvent` overlap to conflict
+    /// with.
+    pub fn emit(&self, name: &str) {
+        unsafe { events::emit(self.ctx.as_raw(), name) };
+    }
 
-  pub fn pane_names(&self) -> impl Iterator<Item = &str> {
-    self.panes.keys().map(String::as_str)
-  }
+    pub fn pane_names(&self) -> impl Iterator<Item = &str> {
+        self.panes.keys().map(String::as_str)
+    }
 }
 
 impl Drop for AutomationEngine<'_> {
-  fn drop(&mut self) {
-    // Must run before `self.ctx` itself drops (which calls
-    // `JS_FreeContext`) — same ordering requirement `timers::cleanup`/
-    // `fetch_async::cleanup` already document in js-runtime.
-    unsafe {
-      events::cleanup(self.ctx.as_raw());
-      cron::cleanup(self.ctx.as_raw());
+    fn drop(&mut self) {
+        // Must run before `self.ctx` itself drops (which calls
+        // `JS_FreeContext`) — same ordering requirement `timers::cleanup`/
+        // `fetch_async::cleanup` already document in js-runtime.
+        unsafe {
+            events::cleanup(self.ctx.as_raw());
+            cron::cleanup(self.ctx.as_raw());
+        }
     }
-  }
 }

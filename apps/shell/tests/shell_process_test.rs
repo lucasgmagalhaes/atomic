@@ -11,31 +11,31 @@ use std::process::{Child, Command};
 use std::time::Duration;
 
 fn kill_and_wait(mut child: Child) {
-  let _ = child.kill();
-  let _ = child.wait();
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 #[test]
 fn shell_exe_stays_alive_past_startup() {
-  let mut child = Command::new(env!("CARGO_BIN_EXE_shell"))
-    .spawn()
-    .expect("failed to launch shell.exe");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_shell"))
+        .spawn()
+        .expect("failed to launch shell.exe");
 
-  // Real profile-worker spawn + first GPU frame takes a moment - give it
-  // more than the couple of seconds the observed crash happened within.
-  std::thread::sleep(Duration::from_secs(3));
+    // Real profile-worker spawn + first GPU frame takes a moment - give it
+    // more than the couple of seconds the observed crash happened within.
+    std::thread::sleep(Duration::from_secs(3));
 
-  match child.try_wait() {
-    Ok(None) => {
-      // Still running - the expected, healthy outcome.
-      kill_and_wait(child);
+    match child.try_wait() {
+        Ok(None) => {
+            // Still running - the expected, healthy outcome.
+            kill_and_wait(child);
+        }
+        Ok(Some(status)) => {
+            panic!("shell.exe exited on its own within 3s (status: {status}) - this is the crash this test guards against");
+        }
+        Err(e) => {
+            kill_and_wait(child);
+            panic!("failed to poll shell.exe's status: {e}");
+        }
     }
-    Ok(Some(status)) => {
-      panic!("shell.exe exited on its own within 3s (status: {status}) - this is the crash this test guards against");
-    }
-    Err(e) => {
-      kill_and_wait(child);
-      panic!("failed to poll shell.exe's status: {e}");
-    }
-  }
 }

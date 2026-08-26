@@ -15,15 +15,15 @@ use quickjs_sys as sys;
 /// doesn't clobber whatever `dom_bindings::register` already put there
 /// (or vice versa, depending on registration order).
 pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
-  let document = crate::document::get_or_create(ctx);
+    let document = crate::document::get_or_create(ctx);
 
-  let visibility_name = CString::new("visibilityState").unwrap();
-  let visibility_value =
-    sys::JS_NewStringLen(ctx, b"visible".as_ptr() as *const std::os::raw::c_char, 7);
-  sys::JS_SetPropertyStr(ctx, document, visibility_name.as_ptr(), visibility_value);
+    let visibility_name = CString::new("visibilityState").unwrap();
+    let visibility_value =
+        sys::JS_NewStringLen(ctx, b"visible".as_ptr() as *const std::os::raw::c_char, 7);
+    sys::JS_SetPropertyStr(ctx, document, visibility_name.as_ptr(), visibility_value);
 
-  let hidden_name = CString::new("hidden").unwrap();
-  sys::JS_SetPropertyStr(ctx, document, hidden_name.as_ptr(), sys::js_bool(false));
+    let hidden_name = CString::new("hidden").unwrap();
+    sys::JS_SetPropertyStr(ctx, document, hidden_name.as_ptr(), sys::js_bool(false));
 
-  sys::JS_FreeValue(ctx, document);
+    sys::JS_FreeValue(ctx, document);
 }

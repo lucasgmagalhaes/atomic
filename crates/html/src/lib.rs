@@ -14,10 +14,10 @@ pub use sink::Sink;
 /// things `dom`'s node model can't represent (doctype, template content
 /// isolation, processing instructions).
 pub fn parse(html: &str) -> Dom {
-  let sink = Sink::new();
-  parse_document(sink, ParseOpts::default())
-    .from_utf8()
-    .one(html.as_bytes())
+    let sink = Sink::new();
+    parse_document(sink, ParseOpts::default())
+        .from_utf8()
+        .one(html.as_bytes())
 }
 
 /// Same as [`parse`], but returns the id of the parsed `<html>` element
@@ -26,18 +26,18 @@ pub fn parse(html: &str) -> Dom {
 /// usually what a caller actually wants to hand to
 /// `layout_engine::build_box_tree` instead of the document node itself.
 pub fn parse_to_html_element(html: &str) -> (Dom, dom::NodeId) {
-  let dom = parse(html);
-  let root = dom.root();
-  let html_el = dom
-    .get(root)
-    .and_then(|n| {
-      n.children
-        .iter()
-        .find(|&&c| is_element_named(&dom, c, "html"))
-        .copied()
-    })
-    .unwrap_or(root);
-  (dom, html_el)
+    let dom = parse(html);
+    let root = dom.root();
+    let html_el = dom
+        .get(root)
+        .and_then(|n| {
+            n.children
+                .iter()
+                .find(|&&c| is_element_named(&dom, c, "html"))
+                .copied()
+        })
+        .unwrap_or(root);
+    (dom, html_el)
 }
 
 /// Parses `html` as an HTML *fragment* — the write side of
@@ -57,29 +57,29 @@ pub fn parse_to_html_element(html: &str) -> (Dom, dom::NodeId) {
 /// throwaway parse buffer, not meant to be kept around or attached to
 /// anything directly, since its `NodeId`s are only valid within it.
 pub fn parse_fragment(html: &str) -> (Dom, Vec<NodeId>) {
-  let dom = parse(html);
-  let root = dom.root();
-  let html_el = dom.get(root).and_then(|n| {
-    n.children
-      .iter()
-      .find(|&&c| is_element_named(&dom, c, "html"))
-      .copied()
-  });
-  let body_el = html_el.and_then(|html_el| dom.get(html_el)).and_then(|n| {
-    n.children
-      .iter()
-      .find(|&&c| is_element_named(&dom, c, "body"))
-      .copied()
-  });
-  let children = body_el
-    .or(html_el)
-    .or(Some(root))
-    .and_then(|id| dom.get(id))
-    .map(|n| n.children.clone())
-    .unwrap_or_default();
-  (dom, children)
+    let dom = parse(html);
+    let root = dom.root();
+    let html_el = dom.get(root).and_then(|n| {
+        n.children
+            .iter()
+            .find(|&&c| is_element_named(&dom, c, "html"))
+            .copied()
+    });
+    let body_el = html_el.and_then(|html_el| dom.get(html_el)).and_then(|n| {
+        n.children
+            .iter()
+            .find(|&&c| is_element_named(&dom, c, "body"))
+            .copied()
+    });
+    let children = body_el
+        .or(html_el)
+        .or(Some(root))
+        .and_then(|id| dom.get(id))
+        .map(|n| n.children.clone())
+        .unwrap_or_default();
+    (dom, children)
 }
 
 fn is_element_named(dom: &Dom, id: dom::NodeId, name: &str) -> bool {
-  matches!(&dom.get(id).map(|n| &n.data), Some(dom::NodeData::Element { tag, .. }) if tag == name)
+    matches!(&dom.get(id).map(|n| &n.data), Some(dom::NodeData::Element { tag, .. }) if tag == name)
 }

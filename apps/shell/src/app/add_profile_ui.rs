@@ -3,12 +3,12 @@
 use super::NimbleApp;
 
 impl NimbleApp {
-  pub(super) fn draw_add_profile_modal(&mut self, ctx: &egui::Context) {
-    if self.add_profile_form.is_none() {
-      return;
-    }
-    let mut open = true;
-    egui::Window::new("Add Profile").open(&mut open).show(ctx, |ui| {
+    pub(super) fn draw_add_profile_modal(&mut self, ctx: &egui::Context) {
+        if self.add_profile_form.is_none() {
+            return;
+        }
+        let mut open = true;
+        egui::Window::new("Add Profile").open(&mut open).show(ctx, |ui| {
             let form = self.add_profile_form.as_mut().expect("checked is_some above");
             egui::Grid::new("add_profile_form_grid").num_columns(2).show(ui, |ui| {
                 ui.label("Name");
@@ -45,9 +45,9 @@ impl NimbleApp {
                 }
             });
         });
-    if !open {
-      self.add_profile_form = None;
-      self.add_profile_error = None;
+        if !open {
+            self.add_profile_form = None;
+            self.add_profile_error = None;
+        }
     }
-  }
 }

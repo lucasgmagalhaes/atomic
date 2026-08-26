@@ -67,6 +67,6 @@ pub(crate) use node_registry::{cleanup, node_id, node_object, parent_node_id};
 /// hierarchy (`element_classes::install_classes`) and the global `document`
 /// object plus `DOMParser`/`XMLSerializer` (`document::install`).
 pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
-  element_classes::install_classes(ctx);
-  document::install(ctx);
+    element_classes::install_classes(ctx);
+    document::install(ctx);
 }

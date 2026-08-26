@@ -1,3 +1,3 @@
 fn main() {
-  println!("xtask stub (phase 1)");
+    println!("xtask stub (phase 1)");
 }

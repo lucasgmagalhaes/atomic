@@ -22,8 +22,8 @@ const BASE_STYLESHEET_SRC: &str = "#container { background-color: #1a1c2b; paddi
 
 /// One CSS source found while walking a page's DOM, in document order.
 enum CssSource {
-  Inline(String),
-  Link(String),
+    Inline(String),
+    Link(String),
 }
 
 /// Walks `node`'s subtree collecting `<style>` text content and
@@ -33,28 +33,28 @@ enum CssSource {
 /// is why this collects one interleaved list rather than two separate
 /// ones).
 fn collect_css_sources(dom: &Dom, node: NodeId, out: &mut Vec<CssSource>) {
-  let Some(n) = dom.get(node) else { return };
-  if let NodeData::Element {
-    tag, attributes, ..
-  } = &n.data
-  {
-    if tag == "style" {
-      out.push(CssSource::Inline(dom.text_content(node)));
-    } else if tag == "link" {
-      let is_stylesheet = attributes
-        .get("rel")
-        .map(|r| r.eq_ignore_ascii_case("stylesheet"))
-        .unwrap_or(false);
-      if is_stylesheet {
-        if let Some(href) = attributes.get("href") {
-          out.push(CssSource::Link(href.clone()));
+    let Some(n) = dom.get(node) else { return };
+    if let NodeData::Element {
+        tag, attributes, ..
+    } = &n.data
+    {
+        if tag == "style" {
+            out.push(CssSource::Inline(dom.text_content(node)));
+        } else if tag == "link" {
+            let is_stylesheet = attributes
+                .get("rel")
+                .map(|r| r.eq_ignore_ascii_case("stylesheet"))
+                .unwrap_or(false);
+            if is_stylesheet {
+                if let Some(href) = attributes.get("href") {
+                    out.push(CssSource::Link(href.clone()));
+                }
+            }
         }
-      }
     }
-  }
-  for &child in &n.children {
-    collect_css_sources(dom, child, out);
-  }
+    for &child in &n.children {
+        collect_css_sources(dom, child, out);
+    }
 }
 
 /// Real `<script>` tag execution - previously only the hardcoded demo
@@ -71,18 +71,18 @@ fn collect_css_sources(dom: &Dom, node: NodeId, out: &mut Vec<CssSource>) {
 /// external script is a real further network-fetch feature, not attempted
 /// in this pass, and its tag is walked past without effect (not an error).
 pub(crate) fn collect_script_sources(dom: &Dom, node: NodeId, out: &mut Vec<String>) {
-  let Some(n) = dom.get(node) else { return };
-  if let NodeData::Element {
-    tag, attributes, ..
-  } = &n.data
-  {
-    if tag == "script" && !attributes.contains_key("src") {
-      out.push(dom.text_content(node));
+    let Some(n) = dom.get(node) else { return };
+    if let NodeData::Element {
+        tag, attributes, ..
+    } = &n.data
+    {
+        if tag == "script" && !attributes.contains_key("src") {
+            out.push(dom.text_content(node));
+        }
     }
-  }
-  for &child in &n.children {
-    collect_script_sources(dom, child, out);
-  }
+    for &child in &n.children {
+        collect_script_sources(dom, child, out);
+    }
 }
 
 /// Walks `node`'s subtree in document order collecting every
@@ -97,24 +97,24 @@ pub(crate) fn collect_script_sources(dom: &Dom, node: NodeId, out: &mut Vec<Stri
 /// policy - header or meta, wherever the tag sits - is simply in effect
 /// for the whole page load, including its scripts.
 pub(crate) fn collect_meta_csp_policies(dom: &Dom, node: NodeId, out: &mut Vec<String>) {
-  let Some(n) = dom.get(node) else { return };
-  if let NodeData::Element {
-    tag, attributes, ..
-  } = &n.data
-  {
-    if tag == "meta"
-      && attributes
-        .get("http-equiv")
-        .is_some_and(|v| v.eq_ignore_ascii_case("content-security-policy"))
+    let Some(n) = dom.get(node) else { return };
+    if let NodeData::Element {
+        tag, attributes, ..
+    } = &n.data
     {
-      if let Some(policy) = attributes.get("content").filter(|p| !p.is_empty()) {
-        out.push(policy.clone());
-      }
+        if tag == "meta"
+            && attributes
+                .get("http-equiv")
+                .is_some_and(|v| v.eq_ignore_ascii_case("content-security-policy"))
+        {
+            if let Some(policy) = attributes.get("content").filter(|p| !p.is_empty()) {
+                out.push(policy.clone());
+            }
+        }
     }
-  }
-  for &child in &n.children {
-    collect_meta_csp_policies(dom, child, out);
-  }
+    for &child in &n.children {
+        collect_meta_csp_policies(dom, child, out);
+    }
 }
 
 /// Walks `node`'s subtree collecting every `<img src="...">`'s own
@@ -127,20 +127,20 @@ pub(crate) fn collect_meta_csp_policies(dom: &Dom, node: NodeId, out: &mut Vec<S
 /// as `mockup/rendering-engine-gaps.md` §5 originally documented as a
 /// "gap total" — this closes the missing wiring, not new primitives.
 fn collect_image_sources(dom: &Dom, node: NodeId, out: &mut Vec<(NodeId, String)>) {
-  let Some(n) = dom.get(node) else { return };
-  if let NodeData::Element {
-    tag, attributes, ..
-  } = &n.data
-  {
-    if tag == "img" {
-      if let Some(src) = attributes.get("src") {
-        out.push((node, src.clone()));
-      }
+    let Some(n) = dom.get(node) else { return };
+    if let NodeData::Element {
+        tag, attributes, ..
+    } = &n.data
+    {
+        if tag == "img" {
+            if let Some(src) = attributes.get("src") {
+                out.push((node, src.clone()));
+            }
+        }
     }
-  }
-  for &child in &n.children {
-    collect_image_sources(dom, child, out);
-  }
+    for &child in &n.children {
+        collect_image_sources(dom, child, out);
+    }
 }
 
 /// Fetches and decodes every real `<img src>` in `dom` (rooted at `root`),
@@ -156,30 +156,30 @@ fn collect_image_sources(dom: &Dom, node: NodeId, out: &mut Vec<(NodeId, String)
 /// stance `build_stylesheet` already takes, and `apply_image_sizes`
 /// itself already documents as its contract for a missing entry.
 pub(crate) fn load_images(
-  dom: &Dom,
-  root: NodeId,
-  base_url: Option<&str>,
-  storage_root: &std::path::Path,
-  proxy: Option<&net::ProxyConfig>,
-  dns_server: Option<std::net::SocketAddr>,
+    dom: &Dom,
+    root: NodeId,
+    base_url: Option<&str>,
+    storage_root: &std::path::Path,
+    proxy: Option<&net::ProxyConfig>,
+    dns_server: Option<std::net::SocketAddr>,
 ) -> HashMap<NodeId, Rc<DecodedImage>> {
-  let mut sources = Vec::new();
-  collect_image_sources(dom, root, &mut sources);
+    let mut sources = Vec::new();
+    collect_image_sources(dom, root, &mut sources);
 
-  let mut images = HashMap::new();
-  for (node, src) in sources {
-    let Some(url) = resolve_url(base_url, &src) else {
-      continue;
-    };
-    let Ok(response) = fetch_with_cookies(&url, storage_root, proxy, dns_server) else {
-      continue;
-    };
-    let Some(decoded) = image_decode::decode(&response.body) else {
-      continue;
-    };
-    images.insert(node, Rc::new(decoded));
-  }
-  images
+    let mut images = HashMap::new();
+    for (node, src) in sources {
+        let Some(url) = resolve_url(base_url, &src) else {
+            continue;
+        };
+        let Ok(response) = fetch_with_cookies(&url, storage_root, proxy, dns_server) else {
+            continue;
+        };
+        let Some(decoded) = image_decode::decode(&response.body) else {
+            continue;
+        };
+        images.insert(node, Rc::new(decoded));
+    }
+    images
 }
 
 /// Resolves a `<link href>` against `base_url` (the page's own URL - the
@@ -192,15 +192,15 @@ pub(crate) fn load_images(
 /// `base_url` to resolve against (the built-in demo page has no URL of
 /// its own).
 fn resolve_url(base_url: Option<&str>, href: &str) -> Option<String> {
-  let resolved = match base_url {
-    Some(base) => url::Url::parse(base).ok()?.join(href).ok()?,
-    None => url::Url::parse(href).ok()?,
-  };
-  if resolved.scheme() == "http" || resolved.scheme() == "https" {
-    Some(resolved.to_string())
-  } else {
-    None
-  }
+    let resolved = match base_url {
+        Some(base) => url::Url::parse(base).ok()?.join(href).ok()?,
+        None => url::Url::parse(href).ok()?,
+    };
+    if resolved.scheme() == "http" || resolved.scheme() == "https" {
+        Some(resolved.to_string())
+    } else {
+        None
+    }
 }
 
 /// Parses `css_text`, fetches and merges any `@import`s it contains (an
@@ -218,32 +218,32 @@ fn resolve_url(base_url: Option<&str>, href: &str) -> Option<String> {
 /// relative to whichever stylesheet contains the `@import`) — a
 /// documented simplification, not a distinction this worker tracks.
 fn merge_stylesheet_text(
-  sheet: &mut Stylesheet,
-  css_text: &str,
-  base_url: Option<&str>,
-  viewport_width: f64,
-  storage_root: &std::path::Path,
-  proxy: Option<&net::ProxyConfig>,
-  dns_server: Option<std::net::SocketAddr>,
+    sheet: &mut Stylesheet,
+    css_text: &str,
+    base_url: Option<&str>,
+    viewport_width: f64,
+    storage_root: &std::path::Path,
+    proxy: Option<&net::ProxyConfig>,
+    dns_server: Option<std::net::SocketAddr>,
 ) {
-  let parsed = parse_stylesheet(css_text);
-  for import in &parsed.imports {
-    let should_fetch = import
-      .media
-      .as_ref()
-      .map(|m| m.matches(viewport_width))
-      .unwrap_or(true);
-    if !should_fetch {
-      continue;
+    let parsed = parse_stylesheet(css_text);
+    for import in &parsed.imports {
+        let should_fetch = import
+            .media
+            .as_ref()
+            .map(|m| m.matches(viewport_width))
+            .unwrap_or(true);
+        if !should_fetch {
+            continue;
+        }
+        if let Some(resolved) = resolve_url(base_url, &import.url) {
+            if let Ok(response) = fetch_with_cookies(&resolved, storage_root, proxy, dns_server) {
+                let imported_text = String::from_utf8_lossy(&response.body).into_owned();
+                sheet.rules.extend(parse_stylesheet(&imported_text).rules);
+            }
+        }
     }
-    if let Some(resolved) = resolve_url(base_url, &import.url) {
-      if let Ok(response) = fetch_with_cookies(&resolved, storage_root, proxy, dns_server) {
-        let imported_text = String::from_utf8_lossy(&response.body).into_owned();
-        sheet.rules.extend(parse_stylesheet(&imported_text).rules);
-      }
-    }
-  }
-  sheet.rules.extend(parsed.rules);
+    sheet.rules.extend(parsed.rules);
 }
 
 /// Resolves every CSS source in `dom` (rooted at `root`) into one cascaded
@@ -255,36 +255,36 @@ fn merge_stylesheet_text(
 /// rather than failing the whole page load over one bad stylesheet
 /// reference.
 pub(crate) fn build_stylesheet(
-  dom: &Dom,
-  root: NodeId,
-  base_url: Option<&str>,
-  viewport_width: f64,
-  storage_root: &std::path::Path,
-  proxy: Option<&net::ProxyConfig>,
-  dns_server: Option<std::net::SocketAddr>,
+    dom: &Dom,
+    root: NodeId,
+    base_url: Option<&str>,
+    viewport_width: f64,
+    storage_root: &std::path::Path,
+    proxy: Option<&net::ProxyConfig>,
+    dns_server: Option<std::net::SocketAddr>,
 ) -> Stylesheet {
-  let mut sources = Vec::new();
-  collect_css_sources(dom, root, &mut sources);
+    let mut sources = Vec::new();
+    collect_css_sources(dom, root, &mut sources);
 
-  let mut sheet = parse_stylesheet(BASE_STYLESHEET_SRC);
-  for source in sources {
-    let css_text = match source {
-      CssSource::Inline(text) => Some(text),
-      CssSource::Link(href) => resolve_url(base_url, &href)
-        .and_then(|url| fetch_with_cookies(&url, storage_root, proxy, dns_server).ok())
-        .map(|response| String::from_utf8_lossy(&response.body).into_owned()),
-    };
-    if let Some(css_text) = css_text {
-      merge_stylesheet_text(
-        &mut sheet,
-        &css_text,
-        base_url,
-        viewport_width,
-        storage_root,
-        proxy,
-        dns_server,
-      );
+    let mut sheet = parse_stylesheet(BASE_STYLESHEET_SRC);
+    for source in sources {
+        let css_text = match source {
+            CssSource::Inline(text) => Some(text),
+            CssSource::Link(href) => resolve_url(base_url, &href)
+                .and_then(|url| fetch_with_cookies(&url, storage_root, proxy, dns_server).ok())
+                .map(|response| String::from_utf8_lossy(&response.body).into_owned()),
+        };
+        if let Some(css_text) = css_text {
+            merge_stylesheet_text(
+                &mut sheet,
+                &css_text,
+                base_url,
+                viewport_width,
+                storage_root,
+                proxy,
+                dns_server,
+            );
+        }
     }
-  }
-  sheet
+    sheet
 }

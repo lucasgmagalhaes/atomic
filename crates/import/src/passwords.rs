@@ -6,24 +6,24 @@ use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Password {
-  pub origin_url: String,
-  pub username: String,
-  pub password: String,
+    pub origin_url: String,
+    pub username: String,
+    pub password: String,
 }
 
 #[derive(Debug)]
 pub enum ImportError {
-  Io(std::io::Error),
-  Sqlite(rusqlite::Error),
+    Io(std::io::Error),
+    Sqlite(rusqlite::Error),
 }
 
 impl std::fmt::Display for ImportError {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    match self {
-      ImportError::Io(e) => write!(f, "failed to prepare Login Data file for import: {e}"),
-      ImportError::Sqlite(e) => write!(f, "failed to read Login Data database: {e}"),
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ImportError::Io(e) => write!(f, "failed to prepare Login Data file for import: {e}"),
+            ImportError::Sqlite(e) => write!(f, "failed to read Login Data database: {e}"),
+        }
     }
-  }
 }
 
 impl std::error::Error for ImportError {}
@@ -32,33 +32,33 @@ impl std::error::Error for ImportError {}
 /// row that can't be decrypted (wrong key, `v20`) doesn't lose every other
 /// real credential.
 pub fn import_passwords(path: &Path, master_key: &[u8]) -> Result<Vec<Password>, ImportError> {
-  let snapshot = crate::snapshot_sqlite(path, "logins").map_err(ImportError::Io)?;
+    let snapshot = crate::snapshot_sqlite(path, "logins").map_err(ImportError::Io)?;
 
-  (|| {
-    let conn = rusqlite::Connection::open(snapshot.path()).map_err(ImportError::Sqlite)?;
-    let mut stmt = conn
-      .prepare("SELECT origin_url, username_value, password_value FROM logins")
-      .map_err(ImportError::Sqlite)?;
-    let rows = stmt
-      .query_map([], |row| {
-        let origin_url: String = row.get(0)?;
-        let username: String = row.get(1)?;
-        let encrypted: Vec<u8> = row.get(2)?;
-        Ok((origin_url, username, encrypted))
-      })
-      .map_err(ImportError::Sqlite)?;
+    (|| {
+        let conn = rusqlite::Connection::open(snapshot.path()).map_err(ImportError::Sqlite)?;
+        let mut stmt = conn
+            .prepare("SELECT origin_url, username_value, password_value FROM logins")
+            .map_err(ImportError::Sqlite)?;
+        let rows = stmt
+            .query_map([], |row| {
+                let origin_url: String = row.get(0)?;
+                let username: String = row.get(1)?;
+                let encrypted: Vec<u8> = row.get(2)?;
+                Ok((origin_url, username, encrypted))
+            })
+            .map_err(ImportError::Sqlite)?;
 
-    let mut passwords = Vec::new();
-    for row in rows {
-      let (origin_url, username, encrypted) = row.map_err(ImportError::Sqlite)?;
-      if let Ok(password) = encrypted_value::decrypt(master_key, &encrypted) {
-        passwords.push(Password {
-          origin_url,
-          username,
-          password,
-        });
-      }
-    }
-    Ok(passwords)
-  })()
+        let mut passwords = Vec::new();
+        for row in rows {
+            let (origin_url, username, encrypted) = row.map_err(ImportError::Sqlite)?;
+            if let Ok(password) = encrypted_value::decrypt(master_key, &encrypted) {
+                passwords.push(Password {
+                    origin_url,
+                    username,
+                    password,
+                });
+            }
+        }
+        Ok(passwords)
+    })()
 }

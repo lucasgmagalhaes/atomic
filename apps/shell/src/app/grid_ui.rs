@@ -8,8 +8,8 @@ use super::resource_overlay::draw_resource_overlay;
 use super::{NimbleApp, PANE_HEIGHT, PANE_WIDTH};
 
 impl NimbleApp {
-  pub(super) fn draw_pane_grid(&mut self, ctx: &egui::Context) {
-    egui::CentralPanel::default().show(ctx, |ui| {
+    pub(super) fn draw_pane_grid(&mut self, ctx: &egui::Context) {
+        egui::CentralPanel::default().show(ctx, |ui| {
             let available = ui.available_rect_before_wrap();
             let container = tiling::Rect { x: available.min.x, y: available.min.y, width: available.width(), height: available.height() };
             // Only the active workspace's panes - see
@@ -224,5 +224,5 @@ impl NimbleApp {
                 cell_ui.painter().rect_stroke(cell_rect, 0.0, egui::Stroke::new(2.0_f32, border_color));
             }
         });
-  }
+    }
 }

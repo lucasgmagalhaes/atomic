@@ -24,31 +24,31 @@ const MAX_CHILD_NODE_ARGS: usize = 256;
 const MAX_TEXT_NODE_LENGTH: usize = super::util::MAX_TEXT_NODE_LENGTH;
 
 pub(super) fn valid_tag_name(tag: &str) -> bool {
-  !tag.is_empty()
-    && tag.len() <= MAX_TAG_NAME_LENGTH
-    && tag
-      .bytes()
-      .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    !tag.is_empty()
+        && tag.len() <= MAX_TAG_NAME_LENGTH
+        && tag
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
 }
 
 fn valid_attribute_name(name: &str) -> bool {
-  !name.is_empty()
-    && name.len() <= MAX_ATTRIBUTE_NAME_LENGTH
-    && name
-      .bytes()
-      .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b':'))
+    !name.is_empty()
+        && name.len() <= MAX_ATTRIBUTE_NAME_LENGTH
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b':'))
 }
 
 fn is_ancestor(dom: &dom::Dom, ancestor: dom::NodeId, mut node: dom::NodeId) -> bool {
-  loop {
-    if node == ancestor {
-      return true;
+    loop {
+        if node == ancestor {
+            return true;
+        }
+        let Some(parent) = dom.get(node).and_then(|node| node.parent) else {
+            return false;
+        };
+        node = parent;
     }
-    let Some(parent) = dom.get(node).and_then(|node| node.parent) else {
-      return false;
-    };
-    node = parent;
-  }
 }
 
 /// Recursively evicts every cached JS-side identity/state for `id` and its
@@ -57,261 +57,261 @@ fn is_ancestor(dom: &dom::Dom, ancestor: dom::NodeId, mut node: dom::NodeId) -> 
 /// resurrect a stale listener/cache entry. Also used by `content.rs`'s
 /// `replace_children_with_html`/`node_outer_html_set`.
 pub(super) unsafe fn evict_subtree(ctx: *mut sys::JSContext, dom: &dom::Dom, id: dom::NodeId) {
-  let children = dom
-    .get(id)
-    .map(|node| node.children.clone())
-    .unwrap_or_default();
-  for child in children {
-    evict_subtree(ctx, dom, child);
-  }
-  evict_node_object(ctx, id);
+    let children = dom
+        .get(id)
+        .map(|node| node.children.clone())
+        .unwrap_or_default();
+    for child in children {
+        evict_subtree(ctx, dom, child);
+    }
+    evict_node_object(ctx, id);
 }
 
 unsafe extern "C" fn node_append_child(
-  ctx: *mut sys::JSContext,
-  this_val: sys::JSValue,
-  argc: c_int,
-  argv: *mut sys::JSValue,
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-  if argc < 1 {
-    return throw_type_error(ctx, "child node is required");
-  }
-  let Some(parent) = node_id(ctx, this_val) else {
-    return throw_type_error(ctx, "append target must be a node");
-  };
-  let child_value = *argv;
-  let Some(child) = node_id(ctx, child_value) else {
-    return throw_type_error(ctx, "child must be a node");
-  };
-  let dom = dom_opaque(ctx);
-  if dom.is_null() || (*dom).get(parent).is_none() || (*dom).get(child).is_none() {
-    return throw_type_error(ctx, "node is no longer attached to this document");
-  }
-  if is_ancestor(&*dom, child, parent) {
-    return throw_type_error(ctx, "cannot append an ancestor into its descendant");
-  }
-  (*dom).append_child(parent, child);
-  sys::JS_DupValue(ctx, child_value)
+    if argc < 1 {
+        return throw_type_error(ctx, "child node is required");
+    }
+    let Some(parent) = node_id(ctx, this_val) else {
+        return throw_type_error(ctx, "append target must be a node");
+    };
+    let child_value = *argv;
+    let Some(child) = node_id(ctx, child_value) else {
+        return throw_type_error(ctx, "child must be a node");
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() || (*dom).get(parent).is_none() || (*dom).get(child).is_none() {
+        return throw_type_error(ctx, "node is no longer attached to this document");
+    }
+    if is_ancestor(&*dom, child, parent) {
+        return throw_type_error(ctx, "cannot append an ancestor into its descendant");
+    }
+    (*dom).append_child(parent, child);
+    sys::JS_DupValue(ctx, child_value)
 }
 
 unsafe extern "C" fn node_get_attribute(
-  ctx: *mut sys::JSContext,
-  this_val: sys::JSValue,
-  argc: c_int,
-  argv: *mut sys::JSValue,
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-  if argc < 1 {
-    return throw_type_error(ctx, "attribute name is required");
-  }
-  let Some(name) = read_js_string(ctx, *argv) else {
-    return throw_type_error(ctx, "attribute name must be a string");
-  };
-  if !valid_attribute_name(&name) {
-    return throw_type_error(ctx, "invalid attribute name");
-  }
-  let Some(id) = node_id(ctx, this_val) else {
-    return sys::js_null();
-  };
-  let dom = dom_opaque(ctx);
-  if dom.is_null() {
-    return sys::js_null();
-  }
-  (*dom)
-    .attribute(id, &name)
-    .map(|value| super::util::new_js_string(ctx, value))
-    .unwrap_or_else(sys::js_null)
+    if argc < 1 {
+        return throw_type_error(ctx, "attribute name is required");
+    }
+    let Some(name) = read_js_string(ctx, *argv) else {
+        return throw_type_error(ctx, "attribute name must be a string");
+    };
+    if !valid_attribute_name(&name) {
+        return throw_type_error(ctx, "invalid attribute name");
+    }
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_null();
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return sys::js_null();
+    }
+    (*dom)
+        .attribute(id, &name)
+        .map(|value| super::util::new_js_string(ctx, value))
+        .unwrap_or_else(sys::js_null)
 }
 
 unsafe extern "C" fn node_has_attribute(
-  ctx: *mut sys::JSContext,
-  this_val: sys::JSValue,
-  argc: c_int,
-  argv: *mut sys::JSValue,
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-  if argc < 1 {
-    return throw_type_error(ctx, "attribute name is required");
-  }
-  let Some(name) = read_js_string(ctx, *argv) else {
-    return throw_type_error(ctx, "attribute name must be a string");
-  };
-  if !valid_attribute_name(&name) {
-    return throw_type_error(ctx, "invalid attribute name");
-  }
-  let Some(id) = node_id(ctx, this_val) else {
-    return sys::js_bool(false);
-  };
-  let dom = dom_opaque(ctx);
-  sys::js_bool(!dom.is_null() && (*dom).attribute(id, &name).is_some())
+    if argc < 1 {
+        return throw_type_error(ctx, "attribute name is required");
+    }
+    let Some(name) = read_js_string(ctx, *argv) else {
+        return throw_type_error(ctx, "attribute name must be a string");
+    };
+    if !valid_attribute_name(&name) {
+        return throw_type_error(ctx, "invalid attribute name");
+    }
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_bool(false);
+    };
+    let dom = dom_opaque(ctx);
+    sys::js_bool(!dom.is_null() && (*dom).attribute(id, &name).is_some())
 }
 
 unsafe extern "C" fn node_get_attribute_names(
-  ctx: *mut sys::JSContext,
-  this_val: sys::JSValue,
-  _argc: c_int,
-  _argv: *mut sys::JSValue,
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-  let array = sys::JS_NewArray(ctx);
-  let Some(id) = node_id(ctx, this_val) else {
-    return array;
-  };
-  let dom = dom_opaque(ctx);
-  let Some(dom::NodeData::Element { attributes, .. }) = (!dom.is_null())
-    .then(|| (*dom).get(id).map(|node| &node.data))
-    .flatten()
-  else {
-    return array;
-  };
-  let mut names: Vec<_> = attributes.keys().collect();
-  names.sort_unstable();
-  for (index, name) in names.into_iter().enumerate() {
-    sys::JS_SetPropertyUint32(
-      ctx,
-      array,
-      index as u32,
-      super::util::new_js_string(ctx, name),
-    );
-  }
-  array
+    let array = sys::JS_NewArray(ctx);
+    let Some(id) = node_id(ctx, this_val) else {
+        return array;
+    };
+    let dom = dom_opaque(ctx);
+    let Some(dom::NodeData::Element { attributes, .. }) = (!dom.is_null())
+        .then(|| (*dom).get(id).map(|node| &node.data))
+        .flatten()
+    else {
+        return array;
+    };
+    let mut names: Vec<_> = attributes.keys().collect();
+    names.sort_unstable();
+    for (index, name) in names.into_iter().enumerate() {
+        sys::JS_SetPropertyUint32(
+            ctx,
+            array,
+            index as u32,
+            super::util::new_js_string(ctx, name),
+        );
+    }
+    array
 }
 
 unsafe extern "C" fn node_insert_before(
-  ctx: *mut sys::JSContext,
-  this_val: sys::JSValue,
-  argc: c_int,
-  argv: *mut sys::JSValue,
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-  if argc < 2 {
-    return throw_type_error(ctx, "new node and reference node are required");
-  }
-  let Some(parent) = node_id(ctx, this_val) else {
-    return throw_type_error(ctx, "insert target must be a node");
-  };
-  let new_value = *argv;
-  let reference_value = *argv.add(1);
-  let (Some(new_node), Some(reference_node)) =
-    (node_id(ctx, new_value), node_id(ctx, reference_value))
-  else {
-    return throw_type_error(ctx, "insert arguments must be nodes");
-  };
-  let dom = dom_opaque(ctx);
-  if dom.is_null()
-    || (*dom).get(parent).is_none()
-    || (*dom).get(new_node).is_none()
-    || (*dom).get(reference_node).is_none()
-  {
-    return throw_type_error(ctx, "node is no longer attached to this document");
-  }
-  if (*dom).get(reference_node).and_then(|node| node.parent) != Some(parent) {
-    return throw_type_error(ctx, "reference node is not a child of this parent");
-  }
-  if is_ancestor(&*dom, new_node, parent) {
-    return throw_type_error(ctx, "cannot insert an ancestor into its descendant");
-  }
-  (*dom).insert_before(reference_node, new_node);
-  sys::JS_DupValue(ctx, new_value)
+    if argc < 2 {
+        return throw_type_error(ctx, "new node and reference node are required");
+    }
+    let Some(parent) = node_id(ctx, this_val) else {
+        return throw_type_error(ctx, "insert target must be a node");
+    };
+    let new_value = *argv;
+    let reference_value = *argv.add(1);
+    let (Some(new_node), Some(reference_node)) =
+        (node_id(ctx, new_value), node_id(ctx, reference_value))
+    else {
+        return throw_type_error(ctx, "insert arguments must be nodes");
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null()
+        || (*dom).get(parent).is_none()
+        || (*dom).get(new_node).is_none()
+        || (*dom).get(reference_node).is_none()
+    {
+        return throw_type_error(ctx, "node is no longer attached to this document");
+    }
+    if (*dom).get(reference_node).and_then(|node| node.parent) != Some(parent) {
+        return throw_type_error(ctx, "reference node is not a child of this parent");
+    }
+    if is_ancestor(&*dom, new_node, parent) {
+        return throw_type_error(ctx, "cannot insert an ancestor into its descendant");
+    }
+    (*dom).insert_before(reference_node, new_node);
+    sys::JS_DupValue(ctx, new_value)
 }
 
 unsafe extern "C" fn node_set_attribute(
-  ctx: *mut sys::JSContext,
-  this_val: sys::JSValue,
-  argc: c_int,
-  argv: *mut sys::JSValue,
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-  if argc < 2 {
-    return throw_type_error(ctx, "attribute name and value are required");
-  }
-  let Some(name) = read_js_string(ctx, *argv) else {
-    return throw_type_error(ctx, "attribute name must be a string");
-  };
-  let Some(value) = read_js_string(ctx, *argv.add(1)) else {
-    return throw_type_error(ctx, "attribute value must be a string");
-  };
-  if !valid_attribute_name(&name) || value.len() > MAX_ATTRIBUTE_VALUE_LENGTH {
-    return throw_type_error(ctx, "invalid attribute");
-  }
-  let Some(id) = node_id(ctx, this_val) else {
-    return throw_type_error(ctx, "attribute target must be a node");
-  };
-  let dom = dom_opaque(ctx);
-  if dom.is_null() || (*dom).get(id).is_none() {
-    return throw_type_error(ctx, "node is no longer attached to this document");
-  }
-  (*dom).set_attribute(id, &name, &value);
-  sys::js_undefined()
+    if argc < 2 {
+        return throw_type_error(ctx, "attribute name and value are required");
+    }
+    let Some(name) = read_js_string(ctx, *argv) else {
+        return throw_type_error(ctx, "attribute name must be a string");
+    };
+    let Some(value) = read_js_string(ctx, *argv.add(1)) else {
+        return throw_type_error(ctx, "attribute value must be a string");
+    };
+    if !valid_attribute_name(&name) || value.len() > MAX_ATTRIBUTE_VALUE_LENGTH {
+        return throw_type_error(ctx, "invalid attribute");
+    }
+    let Some(id) = node_id(ctx, this_val) else {
+        return throw_type_error(ctx, "attribute target must be a node");
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() || (*dom).get(id).is_none() {
+        return throw_type_error(ctx, "node is no longer attached to this document");
+    }
+    (*dom).set_attribute(id, &name, &value);
+    sys::js_undefined()
 }
 
 unsafe extern "C" fn node_remove_attribute(
-  ctx: *mut sys::JSContext,
-  this_val: sys::JSValue,
-  argc: c_int,
-  argv: *mut sys::JSValue,
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-  if argc < 1 {
-    return throw_type_error(ctx, "attribute name is required");
-  }
-  let Some(name) = read_js_string(ctx, *argv) else {
-    return throw_type_error(ctx, "attribute name must be a string");
-  };
-  if !valid_attribute_name(&name) {
-    return throw_type_error(ctx, "invalid attribute name");
-  }
-  let Some(id) = node_id(ctx, this_val) else {
-    return throw_type_error(ctx, "attribute target must be a node");
-  };
-  let dom = dom_opaque(ctx);
-  if dom.is_null() || (*dom).get(id).is_none() {
-    return throw_type_error(ctx, "node is no longer attached to this document");
-  }
-  (*dom).remove_attribute(id, &name);
-  sys::js_undefined()
+    if argc < 1 {
+        return throw_type_error(ctx, "attribute name is required");
+    }
+    let Some(name) = read_js_string(ctx, *argv) else {
+        return throw_type_error(ctx, "attribute name must be a string");
+    };
+    if !valid_attribute_name(&name) {
+        return throw_type_error(ctx, "invalid attribute name");
+    }
+    let Some(id) = node_id(ctx, this_val) else {
+        return throw_type_error(ctx, "attribute target must be a node");
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() || (*dom).get(id).is_none() {
+        return throw_type_error(ctx, "node is no longer attached to this document");
+    }
+    (*dom).remove_attribute(id, &name);
+    sys::js_undefined()
 }
 
 unsafe extern "C" fn node_remove(
-  ctx: *mut sys::JSContext,
-  this_val: sys::JSValue,
-  _argc: c_int,
-  _argv: *mut sys::JSValue,
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-  let Some(id) = node_id(ctx, this_val) else {
-    return sys::js_undefined();
-  };
-  let dom = dom_opaque(ctx);
-  if !dom.is_null() && (*dom).get(id).is_some() {
-    if id == (*dom).root() {
-      return throw_type_error(ctx, "document root cannot be removed");
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    let dom = dom_opaque(ctx);
+    if !dom.is_null() && (*dom).get(id).is_some() {
+        if id == (*dom).root() {
+            return throw_type_error(ctx, "document root cannot be removed");
+        }
+        evict_subtree(ctx, &*dom, id);
+        (*dom).remove(id);
     }
-    evict_subtree(ctx, &*dom, id);
-    (*dom).remove(id);
-  }
-  sys::js_undefined()
+    sys::js_undefined()
 }
 
 unsafe extern "C" fn node_remove_child(
-  ctx: *mut sys::JSContext,
-  this_val: sys::JSValue,
-  argc: c_int,
-  argv: *mut sys::JSValue,
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-  if argc < 1 {
-    return throw_type_error(ctx, "child node is required");
-  }
-  let Some(parent) = node_id(ctx, this_val) else {
-    return throw_type_error(ctx, "remove target must be a node");
-  };
-  let child_value = *argv;
-  let Some(child) = node_id(ctx, child_value) else {
-    return throw_type_error(ctx, "child must be a node");
-  };
-  let dom = dom_opaque(ctx);
-  if dom.is_null() || (*dom).get(parent).is_none() || (*dom).get(child).is_none() {
-    return throw_type_error(ctx, "node is no longer attached to this document");
-  }
-  if (*dom).get(child).and_then(|node| node.parent) != Some(parent) {
-    return throw_type_error(ctx, "node is not a child of this parent");
-  }
-  evict_subtree(ctx, &*dom, child);
-  (*dom).remove(child);
-  sys::JS_DupValue(ctx, child_value)
+    if argc < 1 {
+        return throw_type_error(ctx, "child node is required");
+    }
+    let Some(parent) = node_id(ctx, this_val) else {
+        return throw_type_error(ctx, "remove target must be a node");
+    };
+    let child_value = *argv;
+    let Some(child) = node_id(ctx, child_value) else {
+        return throw_type_error(ctx, "child must be a node");
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() || (*dom).get(parent).is_none() || (*dom).get(child).is_none() {
+        return throw_type_error(ctx, "node is no longer attached to this document");
+    }
+    if (*dom).get(child).and_then(|node| node.parent) != Some(parent) {
+        return throw_type_error(ctx, "node is not a child of this parent");
+    }
+    evict_subtree(ctx, &*dom, child);
+    (*dom).remove(child);
+    sys::JS_DupValue(ctx, child_value)
 }
 
 /// Real `Node.prototype.contains(other)`: `true` when `other` is this node
@@ -320,60 +320,60 @@ unsafe extern "C" fn node_remove_child(
 /// thrown error — same permissive style `matches`/`closest` already use for
 /// a malformed `this`/argument.
 unsafe extern "C" fn node_contains(
-  ctx: *mut sys::JSContext,
-  this_val: sys::JSValue,
-  argc: c_int,
-  argv: *mut sys::JSValue,
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-  let Some(id) = node_id(ctx, this_val) else {
-    return sys::js_bool(false);
-  };
-  if argc < 1 {
-    return sys::js_bool(false);
-  }
-  let Some(other) = node_id(ctx, *argv) else {
-    return sys::js_bool(false);
-  };
-  let dom = dom_opaque(ctx);
-  sys::js_bool(!dom.is_null() && (*dom).contains(id, other))
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_bool(false);
+    };
+    if argc < 1 {
+        return sys::js_bool(false);
+    }
+    let Some(other) = node_id(ctx, *argv) else {
+        return sys::js_bool(false);
+    };
+    let dom = dom_opaque(ctx);
+    sys::js_bool(!dom.is_null() && (*dom).contains(id, other))
 }
 
 unsafe extern "C" fn node_compare_document_position(
-  ctx: *mut sys::JSContext,
-  this_val: sys::JSValue,
-  argc: c_int,
-  argv: *mut sys::JSValue,
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-  let Some(id) = node_id(ctx, this_val) else {
-    return sys::js_float64(1.0);
-  };
-  if argc < 1 {
-    return sys::js_float64(1.0);
-  }
-  let Some(other) = node_id(ctx, *argv) else {
-    return sys::js_float64(1.0);
-  };
-  let dom = dom_opaque(ctx);
-  if dom.is_null() {
-    return sys::js_float64(1.0);
-  }
-  sys::js_float64((*dom).compare_document_position(id, other) as f64)
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_float64(1.0);
+    };
+    if argc < 1 {
+        return sys::js_float64(1.0);
+    }
+    let Some(other) = node_id(ctx, *argv) else {
+        return sys::js_float64(1.0);
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return sys::js_float64(1.0);
+    }
+    sys::js_float64((*dom).compare_document_position(id, other) as f64)
 }
 
 unsafe extern "C" fn node_normalize(
-  ctx: *mut sys::JSContext,
-  this_val: sys::JSValue,
-  _argc: c_int,
-  _argv: *mut sys::JSValue,
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-  let Some(id) = node_id(ctx, this_val) else {
-    return sys::js_undefined();
-  };
-  let dom = dom_opaque(ctx);
-  if !dom.is_null() {
-    (*dom).normalize(id);
-  }
-  sys::js_undefined()
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    let dom = dom_opaque(ctx);
+    if !dom.is_null() {
+        (*dom).normalize(id);
+    }
+    sys::js_undefined()
 }
 
 /// Real `Node.prototype.cloneNode(deep)`. Returns a brand-new `Node` object
@@ -381,22 +381,22 @@ unsafe extern "C" fn node_normalize(
 /// the cache — same as `document.createElement`/`createTextNode` do for a
 /// freshly created id, not the identity of the node it was cloned from.
 unsafe extern "C" fn node_clone_node(
-  ctx: *mut sys::JSContext,
-  this_val: sys::JSValue,
-  argc: c_int,
-  argv: *mut sys::JSValue,
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-  let Some(id) = node_id(ctx, this_val) else {
-    return throw_type_error(ctx, "cloneNode target must be a node");
-  };
-  let deep = argc > 0 && sys::JS_ToBool(ctx, *argv) != 0;
-  let dom = dom_opaque(ctx);
-  if dom.is_null() || (*dom).get(id).is_none() {
-    return throw_type_error(ctx, "node is no longer attached to this document");
-  }
-  let new_id = (*dom).clone_node(id, deep);
-  let class_id = node_class_id_for(ctx, dom, new_id);
-  super::node_registry::node_object(ctx, class_id, new_id)
+    let Some(id) = node_id(ctx, this_val) else {
+        return throw_type_error(ctx, "cloneNode target must be a node");
+    };
+    let deep = argc > 0 && sys::JS_ToBool(ctx, *argv) != 0;
+    let dom = dom_opaque(ctx);
+    if dom.is_null() || (*dom).get(id).is_none() {
+        return throw_type_error(ctx, "node is no longer attached to this document");
+    }
+    let new_id = (*dom).clone_node(id, deep);
+    let class_id = node_class_id_for(ctx, dom, new_id);
+    super::node_registry::node_object(ctx, class_id, new_id)
 }
 
 /// Real `Node.prototype.replaceChild(newChild, oldChild)`. Evicts
@@ -408,59 +408,59 @@ unsafe extern "C" fn node_clone_node(
 /// being this node's own ancestor, same `HierarchyRequestError`-style check
 /// `appendChild`/`insertBefore` already make.
 unsafe extern "C" fn node_replace_child(
-  ctx: *mut sys::JSContext,
-  this_val: sys::JSValue,
-  argc: c_int,
-  argv: *mut sys::JSValue,
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-  if argc < 2 {
-    return throw_type_error(ctx, "new child and old child are required");
-  }
-  let Some(parent) = node_id(ctx, this_val) else {
-    return throw_type_error(ctx, "replace target must be a node");
-  };
-  let new_value = *argv;
-  let old_value = *argv.add(1);
-  let (Some(new_child), Some(old_child)) = (node_id(ctx, new_value), node_id(ctx, old_value))
-  else {
-    return throw_type_error(ctx, "replaceChild arguments must be nodes");
-  };
-  let dom = dom_opaque(ctx);
-  if dom.is_null()
-    || (*dom).get(parent).is_none()
-    || (*dom).get(new_child).is_none()
-    || (*dom).get(old_child).is_none()
-  {
-    return throw_type_error(ctx, "node is no longer attached to this document");
-  }
-  if is_ancestor(&*dom, new_child, parent) {
-    return throw_type_error(ctx, "cannot insert an ancestor into its descendant");
-  }
-  let old_child_is_member = (*dom)
-    .get(parent)
-    .map(|node| node.children.contains(&old_child))
-    .unwrap_or(false);
-  if !old_child_is_member {
-    return throw_type_error(ctx, "old child is not a child of this parent");
-  }
-  if old_child != new_child {
-    evict_subtree(ctx, &*dom, old_child);
-  }
-  (*dom).replace_child(parent, new_child, old_child);
-  sys::JS_DupValue(ctx, old_value)
+    if argc < 2 {
+        return throw_type_error(ctx, "new child and old child are required");
+    }
+    let Some(parent) = node_id(ctx, this_val) else {
+        return throw_type_error(ctx, "replace target must be a node");
+    };
+    let new_value = *argv;
+    let old_value = *argv.add(1);
+    let (Some(new_child), Some(old_child)) = (node_id(ctx, new_value), node_id(ctx, old_value))
+    else {
+        return throw_type_error(ctx, "replaceChild arguments must be nodes");
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null()
+        || (*dom).get(parent).is_none()
+        || (*dom).get(new_child).is_none()
+        || (*dom).get(old_child).is_none()
+    {
+        return throw_type_error(ctx, "node is no longer attached to this document");
+    }
+    if is_ancestor(&*dom, new_child, parent) {
+        return throw_type_error(ctx, "cannot insert an ancestor into its descendant");
+    }
+    let old_child_is_member = (*dom)
+        .get(parent)
+        .map(|node| node.children.contains(&old_child))
+        .unwrap_or(false);
+    if !old_child_is_member {
+        return throw_type_error(ctx, "old child is not a child of this parent");
+    }
+    if old_child != new_child {
+        evict_subtree(ctx, &*dom, old_child);
+    }
+    (*dom).replace_child(parent, new_child, old_child);
+    sys::JS_DupValue(ctx, old_value)
 }
 
 /// Also used by `content.rs`'s `node_insert_adjacent_html` (`afterend` case).
 pub(super) fn next_sibling_of(dom: &dom::Dom, id: dom::NodeId) -> Option<dom::NodeId> {
-  let parent = dom.get(id)?.parent?;
-  let siblings = &dom.get(parent)?.children;
-  let index = siblings.iter().position(|&c| c == id)?;
-  siblings.get(index + 1).copied()
+    let parent = dom.get(id)?.parent?;
+    let siblings = &dom.get(parent)?.children;
+    let index = siblings.iter().position(|&c| c == id)?;
+    siblings.get(index + 1).copied()
 }
 
 /// Also used by `content.rs`'s `node_insert_adjacent_html` (`afterbegin` case).
 pub(super) fn first_child_of(dom: &dom::Dom, id: dom::NodeId) -> Option<dom::NodeId> {
-  dom.get(id)?.children.first().copied()
+    dom.get(id)?.children.first().copied()
 }
 
 /// Resolves the variadic argument list `prepend`/`append`/`before`/`after`/
@@ -474,44 +474,44 @@ pub(super) fn first_child_of(dom: &dom::Dom, id: dom::NodeId) -> Option<dom::Nod
 /// returns the already-thrown exception value for the caller to return
 /// directly.
 unsafe fn read_child_node_args(
-  ctx: *mut sys::JSContext,
-  dom: *mut dom::Dom,
-  argc: c_int,
-  argv: *mut sys::JSValue,
+    ctx: *mut sys::JSContext,
+    dom: *mut dom::Dom,
+    argc: c_int,
+    argv: *mut sys::JSValue,
 ) -> Result<Vec<dom::NodeId>, sys::JSValue> {
-  if argc as usize > MAX_CHILD_NODE_ARGS {
-    return Err(throw_type_error(ctx, "too many arguments"));
-  }
-  let mut nodes = Vec::with_capacity(argc.max(0) as usize);
-  for i in 0..argc {
-    let arg = *argv.add(i as usize);
-    if arg.tag == sys::JS_TAG_STRING {
-      let Some(text) = read_js_string(ctx, arg) else {
-        return Err(throw_type_error(ctx, "invalid string argument"));
-      };
-      if text.len() > MAX_TEXT_NODE_LENGTH {
-        return Err(throw_type_error(
-          ctx,
-          "text argument exceeds the maximum length",
-        ));
-      }
-      nodes.push((*dom).create_text(&text));
-    } else if let Some(id) = node_id(ctx, arg) {
-      if (*dom).get(id).is_none() {
-        return Err(throw_type_error(
-          ctx,
-          "node is no longer attached to this document",
-        ));
-      }
-      nodes.push(id);
-    } else {
-      return Err(throw_type_error(
-        ctx,
-        "arguments must be a Node or a string",
-      ));
+    if argc as usize > MAX_CHILD_NODE_ARGS {
+        return Err(throw_type_error(ctx, "too many arguments"));
     }
-  }
-  Ok(nodes)
+    let mut nodes = Vec::with_capacity(argc.max(0) as usize);
+    for i in 0..argc {
+        let arg = *argv.add(i as usize);
+        if arg.tag == sys::JS_TAG_STRING {
+            let Some(text) = read_js_string(ctx, arg) else {
+                return Err(throw_type_error(ctx, "invalid string argument"));
+            };
+            if text.len() > MAX_TEXT_NODE_LENGTH {
+                return Err(throw_type_error(
+                    ctx,
+                    "text argument exceeds the maximum length",
+                ));
+            }
+            nodes.push((*dom).create_text(&text));
+        } else if let Some(id) = node_id(ctx, arg) {
+            if (*dom).get(id).is_none() {
+                return Err(throw_type_error(
+                    ctx,
+                    "node is no longer attached to this document",
+                ));
+            }
+            nodes.push(id);
+        } else {
+            return Err(throw_type_error(
+                ctx,
+                "arguments must be a Node or a string",
+            ));
+        }
+    }
+    Ok(nodes)
 }
 
 /// Real `ParentNode.prepend(...nodes)`: inserts each argument, in order, as
@@ -519,99 +519,99 @@ unsafe fn read_child_node_args(
 /// node (real spec permissiveness — same degrade-gracefully convention
 /// every other accessor here already follows for a malformed `this`).
 unsafe extern "C" fn node_prepend(
-  ctx: *mut sys::JSContext,
-  this_val: sys::JSValue,
-  argc: c_int,
-  argv: *mut sys::JSValue,
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-  let Some(this_id) = node_id(ctx, this_val) else {
-    return sys::js_undefined();
-  };
-  let dom = dom_opaque(ctx);
-  if dom.is_null() || (*dom).get(this_id).is_none() {
-    return sys::js_undefined();
-  }
-  let nodes = match read_child_node_args(ctx, dom, argc, argv) {
-    Ok(nodes) => nodes,
-    Err(exception) => return exception,
-  };
-  for &node in &nodes {
-    if is_ancestor(&*dom, node, this_id) {
-      return throw_type_error(ctx, "cannot insert an ancestor into its descendant");
+    let Some(this_id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() || (*dom).get(this_id).is_none() {
+        return sys::js_undefined();
     }
-  }
-  let first_child = first_child_of(&*dom, this_id);
-  for node in nodes {
-    match first_child {
-      Some(sibling) => (*dom).insert_before(sibling, node),
-      None => (*dom).append_child(this_id, node),
+    let nodes = match read_child_node_args(ctx, dom, argc, argv) {
+        Ok(nodes) => nodes,
+        Err(exception) => return exception,
+    };
+    for &node in &nodes {
+        if is_ancestor(&*dom, node, this_id) {
+            return throw_type_error(ctx, "cannot insert an ancestor into its descendant");
+        }
     }
-  }
-  sys::js_undefined()
+    let first_child = first_child_of(&*dom, this_id);
+    for node in nodes {
+        match first_child {
+            Some(sibling) => (*dom).insert_before(sibling, node),
+            None => (*dom).append_child(this_id, node),
+        }
+    }
+    sys::js_undefined()
 }
 
 /// Real `ParentNode.append(...nodes)`: inserts each argument, in order, as
 /// this node's new trailing children.
 unsafe extern "C" fn node_append(
-  ctx: *mut sys::JSContext,
-  this_val: sys::JSValue,
-  argc: c_int,
-  argv: *mut sys::JSValue,
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-  let Some(this_id) = node_id(ctx, this_val) else {
-    return sys::js_undefined();
-  };
-  let dom = dom_opaque(ctx);
-  if dom.is_null() || (*dom).get(this_id).is_none() {
-    return sys::js_undefined();
-  }
-  let nodes = match read_child_node_args(ctx, dom, argc, argv) {
-    Ok(nodes) => nodes,
-    Err(exception) => return exception,
-  };
-  for &node in &nodes {
-    if is_ancestor(&*dom, node, this_id) {
-      return throw_type_error(ctx, "cannot insert an ancestor into its descendant");
+    let Some(this_id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() || (*dom).get(this_id).is_none() {
+        return sys::js_undefined();
     }
-  }
-  for node in nodes {
-    (*dom).append_child(this_id, node);
-  }
-  sys::js_undefined()
+    let nodes = match read_child_node_args(ctx, dom, argc, argv) {
+        Ok(nodes) => nodes,
+        Err(exception) => return exception,
+    };
+    for &node in &nodes {
+        if is_ancestor(&*dom, node, this_id) {
+            return throw_type_error(ctx, "cannot insert an ancestor into its descendant");
+        }
+    }
+    for node in nodes {
+        (*dom).append_child(this_id, node);
+    }
+    sys::js_undefined()
 }
 
 /// Real `ChildNode.before(...nodes)`: inserts each argument, in order,
 /// immediately before this node in its parent. A no-op if this node has no
 /// parent, matching the real spec's own "if parent is null, then return".
 unsafe extern "C" fn node_before(
-  ctx: *mut sys::JSContext,
-  this_val: sys::JSValue,
-  argc: c_int,
-  argv: *mut sys::JSValue,
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-  let Some(this_id) = node_id(ctx, this_val) else {
-    return sys::js_undefined();
-  };
-  let dom = dom_opaque(ctx);
-  if dom.is_null() {
-    return sys::js_undefined();
-  }
-  let Some(parent) = (*dom).get(this_id).and_then(|node| node.parent) else {
-    return sys::js_undefined();
-  };
-  let nodes = match read_child_node_args(ctx, dom, argc, argv) {
-    Ok(nodes) => nodes,
-    Err(exception) => return exception,
-  };
-  for &node in &nodes {
-    if is_ancestor(&*dom, node, parent) {
-      return throw_type_error(ctx, "cannot insert an ancestor into its descendant");
+    let Some(this_id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return sys::js_undefined();
     }
-  }
-  for node in nodes {
-    (*dom).insert_before(this_id, node);
-  }
-  sys::js_undefined()
+    let Some(parent) = (*dom).get(this_id).and_then(|node| node.parent) else {
+        return sys::js_undefined();
+    };
+    let nodes = match read_child_node_args(ctx, dom, argc, argv) {
+        Ok(nodes) => nodes,
+        Err(exception) => return exception,
+    };
+    for &node in &nodes {
+        if is_ancestor(&*dom, node, parent) {
+            return throw_type_error(ctx, "cannot insert an ancestor into its descendant");
+        }
+    }
+    for node in nodes {
+        (*dom).insert_before(this_id, node);
+    }
+    sys::js_undefined()
 }
 
 /// Real `ChildNode.after(...nodes)`: inserts each argument, in order,
@@ -619,38 +619,38 @@ unsafe extern "C" fn node_before(
 /// original next sibling, if any) is captured once before any insertion —
 /// every argument lands ahead of it, in argument order.
 unsafe extern "C" fn node_after(
-  ctx: *mut sys::JSContext,
-  this_val: sys::JSValue,
-  argc: c_int,
-  argv: *mut sys::JSValue,
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-  let Some(this_id) = node_id(ctx, this_val) else {
-    return sys::js_undefined();
-  };
-  let dom = dom_opaque(ctx);
-  if dom.is_null() {
-    return sys::js_undefined();
-  }
-  let Some(parent) = (*dom).get(this_id).and_then(|node| node.parent) else {
-    return sys::js_undefined();
-  };
-  let nodes = match read_child_node_args(ctx, dom, argc, argv) {
-    Ok(nodes) => nodes,
-    Err(exception) => return exception,
-  };
-  for &node in &nodes {
-    if is_ancestor(&*dom, node, parent) {
-      return throw_type_error(ctx, "cannot insert an ancestor into its descendant");
+    let Some(this_id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return sys::js_undefined();
     }
-  }
-  let reference = next_sibling_of(&*dom, this_id);
-  for node in nodes {
-    match reference {
-      Some(sibling) => (*dom).insert_before(sibling, node),
-      None => (*dom).append_child(parent, node),
+    let Some(parent) = (*dom).get(this_id).and_then(|node| node.parent) else {
+        return sys::js_undefined();
+    };
+    let nodes = match read_child_node_args(ctx, dom, argc, argv) {
+        Ok(nodes) => nodes,
+        Err(exception) => return exception,
+    };
+    for &node in &nodes {
+        if is_ancestor(&*dom, node, parent) {
+            return throw_type_error(ctx, "cannot insert an ancestor into its descendant");
+        }
     }
-  }
-  sys::js_undefined()
+    let reference = next_sibling_of(&*dom, this_id);
+    for node in nodes {
+        match reference {
+            Some(sibling) => (*dom).insert_before(sibling, node),
+            None => (*dom).append_child(parent, node),
+        }
+    }
+    sys::js_undefined()
 }
 
 /// Real `ChildNode.replaceWith(...nodes)`: removes this node from its
@@ -660,97 +660,97 @@ unsafe extern "C" fn node_after(
 /// documented simplification (a real DOM keeps a removed node alive and
 /// reattachable; this one destroys it).
 unsafe extern "C" fn node_replace_with(
-  ctx: *mut sys::JSContext,
-  this_val: sys::JSValue,
-  argc: c_int,
-  argv: *mut sys::JSValue,
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-  let Some(this_id) = node_id(ctx, this_val) else {
-    return sys::js_undefined();
-  };
-  let dom = dom_opaque(ctx);
-  if dom.is_null() {
-    return sys::js_undefined();
-  }
-  let Some(parent) = (*dom).get(this_id).and_then(|node| node.parent) else {
-    return sys::js_undefined();
-  };
-  let nodes = match read_child_node_args(ctx, dom, argc, argv) {
-    Ok(nodes) => nodes,
-    Err(exception) => return exception,
-  };
-  for &node in &nodes {
-    if is_ancestor(&*dom, node, parent) {
-      return throw_type_error(ctx, "cannot insert an ancestor into its descendant");
+    let Some(this_id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return sys::js_undefined();
     }
-  }
-  let reference = next_sibling_of(&*dom, this_id);
-  evict_subtree(ctx, &*dom, this_id);
-  (*dom).remove(this_id);
-  for node in nodes {
-    if (*dom).get(node).is_none() {
-      // Only reachable if `this` itself was passed as one of the
-      // replacement nodes — already freed by the removal above, same
-      // graceful "stale id silently drops" degradation every other
-      // permissive accessor in this file already has.
-      continue;
+    let Some(parent) = (*dom).get(this_id).and_then(|node| node.parent) else {
+        return sys::js_undefined();
+    };
+    let nodes = match read_child_node_args(ctx, dom, argc, argv) {
+        Ok(nodes) => nodes,
+        Err(exception) => return exception,
+    };
+    for &node in &nodes {
+        if is_ancestor(&*dom, node, parent) {
+            return throw_type_error(ctx, "cannot insert an ancestor into its descendant");
+        }
     }
-    match reference {
-      Some(sibling) => (*dom).insert_before(sibling, node),
-      None => (*dom).append_child(parent, node),
+    let reference = next_sibling_of(&*dom, this_id);
+    evict_subtree(ctx, &*dom, this_id);
+    (*dom).remove(this_id);
+    for node in nodes {
+        if (*dom).get(node).is_none() {
+            // Only reachable if `this` itself was passed as one of the
+            // replacement nodes — already freed by the removal above, same
+            // graceful "stale id silently drops" degradation every other
+            // permissive accessor in this file already has.
+            continue;
+        }
+        match reference {
+            Some(sibling) => (*dom).insert_before(sibling, node),
+            None => (*dom).append_child(parent, node),
+        }
     }
-  }
-  sys::js_undefined()
+    sys::js_undefined()
 }
 
 pub(super) unsafe fn define_mutation_methods(ctx: *mut sys::JSContext, proto: sys::JSValue) {
-  for (name, function, arity) in [
-    ("appendChild", node_append_child as sys::JSCFunction, 1),
-    ("getAttribute", node_get_attribute as sys::JSCFunction, 1),
-    ("hasAttribute", node_has_attribute as sys::JSCFunction, 1),
-    (
-      "getAttributeNames",
-      node_get_attribute_names as sys::JSCFunction,
-      0,
-    ),
-    ("setAttribute", node_set_attribute as sys::JSCFunction, 2),
-    (
-      "removeAttribute",
-      node_remove_attribute as sys::JSCFunction,
-      1,
-    ),
-    ("insertBefore", node_insert_before as sys::JSCFunction, 2),
-    ("removeChild", node_remove_child as sys::JSCFunction, 1),
-    ("remove", node_remove as sys::JSCFunction, 0),
-    ("contains", node_contains as sys::JSCFunction, 1),
-    ("cloneNode", node_clone_node as sys::JSCFunction, 0),
-    ("replaceChild", node_replace_child as sys::JSCFunction, 2),
-    ("prepend", node_prepend as sys::JSCFunction, 0),
-    ("append", node_append as sys::JSCFunction, 0),
-    ("before", node_before as sys::JSCFunction, 0),
-    ("after", node_after as sys::JSCFunction, 0),
-    ("replaceWith", node_replace_with as sys::JSCFunction, 0),
-    (
-      "insertAdjacentHTML",
-      insert_adjacent_html as sys::JSCFunction,
-      2,
-    ),
-    (
-      "compareDocumentPosition",
-      node_compare_document_position as sys::JSCFunction,
-      1,
-    ),
-    ("normalize", node_normalize as sys::JSCFunction, 0),
-  ] {
-    let name = CString::new(name).unwrap();
-    let value = sys::JS_NewCFunction2(
-      ctx,
-      function,
-      name.as_ptr(),
-      arity,
-      sys::JS_CFUNC_GENERIC,
-      0,
-    );
-    sys::JS_SetPropertyStr(ctx, proto, name.as_ptr(), value);
-  }
+    for (name, function, arity) in [
+        ("appendChild", node_append_child as sys::JSCFunction, 1),
+        ("getAttribute", node_get_attribute as sys::JSCFunction, 1),
+        ("hasAttribute", node_has_attribute as sys::JSCFunction, 1),
+        (
+            "getAttributeNames",
+            node_get_attribute_names as sys::JSCFunction,
+            0,
+        ),
+        ("setAttribute", node_set_attribute as sys::JSCFunction, 2),
+        (
+            "removeAttribute",
+            node_remove_attribute as sys::JSCFunction,
+            1,
+        ),
+        ("insertBefore", node_insert_before as sys::JSCFunction, 2),
+        ("removeChild", node_remove_child as sys::JSCFunction, 1),
+        ("remove", node_remove as sys::JSCFunction, 0),
+        ("contains", node_contains as sys::JSCFunction, 1),
+        ("cloneNode", node_clone_node as sys::JSCFunction, 0),
+        ("replaceChild", node_replace_child as sys::JSCFunction, 2),
+        ("prepend", node_prepend as sys::JSCFunction, 0),
+        ("append", node_append as sys::JSCFunction, 0),
+        ("before", node_before as sys::JSCFunction, 0),
+        ("after", node_after as sys::JSCFunction, 0),
+        ("replaceWith", node_replace_with as sys::JSCFunction, 0),
+        (
+            "insertAdjacentHTML",
+            insert_adjacent_html as sys::JSCFunction,
+            2,
+        ),
+        (
+            "compareDocumentPosition",
+            node_compare_document_position as sys::JSCFunction,
+            1,
+        ),
+        ("normalize", node_normalize as sys::JSCFunction, 0),
+    ] {
+        let name = CString::new(name).unwrap();
+        let value = sys::JS_NewCFunction2(
+            ctx,
+            function,
+            name.as_ptr(),
+            arity,
+            sys::JS_CFUNC_GENERIC,
+            0,
+        );
+        sys::JS_SetPropertyStr(ctx, proto, name.as_ptr(), value);
+    }
 }

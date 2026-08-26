@@ -26,53 +26,53 @@
 /// DNS resolution with proxy tunneling — a proxied request's DNS
 /// resolution is the proxy's own job, not this worker's).
 pub(crate) fn fetch_with_cookies(
-  url: &str,
-  storage_root: &std::path::Path,
-  proxy: Option<&net::ProxyConfig>,
-  dns_server: Option<std::net::SocketAddr>,
+    url: &str,
+    storage_root: &std::path::Path,
+    proxy: Option<&net::ProxyConfig>,
+    dns_server: Option<std::net::SocketAddr>,
 ) -> Result<net::Response, net::Error> {
-  let parsed = url::Url::parse(url).ok();
-  let host = parsed
-    .as_ref()
-    .and_then(|u| u.host_str())
-    .map(str::to_string);
-  let path = parsed
-    .as_ref()
-    .map(|u| u.path().to_string())
-    .unwrap_or_else(|| "/".to_string());
-  let secure = parsed
-    .as_ref()
-    .map(|u| u.scheme() == "https")
-    .unwrap_or(false);
+    let parsed = url::Url::parse(url).ok();
+    let host = parsed
+        .as_ref()
+        .and_then(|u| u.host_str())
+        .map(str::to_string);
+    let path = parsed
+        .as_ref()
+        .map(|u| u.path().to_string())
+        .unwrap_or_else(|| "/".to_string());
+    let secure = parsed
+        .as_ref()
+        .map(|u| u.scheme() == "https")
+        .unwrap_or(false);
 
-  let mut jar = host
-    .as_deref()
-    .and_then(|h| storage::cookies::CookieJar::open(storage_root.join(h).join("cookies.txt")).ok());
+    let mut jar = host.as_deref().and_then(|h| {
+        storage::cookies::CookieJar::open(storage_root.join(h).join("cookies.txt")).ok()
+    });
 
-  let cookie_header = jar
-    .as_ref()
-    .zip(host.as_deref())
-    .and_then(|(jar, h)| jar.header_value(h, &path, secure));
-  let extra_headers: Vec<(&str, &str)> = cookie_header
-    .as_deref()
-    .map(|v| vec![("Cookie", v)])
-    .unwrap_or_default();
+    let cookie_header = jar
+        .as_ref()
+        .zip(host.as_deref())
+        .and_then(|(jar, h)| jar.header_value(h, &path, secure));
+    let extra_headers: Vec<(&str, &str)> = cookie_header
+        .as_deref()
+        .map(|v| vec![("Cookie", v)])
+        .unwrap_or_default();
 
-  let response = match (proxy, dns_server) {
-    (Some(proxy), _) => net::get_via_proxy(url, &extra_headers, proxy)?,
-    (None, Some(dns_server)) => net::get_via_dns(url, &extra_headers, dns_server)?,
-    (None, None) => net::get_with_headers(url, &extra_headers)?,
-  };
+    let response = match (proxy, dns_server) {
+        (Some(proxy), _) => net::get_via_proxy(url, &extra_headers, proxy)?,
+        (None, Some(dns_server)) => net::get_via_dns(url, &extra_headers, dns_server)?,
+        (None, None) => net::get_with_headers(url, &extra_headers)?,
+    };
 
-  if let (Some(jar), Some(host)) = (jar.as_mut(), host.as_deref()) {
-    for (name, value) in &response.headers {
-      if name.eq_ignore_ascii_case("set-cookie") {
-        let _ = jar.set_from_header(value, host);
-      }
+    if let (Some(jar), Some(host)) = (jar.as_mut(), host.as_deref()) {
+        for (name, value) in &response.headers {
+            if name.eq_ignore_ascii_case("set-cookie") {
+                let _ = jar.set_from_header(value, host);
+            }
+        }
     }
-  }
 
-  Ok(response)
+    Ok(response)
 }
 
 /// Parses this worker's optional 5th CLI argument into a
@@ -87,26 +87,26 @@ pub(crate) fn fetch_with_cookies(
 /// "best-effort, never fails the whole page load over one bad input"
 /// stance elsewhere (see `crate::page_source::resolve_url`).
 pub(crate) fn parse_proxy_arg(arg: Option<&str>) -> Option<net::ProxyConfig> {
-  let arg = arg?;
-  if arg.is_empty() {
-    return None;
-  }
-  let (credentials, host_port) = match arg.split_once('@') {
-    Some((credentials, host_port)) => (Some(credentials), host_port),
-    None => (None, arg),
-  };
-  let (host, port) = host_port.rsplit_once(':')?;
-  let port: u16 = port.parse().ok()?;
-  let (username, password) = match credentials.and_then(|c| c.split_once(':')) {
-    Some((user, pass)) => (Some(user.to_string()), Some(pass.to_string())),
-    None => (None, None),
-  };
-  Some(net::ProxyConfig {
-    host: host.to_string(),
-    port,
-    username,
-    password,
-  })
+    let arg = arg?;
+    if arg.is_empty() {
+        return None;
+    }
+    let (credentials, host_port) = match arg.split_once('@') {
+        Some((credentials, host_port)) => (Some(credentials), host_port),
+        None => (None, arg),
+    };
+    let (host, port) = host_port.rsplit_once(':')?;
+    let port: u16 = port.parse().ok()?;
+    let (username, password) = match credentials.and_then(|c| c.split_once(':')) {
+        Some((user, pass)) => (Some(user.to_string()), Some(pass.to_string())),
+        None => (None, None),
+    };
+    Some(net::ProxyConfig {
+        host: host.to_string(),
+        port,
+        username,
+        password,
+    })
 }
 
 /// Parses this worker's optional 6th CLI argument (`"host:port"`) into
@@ -119,9 +119,9 @@ pub(crate) fn parse_proxy_arg(arg: Option<&str>) -> Option<net::ProxyConfig> {
 /// has no resolver to bootstrap one with) all degrade to "use the OS
 /// resolver".
 pub(crate) fn parse_dns_arg(arg: Option<&str>) -> Option<std::net::SocketAddr> {
-  let arg = arg?;
-  if arg.is_empty() {
-    return None;
-  }
-  arg.parse().ok()
+    let arg = arg?;
+    if arg.is_empty() {
+        return None;
+    }
+    arg.parse().ok()
 }

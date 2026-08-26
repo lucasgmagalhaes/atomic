@@ -20,11 +20,11 @@
 //! profile handling (`image` itself doesn't apply one either).
 #[derive(Debug)]
 pub struct DecodedImage {
-  pub width: u32,
-  pub height: u32,
-  /// Tightly packed RGBA8, row-major, top-to-bottom — same convention
-  /// `render::GpuRenderer::render_to_rgba`'s own return value uses.
-  pub rgba: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    /// Tightly packed RGBA8, row-major, top-to-bottom — same convention
+    /// `render::GpuRenderer::render_to_rgba`'s own return value uses.
+    pub rgba: Vec<u8>,
 }
 
 /// Decodes `bytes` (a whole PNG or JPEG file's contents, as fetched over
@@ -34,12 +34,12 @@ pub struct DecodedImage {
 /// caller treats like a `<img>` with no `src` at all, rather than a
 /// distinct error type nothing downstream would act on differently.
 pub fn decode(bytes: &[u8]) -> Option<DecodedImage> {
-  let img = image::load_from_memory(bytes).ok()?;
-  let rgba = img.to_rgba8();
-  let (width, height) = (rgba.width(), rgba.height());
-  Some(DecodedImage {
-    width,
-    height,
-    rgba: rgba.into_raw(),
-  })
+    let img = image::load_from_memory(bytes).ok()?;
+    let rgba = img.to_rgba8();
+    let (width, height) = (rgba.width(), rgba.height());
+    Some(DecodedImage {
+        width,
+        height,
+        rgba: rgba.into_raw(),
+    })
 }

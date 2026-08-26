@@ -24,594 +24,590 @@ const PROFILE_MEMORY_LIMIT_BYTES: u64 = 512 * 1024 * 1024;
 
 #[derive(Debug)]
 pub enum SpawnError {
-  Io(std::io::Error),
-  Shmem(ShmemError),
-  /// Only fatal on platforms where sandboxing is implemented (currently
-  /// Windows) — a real failure to confine the process there means the
-  /// process would otherwise run unconfined, which this crate refuses to
-  /// do silently. On platforms where sandboxing isn't implemented yet
-  /// (see `security::sandbox`'s doc comment), `Sandbox(Unsupported)`
-  /// never reaches here — `spawn` treats that specific case as an
-  /// expected gap, not a failure.
-  Sandbox(security::sandbox::SandboxError),
+    Io(std::io::Error),
+    Shmem(ShmemError),
+    /// Only fatal on platforms where sandboxing is implemented (currently
+    /// Windows) — a real failure to confine the process there means the
+    /// process would otherwise run unconfined, which this crate refuses to
+    /// do silently. On platforms where sandboxing isn't implemented yet
+    /// (see `security::sandbox`'s doc comment), `Sandbox(Unsupported)`
+    /// never reaches here — `spawn` treats that specific case as an
+    /// expected gap, not a failure.
+    Sandbox(security::sandbox::SandboxError),
 }
 
 impl std::fmt::Display for SpawnError {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    match self {
-      SpawnError::Io(e) => write!(f, "failed to spawn profile-worker: {e}"),
-      SpawnError::Shmem(e) => write!(f, "failed to open profile frame buffer: {e}"),
-      SpawnError::Sandbox(e) => write!(f, "failed to sandbox profile-worker: {e}"),
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SpawnError::Io(e) => write!(f, "failed to spawn profile-worker: {e}"),
+            SpawnError::Shmem(e) => write!(f, "failed to open profile frame buffer: {e}"),
+            SpawnError::Sandbox(e) => write!(f, "failed to sandbox profile-worker: {e}"),
+        }
     }
-  }
 }
 
 impl std::error::Error for SpawnError {}
 
 pub struct Profile {
-  child: Child,
-  stdin: ChildStdin,
-  stdout: BufReader<ChildStdout>,
-  frame_reader: ipc::FrameReader,
-  quit_sent: bool,
-  /// Held only to keep the confinement alive for as long as the process
-  /// runs — dropping it (which happens automatically on `Profile`'s own
-  /// drop) closes the job, force-killing anything still in it. `None` on
-  /// platforms where `security::sandbox::confine` isn't implemented yet;
-  /// the existing `Drop`-kill below is the only isolation boundary there.
-  _sandbox: Option<security::sandbox::Sandbox>,
+    child: Child,
+    stdin: ChildStdin,
+    stdout: BufReader<ChildStdout>,
+    frame_reader: ipc::FrameReader,
+    quit_sent: bool,
+    /// Held only to keep the confinement alive for as long as the process
+    /// runs — dropping it (which happens automatically on `Profile`'s own
+    /// drop) closes the job, force-killing anything still in it. `None` on
+    /// platforms where `security::sandbox::confine` isn't implemented yet;
+    /// the existing `Drop`-kill below is the only isolation boundary there.
+    _sandbox: Option<security::sandbox::Sandbox>,
 }
 
 impl Profile {
-  /// Spawns a new `profile-worker` child process rendering into a
-  /// `width` × `height` frame published under the shared-memory name
-  /// `shmem_name` (must be unique per profile - two profiles sharing a
-  /// name would stomp each other's frames).
-  ///
-  /// `worker_path` is the path to the `profile-worker` executable.
-  /// Callers building/testing within this workspace can pass
-  /// `env!("CARGO_BIN_EXE_profile-worker")`; a real shell would resolve
-  /// this from its own install layout instead.
-  pub fn spawn(
-    worker_path: &str,
-    shmem_name: &str,
-    width: u32,
-    height: u32,
-  ) -> Result<Self, SpawnError> {
-    Self::spawn_with_proxy(worker_path, shmem_name, width, height, None)
-  }
-
-  /// Same as [`spawn`](Self::spawn), plus a per-profile upstream HTTP/
-  /// HTTPS proxy every `NAVIGATE`/`RELOAD` fetch (page HTML, `<link>`
-  /// stylesheets, `@import`s) is routed through instead of connecting
-  /// directly — closes the spec's "proxy por perfil" requirement (`net`
-  /// itself already tunnels via a real `CONNECT`; this is what actually
-  /// picks a proxy *for this profile*). `proxy` is `"host:port"` or
-  /// `"user:pass@host:port"` (matching a `user:pass@host:port` proxy
-  /// URL's authority, minus the scheme, which this crate doesn't
-  /// interpret — it's forwarded to the worker as-is and parsed there).
-  /// `None` behaves exactly like `spawn` (connects directly, no proxy) —
-  /// the worker's own argument parsing treats a missing 5th argument the
-  /// same as this crate not passing one, so the two paths converge on
-  /// the exact same child-process invocation rather than one being a
-  /// degraded version of the other.
-  pub fn spawn_with_proxy(
-    worker_path: &str,
-    shmem_name: &str,
-    width: u32,
-    height: u32,
-    proxy: Option<&str>,
-  ) -> Result<Self, SpawnError> {
-    Self::spawn_with_proxy_and_dns(worker_path, shmem_name, width, height, proxy, None)
-  }
-
-  /// Same as [`spawn`](Self::spawn), plus a per-profile custom DNS
-  /// server (`"host:port"`, the server's own IP:port — this doesn't
-  /// resolve a hostname for *that*) every `NAVIGATE`/`RELOAD` fetch
-  /// resolves its target host through instead of the OS resolver, via
-  /// `net::get_via_dns` — closes the "DNS" half of the spec's Settings/
-  /// Network requirement the same way [`spawn_with_proxy`](Self::spawn_with_proxy)
-  /// closed the proxy half. `None` behaves exactly like [`spawn`](Self::spawn).
-  pub fn spawn_with_dns(
-    worker_path: &str,
-    shmem_name: &str,
-    width: u32,
-    height: u32,
-    dns_server: Option<&str>,
-  ) -> Result<Self, SpawnError> {
-    Self::spawn_with_proxy_and_dns(worker_path, shmem_name, width, height, None, dns_server)
-  }
-
-  /// Same as [`spawn`](Self::spawn), plus opening a specific GPU adapter
-  /// (see `render::list_adapters`'s own doc for how a caller enumerates
-  /// real ones) instead of `render::GpuRenderer::new`'s default-adapter
-  /// heuristic — the mockup's "Settings > Performance > GPU" knob.
-  /// `index` is into `render::list_adapters()`'s own order; an
-  /// out-of-range index is the worker process's problem to report (it
-  /// panics on that, same as `GpuRenderer::new_with_adapter` itself
-  /// does), not this crate's.
-  pub fn spawn_with_gpu_adapter(
-    worker_path: &str,
-    shmem_name: &str,
-    width: u32,
-    height: u32,
-    gpu_adapter: Option<usize>,
-  ) -> Result<Self, SpawnError> {
-    Self::spawn_full(
-      worker_path,
-      shmem_name,
-      width,
-      height,
-      None,
-      None,
-      gpu_adapter,
-    )
-  }
-
-  /// The general form every other `spawn_*` delegates to. A proxy and a
-  /// custom DNS server can both be passed, but the worker's own
-  /// `fetch_with_cookies` always prefers the proxy when both are set
-  /// (there's no `net` entry point combining `CONNECT` tunneling with a
-  /// caller-chosen resolver — a proxied request's DNS resolution is the
-  /// proxy's job). `gpu_adapter` is independent of both — it picks which
-  /// GPU renders, not how network requests are routed.
-  pub fn spawn_with_proxy_and_dns(
-    worker_path: &str,
-    shmem_name: &str,
-    width: u32,
-    height: u32,
-    proxy: Option<&str>,
-    dns_server: Option<&str>,
-  ) -> Result<Self, SpawnError> {
-    Self::spawn_full(
-      worker_path,
-      shmem_name,
-      width,
-      height,
-      proxy,
-      dns_server,
-      None,
-    )
-  }
-
-  #[allow(clippy::too_many_arguments)]
-  pub fn spawn_full(
-    worker_path: &str,
-    shmem_name: &str,
-    width: u32,
-    height: u32,
-    proxy: Option<&str>,
-    dns_server: Option<&str>,
-    gpu_adapter: Option<usize>,
-  ) -> Result<Self, SpawnError> {
-    let mut command = Command::new(worker_path);
-    command
-      .arg(shmem_name)
-      .arg(width.to_string())
-      .arg(height.to_string());
-    if proxy.is_some() || dns_server.is_some() || gpu_adapter.is_some() {
-      command.arg(proxy.unwrap_or(""));
+    /// Spawns a new `profile-worker` child process rendering into a
+    /// `width` × `height` frame published under the shared-memory name
+    /// `shmem_name` (must be unique per profile - two profiles sharing a
+    /// name would stomp each other's frames).
+    ///
+    /// `worker_path` is the path to the `profile-worker` executable.
+    /// Callers building/testing within this workspace can pass
+    /// `env!("CARGO_BIN_EXE_profile-worker")`; a real shell would resolve
+    /// this from its own install layout instead.
+    pub fn spawn(
+        worker_path: &str,
+        shmem_name: &str,
+        width: u32,
+        height: u32,
+    ) -> Result<Self, SpawnError> {
+        Self::spawn_with_proxy(worker_path, shmem_name, width, height, None)
     }
-    if dns_server.is_some() || gpu_adapter.is_some() {
-      command.arg(dns_server.map(str::to_string).unwrap_or_default());
+
+    /// Same as [`spawn`](Self::spawn), plus a per-profile upstream HTTP/
+    /// HTTPS proxy every `NAVIGATE`/`RELOAD` fetch (page HTML, `<link>`
+    /// stylesheets, `@import`s) is routed through instead of connecting
+    /// directly — closes the spec's "proxy por perfil" requirement (`net`
+    /// itself already tunnels via a real `CONNECT`; this is what actually
+    /// picks a proxy *for this profile*). `proxy` is `"host:port"` or
+    /// `"user:pass@host:port"` (matching a `user:pass@host:port` proxy
+    /// URL's authority, minus the scheme, which this crate doesn't
+    /// interpret — it's forwarded to the worker as-is and parsed there).
+    /// `None` behaves exactly like `spawn` (connects directly, no proxy) —
+    /// the worker's own argument parsing treats a missing 5th argument the
+    /// same as this crate not passing one, so the two paths converge on
+    /// the exact same child-process invocation rather than one being a
+    /// degraded version of the other.
+    pub fn spawn_with_proxy(
+        worker_path: &str,
+        shmem_name: &str,
+        width: u32,
+        height: u32,
+        proxy: Option<&str>,
+    ) -> Result<Self, SpawnError> {
+        Self::spawn_with_proxy_and_dns(worker_path, shmem_name, width, height, proxy, None)
     }
-    if let Some(gpu_adapter) = gpu_adapter {
-      command.arg(gpu_adapter.to_string());
+
+    /// Same as [`spawn`](Self::spawn), plus a per-profile custom DNS
+    /// server (`"host:port"`, the server's own IP:port — this doesn't
+    /// resolve a hostname for *that*) every `NAVIGATE`/`RELOAD` fetch
+    /// resolves its target host through instead of the OS resolver, via
+    /// `net::get_via_dns` — closes the "DNS" half of the spec's Settings/
+    /// Network requirement the same way [`spawn_with_proxy`](Self::spawn_with_proxy)
+    /// closed the proxy half. `None` behaves exactly like [`spawn`](Self::spawn).
+    pub fn spawn_with_dns(
+        worker_path: &str,
+        shmem_name: &str,
+        width: u32,
+        height: u32,
+        dns_server: Option<&str>,
+    ) -> Result<Self, SpawnError> {
+        Self::spawn_with_proxy_and_dns(worker_path, shmem_name, width, height, None, dns_server)
     }
-    let mut child = command
-      .stdin(Stdio::piped())
-      .stdout(Stdio::piped())
-      .stderr(Stdio::inherit())
-      .spawn()
-      .map_err(SpawnError::Io)?;
 
-    let sandbox = match security::sandbox::confine(&child, PROFILE_MEMORY_LIMIT_BYTES) {
-      Ok(sandbox) => Some(sandbox),
-      Err(e) if cfg!(windows) => {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err(SpawnError::Sandbox(e));
-      }
-      Err(_unsupported) => None,
-    };
-
-    let stdin = child.stdin.take().expect("piped stdin");
-    let stdout = BufReader::new(child.stdout.take().expect("piped stdout"));
-
-    // The worker creates the shmem region before rendering its first
-    // frame, but process startup isn't instant - retry opening our
-    // end for a bit rather than racing it once and failing.
-    let frame_reader = open_frame_reader_with_retry(shmem_name, width, height)?;
-
-    Ok(Profile {
-      child,
-      stdin,
-      stdout,
-      frame_reader,
-      quit_sent: false,
-      _sandbox: sandbox,
-    })
-  }
-
-  /// Sends `PING`, waits for `PONG`. `Ok(true)` means the process is
-  /// alive and responsive; `Ok(false)` means it responded with
-  /// something else (shouldn't happen against a well-behaved worker).
-  pub fn ping(&mut self) -> std::io::Result<bool> {
-    writeln!(self.stdin, "PING")?;
-    self.stdin.flush()?;
-    let mut line = String::new();
-    self.stdout.read_line(&mut line)?;
-    Ok(line.trim() == "PONG")
-  }
-
-  /// Asks the worker to re-render and publish a new frame.
-  pub fn reload(&mut self) -> std::io::Result<()> {
-    writeln!(self.stdin, "RELOAD")?;
-    self.stdin.flush()?;
-    let mut line = String::new();
-    self.stdout.read_line(&mut line)?;
-    Ok(())
-  }
-
-  /// Asks the worker to fetch `url` (a real HTTP/HTTPS request via
-  /// `net::get`, blocking the worker's render loop for the duration —
-  /// see `profile-worker`'s doc on why that's an acceptable simplicity
-  /// trade at this scope) and render the result, replacing the current
-  /// page. `Ok(Ok(()))` means the page loaded; `Ok(Err(message))` means
-  /// the worker is still alive and responsive but the fetch/parse
-  /// itself failed (bad URL, network error, ...) — the worker renders
-  /// a real in-page error message in that case rather than crashing or
-  /// leaving the previous page up silently. The outer `io::Result`
-  /// only covers the stdin/stdout protocol itself failing (a dead
-  /// worker, a broken pipe).
-  pub fn navigate(&mut self, url: &str) -> std::io::Result<Result<(), String>> {
-    writeln!(self.stdin, "NAVIGATE {url}")?;
-    self.stdin.flush()?;
-    let mut line = String::new();
-    self.stdout.read_line(&mut line)?;
-    let line = line.trim();
-    match line.strip_prefix("ERROR ") {
-      Some(message) => Ok(Err(message.to_string())),
-      None => Ok(Ok(())),
+    /// Same as [`spawn`](Self::spawn), plus opening a specific GPU adapter
+    /// (see `render::list_adapters`'s own doc for how a caller enumerates
+    /// real ones) instead of `render::GpuRenderer::new`'s default-adapter
+    /// heuristic — the mockup's "Settings > Performance > GPU" knob.
+    /// `index` is into `render::list_adapters()`'s own order; an
+    /// out-of-range index is the worker process's problem to report (it
+    /// panics on that, same as `GpuRenderer::new_with_adapter` itself
+    /// does), not this crate's.
+    pub fn spawn_with_gpu_adapter(
+        worker_path: &str,
+        shmem_name: &str,
+        width: u32,
+        height: u32,
+        gpu_adapter: Option<usize>,
+    ) -> Result<Self, SpawnError> {
+        Self::spawn_full(
+            worker_path,
+            shmem_name,
+            width,
+            height,
+            None,
+            None,
+            gpu_adapter,
+        )
     }
-  }
 
-  /// The OS process id of the spawned `profile-worker` child - real
-  /// value from `std::process::Child::id()`, not synthesized. Lets a
-  /// caller sample real per-process telemetry against it (e.g.
-  /// `platform_apis::process_stats::sample(profile.pid())` for the
-  /// mockup's resource-monitor CPU/RAM column) without this crate having
-  /// to depend on `platform-apis` itself.
-  pub fn pid(&self) -> u32 {
-    self.child.id()
-  }
-
-  /// Dispatches a real `"click"` event at the element with id `selector`
-  /// (only `#id` is accepted — see `profile-worker`'s own doc on why).
-  /// `Ok(Ok(()))` means it dispatched (a page-attached `"click"` listener,
-  /// if any, actually ran); `Ok(Err(message))` means the worker is still
-  /// alive but the click itself failed (no such id, or `selector` wasn't
-  /// `#id`-shaped). The outer `io::Result` only covers the protocol
-  /// itself failing (a dead worker, a broken pipe) — same convention as
-  /// [`navigate`](Self::navigate).
-  pub fn click(&mut self, selector: &str) -> std::io::Result<Result<(), String>> {
-    writeln!(self.stdin, "CLICK {selector}")?;
-    self.stdin.flush()?;
-    let mut line = String::new();
-    self.stdout.read_line(&mut line)?;
-    let line = line.trim();
-    match line.strip_prefix("ERROR ") {
-      Some(message) => Ok(Err(message.to_string())),
-      None => Ok(Ok(())),
+    /// The general form every other `spawn_*` delegates to. A proxy and a
+    /// custom DNS server can both be passed, but the worker's own
+    /// `fetch_with_cookies` always prefers the proxy when both are set
+    /// (there's no `net` entry point combining `CONNECT` tunneling with a
+    /// caller-chosen resolver — a proxied request's DNS resolution is the
+    /// proxy's job). `gpu_adapter` is independent of both — it picks which
+    /// GPU renders, not how network requests are routed.
+    pub fn spawn_with_proxy_and_dns(
+        worker_path: &str,
+        shmem_name: &str,
+        width: u32,
+        height: u32,
+        proxy: Option<&str>,
+        dns_server: Option<&str>,
+    ) -> Result<Self, SpawnError> {
+        Self::spawn_full(
+            worker_path,
+            shmem_name,
+            width,
+            height,
+            proxy,
+            dns_server,
+            None,
+        )
     }
-  }
 
-  /// Sets the `#id` element's real `.value` (`dom::Dom::value`/
-  /// `set_value`, independent of children/text) if it's an
-  /// `<input>`/`<textarea>`, `textContent` otherwise — see
-  /// `profile-worker`'s own doc on `FILL` for the exact rule. `value`
-  /// must not contain a newline (this crate's stdin/stdout protocol is
-  /// newline-delimited —
-  /// see this struct's own doc comment); a value that does never reaches
-  /// the worker, reported the same way a worker-side failure would be
-  /// rather than corrupting the command stream.
-  pub fn fill(&mut self, selector: &str, value: &str) -> std::io::Result<Result<(), String>> {
-    if value.contains('\n') {
-      return Ok(Err("fill value must not contain a newline".to_string()));
-    }
-    writeln!(self.stdin, "FILL {selector} {value}")?;
-    self.stdin.flush()?;
-    let mut line = String::new();
-    self.stdout.read_line(&mut line)?;
-    let line = line.trim();
-    match line.strip_prefix("ERROR ") {
-      Some(message) => Ok(Err(message.to_string())),
-      None => Ok(Ok(())),
-    }
-  }
+    #[allow(clippy::too_many_arguments)]
+    pub fn spawn_full(
+        worker_path: &str,
+        shmem_name: &str,
+        width: u32,
+        height: u32,
+        proxy: Option<&str>,
+        dns_server: Option<&str>,
+        gpu_adapter: Option<usize>,
+    ) -> Result<Self, SpawnError> {
+        let mut command = Command::new(worker_path);
+        command
+            .arg(shmem_name)
+            .arg(width.to_string())
+            .arg(height.to_string());
+        if proxy.is_some() || dns_server.is_some() || gpu_adapter.is_some() {
+            command.arg(proxy.unwrap_or(""));
+        }
+        if dns_server.is_some() || gpu_adapter.is_some() {
+            command.arg(dns_server.map(str::to_string).unwrap_or_default());
+        }
+        if let Some(gpu_adapter) = gpu_adapter {
+            command.arg(gpu_adapter.to_string());
+        }
+        let mut child = command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .map_err(SpawnError::Io)?;
 
-  /// Real coordinate click: `x`/`y` are pixel coordinates in the
-  /// profile's own frame (same space `latest_frame`'s pixels are in) -
-  /// the worker hit-tests its current layout and dispatches a real
-  /// `"click"` on the nearest id-addressable element (see
-  /// `profile-worker`'s `nearest_id_ancestor`/`dispatch_click_at` for
-  /// the real "only elements with an id, directly or via an ancestor,
-  /// are reachable" limitation this implies). If the hit element is
-  /// itself a real `<input>`/`<textarea>` with its own id, the worker
-  /// also focuses it for a subsequent [`type_key`](Self::type_key) -
-  /// that bookkeeping lives worker-side, not surfaced back through this
-  /// return value; `Ok(Ok(()))` just means the click reached a real
-  /// element. `Ok(Err(message))` means nothing was there to click (no
-  /// element at that point, or nothing id-addressable above it).
-  pub fn click_at(&mut self, x: f64, y: f64) -> std::io::Result<Result<(), String>> {
-    writeln!(self.stdin, "CLICK_AT {x} {y}")?;
-    self.stdin.flush()?;
-    let mut line = String::new();
-    self.stdout.read_line(&mut line)?;
-    let line = line.trim();
-    match line.strip_prefix("ERROR ") {
-      Some(message) => Ok(Err(message.to_string())),
-      None => Ok(Ok(())),
-    }
-  }
+        let sandbox = match security::sandbox::confine(&child, PROFILE_MEMORY_LIMIT_BYTES) {
+            Ok(sandbox) => Some(sandbox),
+            Err(e) if cfg!(windows) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(SpawnError::Sandbox(e));
+            }
+            Err(_unsupported) => None,
+        };
 
-  /// Types `key` into whichever real `<input>`/`<textarea>` the most
-  /// recent [`click_at`](Self::click_at) focused - `"Backspace"` is a
-  /// real delete-last-character, anything else is appended as typed
-  /// text, into the element's real `.value` (`dom::Dom::value`/
-  /// `set_value`). `Ok(Err(message))` if nothing is currently focused
-  /// (never clicked an `<input>`/`<textarea>`, or the page reloaded
-  /// since - see `profile-worker`'s `focused_id` reset on
-  /// `RELOAD`/`NAVIGATE`) or the focused id no longer exists.
-  pub fn type_key(&mut self, key: &str) -> std::io::Result<Result<(), String>> {
-    if key.contains('\n') {
-      return Ok(Err("key must not contain a newline".to_string()));
-    }
-    writeln!(self.stdin, "KEY {key}")?;
-    self.stdin.flush()?;
-    let mut line = String::new();
-    self.stdout.read_line(&mut line)?;
-    let line = line.trim();
-    match line.strip_prefix("ERROR ") {
-      Some(message) => Ok(Err(message.to_string())),
-      None => Ok(Ok(())),
-    }
-  }
+        let stdin = child.stdin.take().expect("piped stdin");
+        let stdout = BufReader::new(child.stdout.take().expect("piped stdout"));
 
-  /// Real `Tab` (`reverse: false`) / `Shift+Tab` (`reverse: true`) focus
-  /// movement, per the real (scoped) tab order `dom::Dom::tab_order`
-  /// computes worker-side (`<input>`/`<textarea>` plus any element with
-  /// an explicit non-negative `tabindex`, positive-`tabindex` group
-  /// first). Blurs whatever was focused before and focuses the next
-  /// target through the real `.blur()`/`.focus()` JS bindings, so real
-  /// `"blur"`/`"change"`/`"focus"` events fire the same as a
-  /// [`click_at`](Self::click_at)-driven focus change - a caller can
-  /// [`type_key`](Self::type_key) into the newly focused field right
-  /// after. `Ok(Err(message))` if the tab order is empty or every
-  /// element in it lacks a real `id` (see `profile-worker`'s
-  /// `tab_focus` doc for why an `id` is required to reach a target
-  /// through this protocol).
-  pub fn tab(&mut self, reverse: bool) -> std::io::Result<Result<(), String>> {
-    writeln!(
-      self.stdin,
-      "{}",
-      if reverse { "TAB_REVERSE" } else { "TAB" }
-    )?;
-    self.stdin.flush()?;
-    let mut line = String::new();
-    self.stdout.read_line(&mut line)?;
-    let line = line.trim();
-    match line.strip_prefix("ERROR ") {
-      Some(message) => Ok(Err(message.to_string())),
-      None => Ok(Ok(())),
+        // The worker creates the shmem region before rendering its first
+        // frame, but process startup isn't instant - retry opening our
+        // end for a bit rather than racing it once and failing.
+        let frame_reader = open_frame_reader_with_retry(shmem_name, width, height)?;
+
+        Ok(Profile {
+            child,
+            stdin,
+            stdout,
+            frame_reader,
+            quit_sent: false,
+            _sandbox: sandbox,
+        })
     }
-  }
 
-  /// Real page (viewport) scroll: shifts the worker's scroll offset by
-  /// `dy` pixels (positive scrolls down, matching a mouse wheel's own
-  /// sign convention), clamped worker-side to `[0, content_height -
-  /// viewport_height]` (`0` if the page is shorter than the viewport -
-  /// nothing to scroll). Every subsequent render/hit-test/`CLICK_AT`
-  /// reflects the new offset until the next `SCROLL`, `RELOAD`, or
-  /// `NAVIGATE` (which resets it to `0`, a fresh page always starts
-  /// scrolled to the top - see `profile-worker`'s own `SCROLL` doc).
-  /// No horizontal scroll - this engine's box model has no concept of
-  /// content wider than its container to begin with.
-  pub fn scroll_by(&mut self, dy: f64) -> std::io::Result<Result<(), String>> {
-    writeln!(self.stdin, "SCROLL {dy}")?;
-    self.stdin.flush()?;
-    let mut line = String::new();
-    self.stdout.read_line(&mut line)?;
-    let line = line.trim();
-    match line.strip_prefix("ERROR ") {
-      Some(message) => Ok(Err(message.to_string())),
-      None => Ok(Ok(())),
+    /// Sends `PING`, waits for `PONG`. `Ok(true)` means the process is
+    /// alive and responsive; `Ok(false)` means it responded with
+    /// something else (shouldn't happen against a well-behaved worker).
+    pub fn ping(&mut self) -> std::io::Result<bool> {
+        writeln!(self.stdin, "PING")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        Ok(line.trim() == "PONG")
     }
-  }
 
-  /// Evaluates arbitrary JS in the current page's own context — the
-  /// generic "drive the page like a devtools console" command every
-  /// other method here is a fixed special case of (`click` builds and
-  /// evals one hardcoded dispatch snippet, `fill` a hardcoded assignment,
-  /// etc.). The worker re-renders and republishes the frame before
-  /// replying, so whatever the script mutated — DOM structure, an adopted
-  /// stylesheet via `insertRule`, anything — is already visible in real
-  /// painted pixels by the time this returns (see the adopted-stylesheet
-  /// test in this crate's integration tests for exactly that assertion).
-  /// `Ok(Ok(result))` carries the script's stringified completion value;
-  /// `Ok(Err(message))` means evaluation threw (the worker is still alive
-  /// and any mutations made before the throw are kept and rendered). Not
-  /// gated by CSP — host-driven evaluation, not the page loading its own
-  /// script. `script` must not contain a newline (this crate's stdin/
-  /// stdout protocol is newline-delimited) or NUL bytes (which would
-  /// panic the worker's string conversion); either is rejected here
-  /// before it would corrupt or crash the worker, reported the same way
-  /// a worker-side failure would be. Scripts are also length-capped at
-  /// 64KB, matching this engine's other untrusted-string input bounds.
-  /// The outer `io::Result` only covers the protocol itself failing (a
-  /// dead worker, a broken pipe) — same convention as [`navigate`](Self::navigate).
-  pub fn evaluate(&mut self, script: &str) -> std::io::Result<Result<String, String>> {
-    if script.contains('\n') {
-      return Ok(Err("script must not contain a newline".to_string()));
+    /// Asks the worker to re-render and publish a new frame.
+    pub fn reload(&mut self) -> std::io::Result<()> {
+        writeln!(self.stdin, "RELOAD")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        Ok(())
     }
-    if script.contains('\0') {
-      return Ok(Err("script must not contain NUL bytes".to_string()));
+
+    /// Asks the worker to fetch `url` (a real HTTP/HTTPS request via
+    /// `net::get`, blocking the worker's render loop for the duration —
+    /// see `profile-worker`'s doc on why that's an acceptable simplicity
+    /// trade at this scope) and render the result, replacing the current
+    /// page. `Ok(Ok(()))` means the page loaded; `Ok(Err(message))` means
+    /// the worker is still alive and responsive but the fetch/parse
+    /// itself failed (bad URL, network error, ...) — the worker renders
+    /// a real in-page error message in that case rather than crashing or
+    /// leaving the previous page up silently. The outer `io::Result`
+    /// only covers the stdin/stdout protocol itself failing (a dead
+    /// worker, a broken pipe).
+    pub fn navigate(&mut self, url: &str) -> std::io::Result<Result<(), String>> {
+        writeln!(self.stdin, "NAVIGATE {url}")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        let line = line.trim();
+        match line.strip_prefix("ERROR ") {
+            Some(message) => Ok(Err(message.to_string())),
+            None => Ok(Ok(())),
+        }
     }
-    const MAX_SCRIPT_LENGTH: usize = 64 * 1024;
-    if script.len() > MAX_SCRIPT_LENGTH {
-      return Ok(Err("script exceeds the maximum length".to_string()));
+
+    /// The OS process id of the spawned `profile-worker` child - real
+    /// value from `std::process::Child::id()`, not synthesized. Lets a
+    /// caller sample real per-process telemetry against it (e.g.
+    /// `platform_apis::process_stats::sample(profile.pid())` for the
+    /// mockup's resource-monitor CPU/RAM column) without this crate having
+    /// to depend on `platform-apis` itself.
+    pub fn pid(&self) -> u32 {
+        self.child.id()
     }
-    writeln!(self.stdin, "EVAL {script}")?;
-    self.stdin.flush()?;
-    let mut line = String::new();
-    self.stdout.read_line(&mut line)?;
-    let line = line.trim();
-    match line.strip_prefix("ERROR ") {
-      Some(message) => Ok(Err(message.to_string())),
-      None => Ok(Ok(
-        line
-          .strip_prefix("EVALUATED ")
-          .unwrap_or(line)
-          .trim()
-          .to_string(),
-      )),
+
+    /// Dispatches a real `"click"` event at the element with id `selector`
+    /// (only `#id` is accepted — see `profile-worker`'s own doc on why).
+    /// `Ok(Ok(()))` means it dispatched (a page-attached `"click"` listener,
+    /// if any, actually ran); `Ok(Err(message))` means the worker is still
+    /// alive but the click itself failed (no such id, or `selector` wasn't
+    /// `#id`-shaped). The outer `io::Result` only covers the protocol
+    /// itself failing (a dead worker, a broken pipe) — same convention as
+    /// [`navigate`](Self::navigate).
+    pub fn click(&mut self, selector: &str) -> std::io::Result<Result<(), String>> {
+        writeln!(self.stdin, "CLICK {selector}")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        let line = line.trim();
+        match line.strip_prefix("ERROR ") {
+            Some(message) => Ok(Err(message.to_string())),
+            None => Ok(Ok(())),
+        }
     }
-  }
 
-  /// Drains the page's accumulated `console.*` output (see
-  /// `profile-worker`'s `CONSOLE` command) as `(level, text)` pairs -
-  /// the same stream a devtools console would show, including uncaught
-  /// script errors reported at `error` level by `Context::eval` itself.
-  /// Draining: a second call only returns messages logged after this
-  /// one.
-  pub fn console(&mut self) -> std::io::Result<Vec<(String, String)>> {
-    writeln!(self.stdin, "CONSOLE")?;
-    self.stdin.flush()?;
-    let mut line = String::new();
-    self.stdout.read_line(&mut line)?;
-    let line = line.trim();
-    match line.strip_prefix("MESSAGES ") {
-      Some(rest) => Ok(
-        rest
-          .split(" | ")
-          .filter_map(|entry| entry.split_once(':'))
-          .map(|(level, text)| (level.to_string(), text.to_string()))
-          .collect(),
-      ),
-      // Bare `MESSAGES` - nothing logged since the last drain.
-      None => Ok(Vec::new()),
+    /// Sets the `#id` element's real `.value` (`dom::Dom::value`/
+    /// `set_value`, independent of children/text) if it's an
+    /// `<input>`/`<textarea>`, `textContent` otherwise — see
+    /// `profile-worker`'s own doc on `FILL` for the exact rule. `value`
+    /// must not contain a newline (this crate's stdin/stdout protocol is
+    /// newline-delimited —
+    /// see this struct's own doc comment); a value that does never reaches
+    /// the worker, reported the same way a worker-side failure would be
+    /// rather than corrupting the command stream.
+    pub fn fill(&mut self, selector: &str, value: &str) -> std::io::Result<Result<(), String>> {
+        if value.contains('\n') {
+            return Ok(Err("fill value must not contain a newline".to_string()));
+        }
+        writeln!(self.stdin, "FILL {selector} {value}")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        let line = line.trim();
+        match line.strip_prefix("ERROR ") {
+            Some(message) => Ok(Err(message.to_string())),
+            None => Ok(Ok(())),
+        }
     }
-  }
 
-  /// Caps the worker's own vsync render loop at `fps` frames per second
-  /// (the mockup's "Settings > Performance > frame cap" knob) - takes
-  /// effect on the worker's very next tick, not a respawn (unlike the
-  /// proxy/DNS settings, which are fixed at spawn time - the render loop
-  /// itself has no equivalent "set once" constraint, so this is real live
-  /// throttling of an already-running profile). `Ok(Err(message))` if
-  /// `fps` isn't a positive integer the worker accepted.
-  pub fn set_fps_cap(&mut self, fps: u32) -> std::io::Result<Result<(), String>> {
-    writeln!(self.stdin, "SET_FPS_CAP {fps}")?;
-    self.stdin.flush()?;
-    let mut line = String::new();
-    self.stdout.read_line(&mut line)?;
-    let line = line.trim();
-    match line.strip_prefix("ERROR ") {
-      Some(message) => Ok(Err(message.to_string())),
-      None => Ok(Ok(())),
+    /// Real coordinate click: `x`/`y` are pixel coordinates in the
+    /// profile's own frame (same space `latest_frame`'s pixels are in) -
+    /// the worker hit-tests its current layout and dispatches a real
+    /// `"click"` on the nearest id-addressable element (see
+    /// `profile-worker`'s `nearest_id_ancestor`/`dispatch_click_at` for
+    /// the real "only elements with an id, directly or via an ancestor,
+    /// are reachable" limitation this implies). If the hit element is
+    /// itself a real `<input>`/`<textarea>` with its own id, the worker
+    /// also focuses it for a subsequent [`type_key`](Self::type_key) -
+    /// that bookkeeping lives worker-side, not surfaced back through this
+    /// return value; `Ok(Ok(()))` just means the click reached a real
+    /// element. `Ok(Err(message))` means nothing was there to click (no
+    /// element at that point, or nothing id-addressable above it).
+    pub fn click_at(&mut self, x: f64, y: f64) -> std::io::Result<Result<(), String>> {
+        writeln!(self.stdin, "CLICK_AT {x} {y}")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        let line = line.trim();
+        match line.strip_prefix("ERROR ") {
+            Some(message) => Ok(Err(message.to_string())),
+            None => Ok(Ok(())),
+        }
     }
-  }
 
-  /// Pauses the worker's own vsync render loop entirely (no JS timer
-  /// pumping, no re-render, no frame publish - genuinely idle, see
-  /// `profile-worker`'s own `paused` doc) - the mockup's "background
-  /// throttling" knob for a pane that isn't currently visible. `PING`/
-  /// `SET_FPS_CAP`/`QUIT` still work while paused. No failure mode
-  /// beyond the protocol itself, unlike `click`/`fill`/`navigate` -
-  /// there's nothing about "pause" that can be rejected.
-  pub fn pause(&mut self) -> std::io::Result<()> {
-    writeln!(self.stdin, "PAUSE")?;
-    self.stdin.flush()?;
-    let mut line = String::new();
-    self.stdout.read_line(&mut line)?;
-    Ok(())
-  }
-
-  /// Resumes a paused profile's render loop - a no-op (still answers
-  /// `RESUMED`) if it wasn't paused.
-  pub fn resume(&mut self) -> std::io::Result<()> {
-    writeln!(self.stdin, "RESUME")?;
-    self.stdin.flush()?;
-    let mut line = String::new();
-    self.stdout.read_line(&mut line)?;
-    Ok(())
-  }
-
-  /// The most recently published frame's raw RGBA8 pixels, or `None` if
-  /// the worker hasn't published one yet.
-  pub fn latest_frame(&self) -> Option<Vec<u8>> {
-    self.frame_reader.latest_frame()
-  }
-
-  pub fn frame_generation(&self) -> u32 {
-    self.frame_reader.generation()
-  }
-
-  /// Sends `QUIT` and waits (up to a short timeout) for the process to
-  /// exit on its own. Consumes `self` since there's nothing meaningful
-  /// left to do with a `Profile` after this.
-  pub fn quit(mut self) {
-    self.send_quit_and_wait();
-  }
-
-  fn send_quit_and_wait(&mut self) {
-    if self.quit_sent {
-      return;
+    /// Types `key` into whichever real `<input>`/`<textarea>` the most
+    /// recent [`click_at`](Self::click_at) focused - `"Backspace"` is a
+    /// real delete-last-character, anything else is appended as typed
+    /// text, into the element's real `.value` (`dom::Dom::value`/
+    /// `set_value`). `Ok(Err(message))` if nothing is currently focused
+    /// (never clicked an `<input>`/`<textarea>`, or the page reloaded
+    /// since - see `profile-worker`'s `focused_id` reset on
+    /// `RELOAD`/`NAVIGATE`) or the focused id no longer exists.
+    pub fn type_key(&mut self, key: &str) -> std::io::Result<Result<(), String>> {
+        if key.contains('\n') {
+            return Ok(Err("key must not contain a newline".to_string()));
+        }
+        writeln!(self.stdin, "KEY {key}")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        let line = line.trim();
+        match line.strip_prefix("ERROR ") {
+            Some(message) => Ok(Err(message.to_string())),
+            None => Ok(Ok(())),
+        }
     }
-    self.quit_sent = true;
-    let _ = writeln!(self.stdin, "QUIT");
-    let _ = self.stdin.flush();
 
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while Instant::now() < deadline {
-      if let Ok(Some(_)) = self.child.try_wait() {
-        return;
-      }
-      std::thread::sleep(Duration::from_millis(10));
+    /// Real `Tab` (`reverse: false`) / `Shift+Tab` (`reverse: true`) focus
+    /// movement, per the real (scoped) tab order `dom::Dom::tab_order`
+    /// computes worker-side (`<input>`/`<textarea>` plus any element with
+    /// an explicit non-negative `tabindex`, positive-`tabindex` group
+    /// first). Blurs whatever was focused before and focuses the next
+    /// target through the real `.blur()`/`.focus()` JS bindings, so real
+    /// `"blur"`/`"change"`/`"focus"` events fire the same as a
+    /// [`click_at`](Self::click_at)-driven focus change - a caller can
+    /// [`type_key`](Self::type_key) into the newly focused field right
+    /// after. `Ok(Err(message))` if the tab order is empty or every
+    /// element in it lacks a real `id` (see `profile-worker`'s
+    /// `tab_focus` doc for why an `id` is required to reach a target
+    /// through this protocol).
+    pub fn tab(&mut self, reverse: bool) -> std::io::Result<Result<(), String>> {
+        writeln!(
+            self.stdin,
+            "{}",
+            if reverse { "TAB_REVERSE" } else { "TAB" }
+        )?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        let line = line.trim();
+        match line.strip_prefix("ERROR ") {
+            Some(message) => Ok(Err(message.to_string())),
+            None => Ok(Ok(())),
+        }
     }
-    // Didn't exit in time - not the crash-isolation boundary's job to
-    // wait forever. Drop's kill() covers this if quit() itself wasn't
-    // called at all.
-  }
+
+    /// Real page (viewport) scroll: shifts the worker's scroll offset by
+    /// `dy` pixels (positive scrolls down, matching a mouse wheel's own
+    /// sign convention), clamped worker-side to `[0, content_height -
+    /// viewport_height]` (`0` if the page is shorter than the viewport -
+    /// nothing to scroll). Every subsequent render/hit-test/`CLICK_AT`
+    /// reflects the new offset until the next `SCROLL`, `RELOAD`, or
+    /// `NAVIGATE` (which resets it to `0`, a fresh page always starts
+    /// scrolled to the top - see `profile-worker`'s own `SCROLL` doc).
+    /// No horizontal scroll - this engine's box model has no concept of
+    /// content wider than its container to begin with.
+    pub fn scroll_by(&mut self, dy: f64) -> std::io::Result<Result<(), String>> {
+        writeln!(self.stdin, "SCROLL {dy}")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        let line = line.trim();
+        match line.strip_prefix("ERROR ") {
+            Some(message) => Ok(Err(message.to_string())),
+            None => Ok(Ok(())),
+        }
+    }
+
+    /// Evaluates arbitrary JS in the current page's own context — the
+    /// generic "drive the page like a devtools console" command every
+    /// other method here is a fixed special case of (`click` builds and
+    /// evals one hardcoded dispatch snippet, `fill` a hardcoded assignment,
+    /// etc.). The worker re-renders and republishes the frame before
+    /// replying, so whatever the script mutated — DOM structure, an adopted
+    /// stylesheet via `insertRule`, anything — is already visible in real
+    /// painted pixels by the time this returns (see the adopted-stylesheet
+    /// test in this crate's integration tests for exactly that assertion).
+    /// `Ok(Ok(result))` carries the script's stringified completion value;
+    /// `Ok(Err(message))` means evaluation threw (the worker is still alive
+    /// and any mutations made before the throw are kept and rendered). Not
+    /// gated by CSP — host-driven evaluation, not the page loading its own
+    /// script. `script` must not contain a newline (this crate's stdin/
+    /// stdout protocol is newline-delimited) or NUL bytes (which would
+    /// panic the worker's string conversion); either is rejected here
+    /// before it would corrupt or crash the worker, reported the same way
+    /// a worker-side failure would be. Scripts are also length-capped at
+    /// 64KB, matching this engine's other untrusted-string input bounds.
+    /// The outer `io::Result` only covers the protocol itself failing (a
+    /// dead worker, a broken pipe) — same convention as [`navigate`](Self::navigate).
+    pub fn evaluate(&mut self, script: &str) -> std::io::Result<Result<String, String>> {
+        if script.contains('\n') {
+            return Ok(Err("script must not contain a newline".to_string()));
+        }
+        if script.contains('\0') {
+            return Ok(Err("script must not contain NUL bytes".to_string()));
+        }
+        const MAX_SCRIPT_LENGTH: usize = 64 * 1024;
+        if script.len() > MAX_SCRIPT_LENGTH {
+            return Ok(Err("script exceeds the maximum length".to_string()));
+        }
+        writeln!(self.stdin, "EVAL {script}")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        let line = line.trim();
+        match line.strip_prefix("ERROR ") {
+            Some(message) => Ok(Err(message.to_string())),
+            None => Ok(Ok(line
+                .strip_prefix("EVALUATED ")
+                .unwrap_or(line)
+                .trim()
+                .to_string())),
+        }
+    }
+
+    /// Drains the page's accumulated `console.*` output (see
+    /// `profile-worker`'s `CONSOLE` command) as `(level, text)` pairs -
+    /// the same stream a devtools console would show, including uncaught
+    /// script errors reported at `error` level by `Context::eval` itself.
+    /// Draining: a second call only returns messages logged after this
+    /// one.
+    pub fn console(&mut self) -> std::io::Result<Vec<(String, String)>> {
+        writeln!(self.stdin, "CONSOLE")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        let line = line.trim();
+        match line.strip_prefix("MESSAGES ") {
+            Some(rest) => Ok(rest
+                .split(" | ")
+                .filter_map(|entry| entry.split_once(':'))
+                .map(|(level, text)| (level.to_string(), text.to_string()))
+                .collect()),
+            // Bare `MESSAGES` - nothing logged since the last drain.
+            None => Ok(Vec::new()),
+        }
+    }
+
+    /// Caps the worker's own vsync render loop at `fps` frames per second
+    /// (the mockup's "Settings > Performance > frame cap" knob) - takes
+    /// effect on the worker's very next tick, not a respawn (unlike the
+    /// proxy/DNS settings, which are fixed at spawn time - the render loop
+    /// itself has no equivalent "set once" constraint, so this is real live
+    /// throttling of an already-running profile). `Ok(Err(message))` if
+    /// `fps` isn't a positive integer the worker accepted.
+    pub fn set_fps_cap(&mut self, fps: u32) -> std::io::Result<Result<(), String>> {
+        writeln!(self.stdin, "SET_FPS_CAP {fps}")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        let line = line.trim();
+        match line.strip_prefix("ERROR ") {
+            Some(message) => Ok(Err(message.to_string())),
+            None => Ok(Ok(())),
+        }
+    }
+
+    /// Pauses the worker's own vsync render loop entirely (no JS timer
+    /// pumping, no re-render, no frame publish - genuinely idle, see
+    /// `profile-worker`'s own `paused` doc) - the mockup's "background
+    /// throttling" knob for a pane that isn't currently visible. `PING`/
+    /// `SET_FPS_CAP`/`QUIT` still work while paused. No failure mode
+    /// beyond the protocol itself, unlike `click`/`fill`/`navigate` -
+    /// there's nothing about "pause" that can be rejected.
+    pub fn pause(&mut self) -> std::io::Result<()> {
+        writeln!(self.stdin, "PAUSE")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        Ok(())
+    }
+
+    /// Resumes a paused profile's render loop - a no-op (still answers
+    /// `RESUMED`) if it wasn't paused.
+    pub fn resume(&mut self) -> std::io::Result<()> {
+        writeln!(self.stdin, "RESUME")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        Ok(())
+    }
+
+    /// The most recently published frame's raw RGBA8 pixels, or `None` if
+    /// the worker hasn't published one yet.
+    pub fn latest_frame(&self) -> Option<Vec<u8>> {
+        self.frame_reader.latest_frame()
+    }
+
+    pub fn frame_generation(&self) -> u32 {
+        self.frame_reader.generation()
+    }
+
+    /// Sends `QUIT` and waits (up to a short timeout) for the process to
+    /// exit on its own. Consumes `self` since there's nothing meaningful
+    /// left to do with a `Profile` after this.
+    pub fn quit(mut self) {
+        self.send_quit_and_wait();
+    }
+
+    fn send_quit_and_wait(&mut self) {
+        if self.quit_sent {
+            return;
+        }
+        self.quit_sent = true;
+        let _ = writeln!(self.stdin, "QUIT");
+        let _ = self.stdin.flush();
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            if let Ok(Some(_)) = self.child.try_wait() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        // Didn't exit in time - not the crash-isolation boundary's job to
+        // wait forever. Drop's kill() covers this if quit() itself wasn't
+        // called at all.
+    }
 }
 
 impl Drop for Profile {
-  fn drop(&mut self) {
-    self.send_quit_and_wait();
-    // Force-kill covers both "quit didn't get processed in time" and
-    // "Profile was dropped without quit() ever being called" - the
-    // crash-isolation guarantee holds either way: a stuck profile
-    // process never outlives its Profile handle.
-    let _ = self.child.kill();
-    let _ = self.child.wait();
-  }
+    fn drop(&mut self) {
+        self.send_quit_and_wait();
+        // Force-kill covers both "quit didn't get processed in time" and
+        // "Profile was dropped without quit() ever being called" - the
+        // crash-isolation guarantee holds either way: a stuck profile
+        // process never outlives its Profile handle.
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
 fn open_frame_reader_with_retry(
-  name: &str,
-  width: u32,
-  height: u32,
+    name: &str,
+    width: u32,
+    height: u32,
 ) -> Result<ipc::FrameReader, SpawnError> {
-  let deadline = Instant::now() + Duration::from_secs(5);
-  let mut last_err = None;
-  while Instant::now() < deadline {
-    match ipc::FrameReader::new(name, width, height) {
-      Ok(reader) => return Ok(reader),
-      Err(e) => {
-        last_err = Some(e);
-        std::thread::sleep(Duration::from_millis(20));
-      }
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut last_err = None;
+    while Instant::now() < deadline {
+        match ipc::FrameReader::new(name, width, height) {
+            Ok(reader) => return Ok(reader),
+            Err(e) => {
+                last_err = Some(e);
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
     }
-  }
-  Err(SpawnError::Shmem(last_err.unwrap()))
+    Err(SpawnError::Shmem(last_err.unwrap()))
 }

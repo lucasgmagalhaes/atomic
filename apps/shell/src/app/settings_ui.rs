@@ -6,13 +6,13 @@ use shell::chrome_import;
 use super::NimbleApp;
 
 impl NimbleApp {
-  pub(super) fn draw_settings_window(&mut self, ctx: &egui::Context) {
-    if !self.settings_open {
-      return;
-    }
-    self.ensure_vault_open();
-    let mut open = self.settings_open;
-    egui::Window::new("Settings").open(&mut open).show(ctx, |ui| {
+    pub(super) fn draw_settings_window(&mut self, ctx: &egui::Context) {
+        if !self.settings_open {
+            return;
+        }
+        self.ensure_vault_open();
+        let mut open = self.settings_open;
+        egui::Window::new("Settings").open(&mut open).show(ctx, |ui| {
             ui.heading("Performance");
             ui.add(egui::Slider::new(&mut self.performance.max_panes, 1..=6).text("Max live panes"));
 
@@ -143,6 +143,6 @@ impl NimbleApp {
                 });
             }
         });
-    self.settings_open = open;
-  }
+        self.settings_open = open;
+    }
 }

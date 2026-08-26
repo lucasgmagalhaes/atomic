@@ -8,6 +8,7 @@ use std::path::Path;
 
 use quickjs_sys as sys;
 
+mod abort_controller;
 mod blob;
 mod class_registry;
 mod clipboard;
@@ -142,6 +143,7 @@ impl<'rt> Context<'rt> {
         unsafe {
             performance::register(ptr);
             console::register(ptr);
+            abort_controller::register(ptr);
             crypto::register(ptr);
             events::register(ptr);
             event_subclasses::register(ptr);

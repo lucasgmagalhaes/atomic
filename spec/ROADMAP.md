@@ -36,7 +36,7 @@ Read [architecture/compatibility.md](architecture/compatibility.md) and [matrix/
 
 15. `[x]` **URL / URLSearchParams** — done (`crates/js-runtime`, git commits `7057013`/`0217d48`, 23 tests).
 16. `[x]` **Fetch Core** (`Request`/`Response`/`Headers`/body consumption) — done this session (`crates/js-runtime/src/request_response.rs`); real cancellation is not (see item 17).
-17. `[ ]` **AbortController** / `AbortSignal` — not started. `addEventListener`'s `signal` option is a documented no-op today.
+17. `[~]` **AbortController** / `AbortSignal` — done (2026-08-26) for the case `ROADMAP.md` itself called out: `crates/js-runtime/src/abort_controller.rs` gives real `AbortController`/`AbortSignal` classes (`.signal`, `.abort(reason)`, `.aborted`, `.reason`, `.throwIfAborted()`, `AbortSignal.abort(reason)`, real `"abort"` event dispatch), and `addEventListener`'s `signal` option is no longer a no-op — an already-aborted signal skips registration entirely, and a later `abort()` really removes the listener. Not done: `AbortSignal.timeout()`/`.any()`, `.onabort` IDL property, and `fetch`/`XMLHttpRequest` don't read a `signal` option yet (in-flight requests run on a real OS thread with no cancellation channel — a separate, larger follow-up). See [matrix/changelog.md](matrix/changelog.md).
 18. `[ ]` Script loading modes (parser-blocking/`defer`/`async`).
 19. `[ ]` ES Modules (resolver, import maps, dynamic `import()`, module cache).
 20. `[ ]` Default actions (links, buttons, forms, focus navigation, selection, scrolling, cancellation).

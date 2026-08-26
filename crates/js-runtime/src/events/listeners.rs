@@ -47,14 +47,17 @@ unsafe fn is_valid_listener(ctx: *mut sys::JSContext, value: sys::JSValue) -> bo
 
 /// Real `addEventListener`/`removeEventListener` third-argument shape:
 /// either a bare `useCapture` boolean, or an options object with
-/// `capture`/`once`/`passive`. `signal` (`AbortSignal`) isn't read — this
-/// crate has no `AbortController`/`AbortSignal` implementation yet, a
-/// documented scope cut rather than a silent no-op (nothing here claims to
-/// honor it).
+/// `capture`/`once`/`passive`/`signal`. `signal`, when present and an
+/// object, is duped here and owned by the caller ([`add`] frees it) — real
+/// `AbortSignal` handling (already-aborted skips registration; a later
+/// `abort()` removes the listener) lives in [`crate::abort_controller`],
+/// which `add` calls into rather than this module reaching into that one's
+/// internals.
 pub(super) struct ListenerOptions {
     pub(super) capture: bool,
     pub(super) once: bool,
     pub(super) passive: bool,
+    pub(super) signal: sys::JSValue,
 }
 
 pub(super) unsafe fn read_listener_options(
@@ -68,6 +71,7 @@ pub(super) unsafe fn read_listener_options(
             capture: false,
             once: false,
             passive: false,
+            signal: sys::js_undefined(),
         };
     }
     let value = *argv.add(index);
@@ -76,6 +80,7 @@ pub(super) unsafe fn read_listener_options(
             capture: sys::JS_ToBool(ctx, value) != 0,
             once: false,
             passive: false,
+            signal: sys::js_undefined(),
         };
     }
     let read = |name: &str| {
@@ -85,10 +90,13 @@ pub(super) unsafe fn read_listener_options(
         sys::JS_FreeValue(ctx, prop);
         b
     };
+    let signal_name = CString::new("signal").unwrap();
+    let signal = sys::JS_GetPropertyStr(ctx, value, signal_name.as_ptr());
     ListenerOptions {
         capture: read("capture"),
         once: read("once"),
         passive: read("passive"),
+        signal,
     }
 }
 
@@ -173,8 +181,16 @@ pub(super) unsafe extern "C" fn add(
         );
     }
     let options = read_listener_options(ctx, argc, argv, 2);
+    // Per spec: a `signal` that's already aborted means the listener is
+    // never added at all, not added-then-immediately-removed.
+    if options.signal.tag == sys::JS_TAG_OBJECT
+        && crate::abort_controller::signal_aborted(ctx, options.signal)
+    {
+        sys::JS_FreeValue(ctx, options.signal);
+        return sys::js_undefined();
+    }
     let all = listeners(ctx, node);
-    let name = CString::new(kind).unwrap_or_default();
+    let name = CString::new(kind.clone()).unwrap_or_default();
     let old = sys::JS_GetPropertyStr(ctx, all, name.as_ptr());
     let list = if sys::JS_IsArray(old) {
         old
@@ -189,12 +205,24 @@ pub(super) unsafe extern "C" fn add(
     if len >= MAX_LISTENERS_PER_TYPE {
         sys::JS_FreeValue(ctx, list);
         sys::JS_FreeValue(ctx, all);
+        sys::JS_FreeValue(ctx, options.signal);
         return type_error(ctx, "event listener limit exceeded");
     }
     let record = make_record(ctx, callback, &options);
     sys::JS_SetPropertyUint32(ctx, list, len as u32, record);
     sys::JS_FreeValue(ctx, list);
     sys::JS_FreeValue(ctx, all);
+    if options.signal.tag == sys::JS_TAG_OBJECT {
+        crate::abort_controller::track_listener(
+            ctx,
+            options.signal,
+            node,
+            &kind,
+            callback,
+            options.capture,
+        );
+    }
+    sys::JS_FreeValue(ctx, options.signal);
     sys::js_undefined()
 }
 
@@ -249,7 +277,7 @@ pub(super) unsafe extern "C" fn remove(
 /// fires. Sets the slot to `undefined` in place (same sparse-array
 /// convention `remove()` already uses) rather than splicing, so this never
 /// shifts indices a concurrent iteration snapshot elsewhere still relies on.
-pub(super) unsafe fn remove_matching_record(
+pub(crate) unsafe fn remove_matching_record(
     ctx: *mut sys::JSContext,
     node: sys::JSValue,
     event_type: &str,

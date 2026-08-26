@@ -29,3 +29,4 @@ pub(crate) use dispatch::{
     dispatch_simple,
 };
 pub(crate) use event_class::{create_event, register};
+pub(crate) use listeners::remove_matching_record;

@@ -157,6 +157,7 @@ impl Drop for AutomationEngine<'_> {
         // `JS_FreeContext`) — same ordering requirement `timers::cleanup`/
         // `fetch_async::cleanup` already document in js-runtime.
         unsafe {
+            pane::cleanup(self.ctx.as_raw());
             events::cleanup(self.ctx.as_raw());
             cron::cleanup(self.ctx.as_raw());
         }

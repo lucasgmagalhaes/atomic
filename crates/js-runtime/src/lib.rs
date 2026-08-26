@@ -72,6 +72,31 @@ impl Runtime {
     }
 }
 
+/// Registers (or looks up, if already registered for this specific
+/// `JSRuntime`) a QuickJS class under `kind`, going through the same
+/// per-runtime registry every class in this crate uses — see
+/// `class_registry`'s module doc for why a `static ..._CLASS_ID` per
+/// class kind is unsound under concurrent `Runtime` construction. `kind`
+/// must be a value unique to the caller (e.g. `"automation::Pane"`) so it
+/// can't collide with a class kind registered from inside this crate.
+/// Exposed so other crates that embed a `js_runtime::Runtime`/`Context`
+/// (e.g. `automation`'s `Pane` class) get the same safety this crate's
+/// own bindings have, instead of reinventing the same bug.
+pub unsafe fn ensure_external_class(
+    rt: *mut sys::JSRuntime,
+    kind: &'static str,
+    def: &sys::JSClassDef,
+) -> sys::JSClassID {
+    class_registry::ensure_class(rt, kind, def)
+}
+
+/// Looks up a class ID previously registered via
+/// [`ensure_external_class`] for `rt`/`kind`. Returns `0`
+/// (`JS_INVALID_CLASS_ID`) if never registered for this runtime.
+pub fn external_class_id(rt: *mut sys::JSRuntime, kind: &'static str) -> sys::JSClassID {
+    class_registry::class_id_for(rt, kind)
+}
+
 impl Default for Runtime {
     fn default() -> Self {
         Self::new()

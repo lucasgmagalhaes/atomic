@@ -68,9 +68,22 @@ fn fetch_then_resolves_with_a_real_response_once_pumped() {
 
   assert_eq!(ctx.eval("seen.ok", "<test>").unwrap(), "true");
   assert_eq!(ctx.eval("seen.status", "<test>").unwrap(), "200");
+
+  ctx
+    .eval(
+      "globalThis.bodyText = null; seen.text().then((t) => { bodyText = t; });",
+      "<test>",
+    )
+    .unwrap();
+  let text_done = pump_until(
+    &ctx,
+    |c| c.eval("bodyText !== null", "<test>").unwrap() == "true",
+    Duration::from_secs(15),
+  );
+  assert!(text_done, "seen.text() should resolve within 15s");
   assert_eq!(
     ctx
-      .eval("seen.body.includes('Example Domain')", "<test>")
+      .eval("bodyText.includes('Example Domain')", "<test>")
       .unwrap(),
     "true"
   );

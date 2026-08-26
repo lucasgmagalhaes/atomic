@@ -38,9 +38,14 @@ fn same_origin_request_sends_the_full_page_url_as_referer() {
   let page_url = format!("http://{addr}/page?x=1");
   ctx.set_url(&page_url);
 
-  let result = ctx
-    .eval(&format!("fetchSync('{url}').body"), "<test>")
+  ctx
+    .eval(
+      &format!("var _b = ''; fetchSync('{url}').text().then(function(t) {{ _b = t; }});"),
+      "<test>",
+    )
     .unwrap();
+  ctx.run_pending_timers();
+  let result = ctx.eval("_b", "<test>").unwrap();
   assert!(
     result
       .to_lowercase()
@@ -59,9 +64,14 @@ fn cross_origin_request_sends_only_the_page_origin_as_referer() {
   let mut ctx = Context::with_dom(&rt, d);
   ctx.set_url("http://totally-different-origin.example/secret-path");
 
-  let result = ctx
-    .eval(&format!("fetchSync('{url}').body"), "<test>")
+  ctx
+    .eval(
+      &format!("var _b = ''; fetchSync('{url}').text().then(function(t) {{ _b = t; }});"),
+      "<test>",
+    )
     .unwrap();
+  ctx.run_pending_timers();
+  let result = ctx.eval("_b", "<test>").unwrap();
   assert!(
     result
       .to_lowercase()
@@ -91,9 +101,14 @@ fn an_opaque_origin_page_sends_no_referer() {
   let mut ctx = Context::with_dom(&rt, d);
   ctx.set_url("data:text/html,hello");
 
-  let result = ctx
-    .eval(&format!("fetchSync('{url}').body"), "<test>")
+  ctx
+    .eval(
+      &format!("var _b = ''; fetchSync('{url}').text().then(function(t) {{ _b = t; }});"),
+      "<test>",
+    )
     .unwrap();
+  ctx.run_pending_timers();
+  let result = ctx.eval("_b", "<test>").unwrap();
   assert!(!result.to_lowercase().contains("referer:"), "got: {result}");
 }
 
@@ -106,8 +121,13 @@ fn a_context_with_no_real_url_sends_no_referer() {
   let rt = Runtime::new();
   let ctx = Context::with_dom(&rt, d); // no set_url call
 
-  let result = ctx
-    .eval(&format!("fetchSync('{url}').body"), "<test>")
+  ctx
+    .eval(
+      &format!("var _b = ''; fetchSync('{url}').text().then(function(t) {{ _b = t; }});"),
+      "<test>",
+    )
     .unwrap();
+  ctx.run_pending_timers();
+  let result = ctx.eval("_b", "<test>").unwrap();
   assert!(!result.to_lowercase().contains("referer:"), "got: {result}");
 }

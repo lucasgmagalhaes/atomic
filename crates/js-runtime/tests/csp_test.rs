@@ -50,9 +50,12 @@ fn connect_src_none_blocks_every_fetch() {
   ctx.set_csp("connect-src 'none'");
 
   let result = ctx
-    .eval(&format!("JSON.stringify(fetchSync('{url}'))"), "<test>")
+    .eval(
+      &format!("var r = fetchSync('{url}'); [r.ok, r.status] + ''"),
+      "<test>",
+    )
     .unwrap();
-  assert_eq!(result, r#"{"ok":false,"status":0,"body":""}"#);
+  assert_eq!(result, "false,0");
 }
 
 #[test]

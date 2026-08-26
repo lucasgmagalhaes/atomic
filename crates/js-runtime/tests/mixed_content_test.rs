@@ -50,9 +50,12 @@ fn fetch_sync_blocks_a_plain_http_request_from_an_https_page() {
   ctx.set_url("https://secure-page.example/");
 
   let result = ctx
-    .eval(&format!("JSON.stringify(fetchSync('{url}'))"), "<test>")
+    .eval(
+      &format!("var r = fetchSync('{url}'); [r.ok, r.status] + ''"),
+      "<test>",
+    )
     .unwrap();
-  assert_eq!(result, r#"{"ok":false,"status":0,"body":""}"#);
+  assert_eq!(result, "false,0");
 }
 
 #[test]

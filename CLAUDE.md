@@ -13,6 +13,10 @@ The project is referred to by **three different names** across the repo, not yet
 
 Do not assume one name is canonical. If you need to pick one for new code/docs, ask the user first — this has not been decided.
 
+## Product positioning (decided 2026-08-26)
+
+The product framing is broader than "idle games" alone now — see [`spec/ROADMAP.md`](spec/ROADMAP.md)'s "Product scope decision" section for the full reasoning (market research on idle games vs. multi-account/antidetect browsers vs. kiosk/digital-signage software). Short version: the core differentiator is **many isolated profiles running light at once**, not games specifically — idle-game account management is one real use case among several (multi-account management, kiosk/embedded deployments) that all need the same thing this engine's architecture already gives for free: per-profile process isolation with far less memory/CPU overhead per profile than a Chromium-based tool. Don't reposition docs/messaging around "beating Chromium" on raw JS/layout performance — that's not realistic (see the same ROADMAP.md section for why) — the honest, defensible claim is idle memory/CPU/cold-start footprint at scale (many profiles), not general browsing speed.
+
 ## Source of truth for architecture
 
 `mockup/browser-idle-spec.md` is the technical execution spec (Rust workspace, crate breakdown, phased roadmap). `mockup/Nimble Browser.dc.html` is the UI/UX mockup (interactive HTML prototype) — it drives product features, not implementation. `mockup/rendering-engine-gaps.md` is a detailed, code-verified gap map of the rendering engine specifically (css/layout-engine/render/webgl/dom) — what's real vs missing at the CSS-property/API level, not the crate/phase level `browser-idle-spec.md` tracks.

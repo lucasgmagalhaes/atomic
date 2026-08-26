@@ -1,10 +1,14 @@
 # idleGo
 
-A free and open source browser focused on managing idle games. Also referred to as **Nimble** in the product mockup (`mockup/`) — naming is not yet unified across README/spec/mockup.
+A free and open source browser built from scratch around one core idea: run many isolated profiles side by side — light enough that having dozens open costs a fraction of what Chromium-based multi-profile tools cost. Also referred to as **Nimble** in the product mockup (`mockup/`) — naming is not yet unified across README/spec/mockup.
 
 ## Goal
 
-Run several isolated game accounts side by side (tiled panes, per-account session isolation, optional proxy, automation scripts) without the overhead of embedding a full browser engine like Chromium.
+Run several isolated profiles side by side (tiled panes, per-profile session isolation, optional proxy, automation scripts, resource monitoring) without the memory/CPU overhead of embedding a full browser engine like Chromium for every profile.
+
+This started as a browser for managing idle games specifically (many accounts open at once, background-throttled) — that's still a real use case, but the actual product surface (per-profile process isolation, workspaces, credential vault, Chrome import, automation engine) is more general: **any workflow that needs many isolated browser sessions running light at once** — idle-game farming, multi-account management, or kiosk/embedded deployments where footprint is a hard constraint, not just a nice-to-have.
+
+Full reasoning behind this positioning (market research, what this engine can and can't realistically compete with Chromium on) — [`spec/ROADMAP.md`](spec/ROADMAP.md)'s "Product scope decision" section.
 
 ## Architecture
 
@@ -33,9 +37,9 @@ Full rationale and crate breakdown: [`mockup/browser-idle-spec.md`](mockup/brows
 
 ## Status
 
-Phase 1 in progress. `crates/dom` has a real implementation with unit tests; every other crate is a compiling stub.
+Well past the phase table above now — every crate listed under "Architecture" has a real, tested implementation (JS engine, DOM, CSS/layout, GPU render, networking/TLS, per-profile process isolation, workers, storage). See [`CLAUDE.md`](CLAUDE.md)'s "Implementation status" section for the current detail, and [`spec/INDEX.md`](spec/INDEX.md) for what's left on the JS-engine side specifically.
 
 ```bash
 cargo build --workspace
-cargo test -p dom
+cargo test --workspace
 ```

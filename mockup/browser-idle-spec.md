@@ -1,5 +1,7 @@
 # IdleBrowser — Spec técnica de execução
 
+> Posicionamento de produto ampliado além de "idle games" — ver `spec/ROADMAP.md`'s "Product scope decision" (2026-08-26). Isolamento multi-perfil leve é o diferencial central; jogos idle são um caso de uso, não o único.
+
 ## Requisitos
 - Plataformas: Windows, Linux, macOS
 - Escala: até 6 contas/abas simultâneas (tiling 1/2/4/6)

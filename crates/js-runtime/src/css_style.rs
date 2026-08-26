@@ -13,9 +13,10 @@
 //!
 //! Real per-`NodeId` object identity (`STYLE_OBJECTS`, same convention
 //! `dom_bindings`'s `classList`/`dataset`/`attributes` already use) —
-//! evicted via `evict`/`cleanup`, called from `dom_bindings`'s own
-//! `evict_node_object`/`cleanup` so a removed node's cached style object
-//! doesn't outlive it.
+//! freed via `cleanup`, called from `dom_bindings`'s own `cleanup` on
+//! `Context` teardown. Node removal itself is non-destructive (see
+//! `spec/architecture/primitives.md` §4.1), so a removed-but-still-alive
+//! node's style object correctly stays cached, not evicted.
 //!
 //! Named camelCase accessors (`style.backgroundColor`, ...) only exist for
 //! [`KEBAB_PROPERTIES`] — the properties `layout-engine`'s cascade resolver
@@ -82,25 +83,6 @@ thread_local! {
     /// declaration list) need clearing to `undefined` — same convention
     /// `dom_bindings::CLASS_LIST_LENGTHS`/`ATTRS_LENGTHS` already use.
     static STYLE_LENGTHS: RefCell<HashMap<usize, HashMap<dom::NodeId, usize>>> = RefCell::new(HashMap::new());
-}
-
-/// Evicts `id`'s cached style object for `ctx`, if any — called from
-/// `dom_bindings::evict_node_object` alongside its own caches, so a removed
-/// node's style object doesn't outlive it.
-pub(crate) unsafe fn evict(ctx: *mut sys::JSContext, id: dom::NodeId) {
-    let cached = STYLE_OBJECTS.with(|reg| {
-        reg.borrow_mut()
-            .get_mut(&(ctx as usize))
-            .and_then(|nodes| nodes.remove(&id))
-    });
-    if let Some(object) = cached {
-        sys::JS_FreeValue(ctx, object);
-    }
-    STYLE_LENGTHS.with(|reg| {
-        if let Some(nodes) = reg.borrow_mut().get_mut(&(ctx as usize)) {
-            nodes.remove(&id);
-        }
-    });
 }
 
 /// Frees every cached style object for `ctx` — called from

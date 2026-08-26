@@ -138,12 +138,10 @@ impl Dom {
     /// low-level method doesn't check, matching how [`Dom::append_child`]/
     /// [`Dom::insert_before`] leave that check to their JS-facing callers
     /// too). Replacing a node with itself is a real no-op (`true`, nothing
-    /// moves) rather than removing and reinserting the same id, which would
-    /// otherwise free the very slot the operation is also trying to insert.
-    /// Frees `old_child`'s whole subtree exactly like [`Dom::remove`] — the
-    /// same documented simplification `removeChild`/`remove` already make
-    /// (a real DOM keeps a removed node alive and reattachable; this one
-    /// destroys it).
+    /// moves) rather than detaching and reinserting the same id. `old_child`
+    /// is only unlinked, not destroyed (see [`Dom::remove_from_parent`]) —
+    /// it keeps its identity, its own subtree, and stays reattachable, per
+    /// `spec/architecture/primitives.md` §4.1.
     pub fn replace_child(&mut self, parent: NodeId, new_child: NodeId, old_child: NodeId) -> bool {
         if new_child == old_child {
             return self
@@ -159,7 +157,7 @@ impl Dom {
         };
         self.mutations = self.mutations.wrapping_add(1);
         self.detach(new_child);
-        self.remove(old_child);
+        self.detach(old_child);
         if let Some(node) = self.get_mut(parent) {
             let insert_pos = position.min(node.children.len());
             node.children.insert(insert_pos, new_child);

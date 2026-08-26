@@ -10,7 +10,7 @@ use std::os::raw::c_int;
 use quickjs_sys as sys;
 
 use super::content::insert_adjacent_html;
-use super::node_registry::{dom_opaque, evict_node_object, node_class_id_for, node_id};
+use super::node_registry::{dom_opaque, node_class_id_for, node_id};
 use super::util::{read_js_string, throw_type_error, MAX_ATTRIBUTE_VALUE_LENGTH};
 
 const MAX_TAG_NAME_LENGTH: usize = 64;
@@ -49,22 +49,6 @@ fn is_ancestor(dom: &dom::Dom, ancestor: dom::NodeId, mut node: dom::NodeId) -> 
         };
         node = parent;
     }
-}
-
-/// Recursively evicts every cached JS-side identity/state for `id` and its
-/// descendants — must run before a subtree is actually freed from `dom`, so
-/// a later `getElementById` on a resurrected id (arena slot reuse) can never
-/// resurrect a stale listener/cache entry. Also used by `content.rs`'s
-/// `replace_children_with_html`/`node_outer_html_set`.
-pub(super) unsafe fn evict_subtree(ctx: *mut sys::JSContext, dom: &dom::Dom, id: dom::NodeId) {
-    let children = dom
-        .get(id)
-        .map(|node| node.children.clone())
-        .unwrap_or_default();
-    for child in children {
-        evict_subtree(ctx, dom, child);
-    }
-    evict_node_object(ctx, id);
 }
 
 unsafe extern "C" fn node_append_child(
@@ -280,8 +264,11 @@ unsafe extern "C" fn node_remove(
         if id == (*dom).root() {
             return throw_type_error(ctx, "document root cannot be removed");
         }
-        evict_subtree(ctx, &*dom, id);
-        (*dom).remove(id);
+        // Non-destructive: `id` keeps its identity (same `NodeId`, same
+        // cached JS wrapper, own listeners intact) and stays reattachable
+        // — only unlinked from its parent, not freed. See spec/architecture/
+        // primitives.md §4.1; a real `remove()` never destroys the node.
+        (*dom).remove_from_parent(id);
     }
     sys::js_undefined()
 }
@@ -309,8 +296,9 @@ unsafe extern "C" fn node_remove_child(
     if (*dom).get(child).and_then(|node| node.parent) != Some(parent) {
         return throw_type_error(ctx, "node is not a child of this parent");
     }
-    evict_subtree(ctx, &*dom, child);
-    (*dom).remove(child);
+    // Non-destructive: `child` remains a valid, reattachable node (same
+    // identity, same listeners) — see `node_remove`'s comment above.
+    (*dom).remove_from_parent(child);
     sys::JS_DupValue(ctx, child_value)
 }
 
@@ -399,14 +387,12 @@ unsafe extern "C" fn node_clone_node(
     super::node_registry::node_object(ctx, class_id, new_id)
 }
 
-/// Real `Node.prototype.replaceChild(newChild, oldChild)`. Evicts
-/// `oldChild`'s cached JS state (identity, listeners, `classList`/`dataset`/
-/// `attributes` objects) first — same convention `removeChild`/`remove`
-/// already use before a subtree stops existing — but only once membership
-/// is confirmed, so a rejected call (old child not actually a child) never
-/// evicts a node that's still fully attached elsewhere. Rejects `newChild`
-/// being this node's own ancestor, same `HierarchyRequestError`-style check
-/// `appendChild`/`insertBefore` already make.
+/// Real `Node.prototype.replaceChild(newChild, oldChild)`. `oldChild` is
+/// unlinked, not destroyed — same non-destructive-removal contract
+/// `removeChild`/`remove` follow, so its identity/listeners/cached state
+/// survive and it stays reattachable. Rejects `newChild` being this node's
+/// own ancestor, same `HierarchyRequestError`-style check `appendChild`/
+/// `insertBefore` already make.
 unsafe extern "C" fn node_replace_child(
     ctx: *mut sys::JSContext,
     this_val: sys::JSValue,
@@ -442,9 +428,6 @@ unsafe extern "C" fn node_replace_child(
         .unwrap_or(false);
     if !old_child_is_member {
         return throw_type_error(ctx, "old child is not a child of this parent");
-    }
-    if old_child != new_child {
-        evict_subtree(ctx, &*dom, old_child);
     }
     (*dom).replace_child(parent, new_child, old_child);
     sys::JS_DupValue(ctx, old_value)
@@ -655,10 +638,10 @@ unsafe extern "C" fn node_after(
 
 /// Real `ChildNode.replaceWith(...nodes)`: removes this node from its
 /// parent and inserts each argument, in order, at the position it
-/// occupied. A no-op if this node has no parent. Frees this node's own
-/// subtree exactly like `removeChild`/`remove` already do — same
-/// documented simplification (a real DOM keeps a removed node alive and
-/// reattachable; this one destroys it).
+/// occupied. A no-op if this node has no parent. This node is unlinked,
+/// not destroyed — same non-destructive-removal contract `removeChild`/
+/// `remove`/`replaceChild` follow — so it stays a valid, reattachable
+/// node afterward.
 unsafe extern "C" fn node_replace_with(
     ctx: *mut sys::JSContext,
     this_val: sys::JSValue,
@@ -685,14 +668,13 @@ unsafe extern "C" fn node_replace_with(
         }
     }
     let reference = next_sibling_of(&*dom, this_id);
-    evict_subtree(ctx, &*dom, this_id);
-    (*dom).remove(this_id);
+    (*dom).remove_from_parent(this_id);
     for node in nodes {
-        if (*dom).get(node).is_none() {
-            // Only reachable if `this` itself was passed as one of the
-            // replacement nodes — already freed by the removal above, same
-            // graceful "stale id silently drops" degradation every other
-            // permissive accessor in this file already has.
+        if node == this_id {
+            // `this` was passed as one of its own replacement nodes —
+            // it's still alive (non-destructive removal), but re-inserting
+            // it at its own old position is a genuine no-op worth skipping
+            // rather than a real replacement.
             continue;
         }
         match reference {

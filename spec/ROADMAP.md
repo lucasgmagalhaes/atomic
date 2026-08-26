@@ -10,7 +10,7 @@
 
 Read [architecture/primitives.md](architecture/primitives.md) for all of these.
 
-1. `[ ]` **Non-destructive detached DOM nodes** (`Connected`/`Detached`/`Destroyed` states). Currently `removeChild`/`remove`/`replaceChild`/`replaceWith` all destroy the subtree outright — documented deviation in every DOM-mutation changelog entry. Blocks correct Range/Selection/drag-drop/MutationObserver semantics later (P5).
+1. `[x]` **Non-destructive detached DOM nodes** — done (2026-08-26): `removeChild`/`remove`/`replaceChild`/`replaceWith` and the `innerHTML`/`outerHTML` setters now unlink via `Dom::remove_from_parent` instead of freeing the arena slot — a removed node keeps its identity/listeners/subtree and stays reattachable. See [matrix/dom.md](matrix/dom.md). `Destroyed` (generation mismatch) is now unreachable from any JS-facing API; only `Connected`/`Detached` occur in practice.
 2. `[x]` **Generation-safe Node handles** — already done: `dom::Dom` uses generation-tagged `NodeId`s (see `CLAUDE.md` phase 1, tested in `crates/dom/tests/dom_test.rs`).
 3. `[~]` **Central Mutation Pipeline** — partial: `dom::Dom::mutation_count()` exists and gates `profile-worker`'s layout cache (whole-document granularity only, see [matrix/changelog.md](matrix/changelog.md) item 6's "Incremental invalidation" writeup), but there's no real dirty-flag classification (item 4 below) or per-subsystem invalidation routing yet.
 4. `[ ]` **Dirty Flags** (classify a mutation as DOM/Collections/Selectors/Style/Layout/Paint/Accessibility instead of one global counter).

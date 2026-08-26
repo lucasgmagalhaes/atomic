@@ -8,7 +8,7 @@ use std::os::raw::c_int;
 
 use quickjs_sys as sys;
 
-use super::mutation::{evict_subtree, first_child_of, next_sibling_of};
+use super::mutation::{first_child_of, next_sibling_of};
 use super::node_registry::{dom_opaque, node_id, node_opaque};
 use super::util::{
     new_js_string, read_js_string, throw_type_error, Getter, Setter, MAX_HTML_LENGTH,
@@ -223,26 +223,18 @@ pub(super) unsafe fn define_node_value(ctx: *mut sys::JSContext, proto: sys::JSV
     sys::JS_FreeAtom(ctx, atom);
 }
 
-/// Replaces every child of `id` with the parsed content of `html`, evicting
-/// cached JS state (`node_registry`'s object-identity cache and each
-/// submodule's own per-node cache, and any listeners living on those cached
-/// objects) for every removed node first — same convention
-/// `mutation::node_remove`/`node_remove_child` already use, since a removed
-/// subtree must not leave stale entries an attacker-controlled
-/// `getElementById` could later resurrect a listener on.
-unsafe fn replace_children_with_html(
-    ctx: *mut sys::JSContext,
-    dom: *mut dom::Dom,
-    id: dom::NodeId,
-    html: &str,
-) {
+/// Replaces every child of `id` with the parsed content of `html`. Old
+/// children are unlinked, not destroyed — same non-destructive-removal
+/// contract `mutation::node_remove`/`node_remove_child` follow — so a
+/// reference a script held onto beforehand stays a valid, reattachable
+/// node.
+unsafe fn replace_children_with_html(dom: *mut dom::Dom, id: dom::NodeId, html: &str) {
     let old_children = (*dom)
         .get(id)
         .map(|node| node.children.clone())
         .unwrap_or_default();
     for child in old_children {
-        evict_subtree(ctx, &*dom, child);
-        (*dom).remove(child);
+        (*dom).remove_from_parent(child);
     }
     let (fragment, roots) = html::parse_fragment(html);
     for root in roots {
@@ -288,7 +280,7 @@ unsafe extern "C" fn node_inner_html_set(
     if dom.is_null() || (*dom).get(id).is_none() {
         return throw_type_error(ctx, "node is no longer attached to this document");
     }
-    replace_children_with_html(ctx, dom, id, &html);
+    replace_children_with_html(dom, id, &html);
     sys::js_undefined()
 }
 
@@ -307,9 +299,10 @@ unsafe extern "C" fn node_outer_html_get(
 }
 
 /// Replaces `id` itself, in place under its current parent, with the parsed
-/// content of `html` — real `outerHTML` semantics (the node stops existing
-/// afterward, matching `node_remove`'s own contract that a real DOM removal
-/// makes `this_val` a detached, cache-evicted wrapper from then on).
+/// content of `html` — real `outerHTML` semantics. `id` is unlinked, not
+/// destroyed — same non-destructive-removal contract `node_remove` follows
+/// — so `this_val` stays a valid, reattachable (just no-longer-connected)
+/// node afterward.
 unsafe extern "C" fn node_outer_html_set(
     ctx: *mut sys::JSContext,
     this_val: sys::JSValue,
@@ -342,8 +335,7 @@ unsafe extern "C" fn node_outer_html_set(
         let cloned = (*dom).adopt(&fragment, root);
         (*dom).insert_before(id, cloned);
     }
-    evict_subtree(ctx, &*dom, id);
-    (*dom).remove(id);
+    (*dom).remove_from_parent(id);
     sys::js_undefined()
 }
 

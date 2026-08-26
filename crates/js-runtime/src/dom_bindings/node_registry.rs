@@ -79,27 +79,6 @@ pub(crate) unsafe fn parent_node_id(
         .flatten()
 }
 
-/// Evicts every cached JS-side state keyed by `id` — the identity object
-/// itself plus each submodule's own per-node cache (`classList`/`dataset`/
-/// `attributes` wrapper objects, and `css_style`'s live-style object) —
-/// called whenever a node stops existing in the DOM (`mutation.rs`'s
-/// `node_remove`/`node_remove_child`/etc, `content.rs`'s
-/// `replace_children_with_html`/`node_outer_html_set`).
-pub(super) unsafe fn evict_node_object(ctx: *mut sys::JSContext, id: dom::NodeId) {
-    let cached = NODE_OBJECTS.with(|reg| {
-        reg.borrow_mut()
-            .get_mut(&(ctx as usize))
-            .and_then(|nodes| nodes.remove(&id))
-    });
-    if let Some(object) = cached {
-        sys::JS_FreeValue(ctx, object);
-    }
-    class_list::evict(ctx, id);
-    dataset::evict(ctx, id);
-    attributes::evict(ctx, id);
-    crate::css_style::evict(ctx, id);
-}
-
 /// Frees every cached `Node` object for `ctx` — must run before
 /// `JS_FreeContext` (same ordering requirement `timers::cleanup`/
 /// `fetch_async::cleanup` already document), since a `JSValue` can't be

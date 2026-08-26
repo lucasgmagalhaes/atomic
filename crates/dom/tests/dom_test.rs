@@ -570,7 +570,7 @@ fn clone_node_shallow_omits_children_deep_includes_them() {
 }
 
 #[test]
-fn replace_child_swaps_at_the_same_position_and_frees_the_old_child() {
+fn replace_child_swaps_at_the_same_position_and_keeps_the_old_child_alive() {
     let mut dom = Dom::new();
     let root = dom.root();
     let first = dom.create_element("a");
@@ -585,7 +585,13 @@ fn replace_child_swaps_at_the_same_position_and_frees_the_old_child() {
 
     assert_eq!(dom.get(root).unwrap().children, vec![first, new, last]);
     assert_eq!(dom.get(new).unwrap().parent, Some(root));
-    assert!(dom.get(old).is_none());
+    // Non-destructive: `old` keeps its identity, is detached (no parent),
+    // and stays reattachable — see spec/architecture/primitives.md §4.1.
+    assert_eq!(dom.get(old).unwrap().parent, None);
+    let other_parent = dom.create_element("div");
+    dom.append_child(root, other_parent);
+    dom.append_child(other_parent, old);
+    assert_eq!(dom.get(other_parent).unwrap().children, vec![old]);
 }
 
 #[test]

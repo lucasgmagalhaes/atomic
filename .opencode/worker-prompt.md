@@ -12,7 +12,7 @@ Steps:
    - No abstractions or features beyond what the task requires.
 3. Run `cargo build --workspace` and `cargo test --workspace`. If it fails, fix it before proceeding.
 4. Commit following Conventional Commits (`feat(crate): ...`, `test(crate): ...`), English message.
-5. Read the current content of FULL_SPEC.md (Part A is the JS-engine capability matrix), find the `- [ ]` line matching what you just implemented, and change it to `- [x]` (or strike it through with `~~...~~ — done (today's date): <short note>` if that section already uses that pattern). Also read CLAUDE.md and apply a small targeted edit if the item is one it tracks too. Never overwrite either file wholesale — only edit the relevant line/section, using a real edit on content you actually read.
+5. Read `spec/ROADMAP.md` to find the item you just implemented and flip its status marker, then do the same in the specific `spec/matrix/*.md` file it points to (find the `- [ ]` line matching what you just implemented, change it to `- [x]`, or strike it through with `~~...~~ — done (today's date): <short note>` if that section already uses that pattern). Also read CLAUDE.md and apply a small targeted edit if the item is one it tracks too. Never overwrite any of these files wholesale — only edit the relevant line/section, using a real edit on content you actually read.
 6. Commit that documentation update separately (`docs: mark <item> done`).
 
 If you get stuck on a real error you cannot resolve after reasonable attempts, write what's blocking you to .opencode\BLOCKED.md instead of guessing, and stop.

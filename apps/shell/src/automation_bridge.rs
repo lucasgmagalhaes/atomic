@@ -23,20 +23,20 @@ use crate::workspace::WorkspaceManager;
 /// `profile_handle` only clones an `Rc` — building this map never needs
 /// exclusive access to the panes themselves.
 pub fn scoped_panes<'p>(
-    workspace: &WorkspaceManager,
-    panes: impl IntoIterator<Item = (&'p str, &'p BrowserView)>,
+  workspace: &WorkspaceManager,
+  panes: impl IntoIterator<Item = (&'p str, &'p BrowserView)>,
 ) -> HashMap<String, Rc<RefCell<profile::Profile>>> {
-    let active_ids = workspace.active().profiles();
-    let mut engine_panes = HashMap::new();
-    for (id, browser) in panes {
-        if !active_ids.iter().any(|active_id| active_id == id) {
-            continue;
-        }
-        if let Some(profile) = browser.profile_handle() {
-            engine_panes.insert(id.to_string(), profile);
-        }
+  let active_ids = workspace.active().profiles();
+  let mut engine_panes = HashMap::new();
+  for (id, browser) in panes {
+    if !active_ids.iter().any(|active_id| active_id == id) {
+      continue;
     }
-    engine_panes
+    if let Some(profile) = browser.profile_handle() {
+      engine_panes.insert(id.to_string(), profile);
+    }
+  }
+  engine_panes
 }
 
 /// Runs `script`'s top-level code once against a fresh, ephemeral engine
@@ -53,13 +53,13 @@ pub fn scoped_panes<'p>(
 /// `pane.fill`/`pane.click` failing against a real element that doesn't
 /// exist — see the `automation` crate's own doc for what's real there now).
 pub fn run_script<'p>(
-    workspace: &WorkspaceManager,
-    panes: impl IntoIterator<Item = (&'p str, &'p BrowserView)>,
-    script: &str,
+  workspace: &WorkspaceManager,
+  panes: impl IntoIterator<Item = (&'p str, &'p BrowserView)>,
+  script: &str,
 ) -> Result<String, String> {
-    let runtime = js_runtime::Runtime::new();
-    let engine = automation::AutomationEngine::new(&runtime, scoped_panes(workspace, panes));
-    engine
-        .run(script, "shell-script.js")
-        .map_err(|e| e.to_string())
+  let runtime = js_runtime::Runtime::new();
+  let engine = automation::AutomationEngine::new(&runtime, scoped_panes(workspace, panes));
+  engine
+    .run(script, "shell-script.js")
+    .map_err(|e| e.to_string())
 }

@@ -24,7 +24,7 @@ use quickjs_sys as sys;
 /// [`is_response_allowed`]), the same degrade-gracefully pattern
 /// `location`'s own properties already use for the same missing state.
 pub(crate) unsafe fn page_origin(ctx: *mut sys::JSContext) -> Option<String> {
-    crate::location::current_url(ctx).map(|u| u.origin().ascii_serialization())
+  crate::location::current_url(ctx).map(|u| u.origin().ascii_serialization())
 }
 
 /// Whether a response fetched from `request_url` may reach script, given
@@ -35,26 +35,26 @@ pub(crate) unsafe fn page_origin(ctx: *mut sys::JSContext) -> Option<String> {
 /// already happens earlier in the fetch path (a request that never made it
 /// this far can't be a CORS bypass).
 pub(crate) fn is_response_allowed(
-    page_origin: Option<&str>,
-    request_url: &str,
-    response_headers: &[(String, String)],
+  page_origin: Option<&str>,
+  request_url: &str,
+  response_headers: &[(String, String)],
 ) -> bool {
-    let Some(page_origin) = page_origin else {
-        return true;
-    };
-    let Ok(request) = url::Url::parse(request_url) else {
-        return true;
-    };
-    if request.origin().ascii_serialization() == page_origin {
-        return true;
+  let Some(page_origin) = page_origin else {
+    return true;
+  };
+  let Ok(request) = url::Url::parse(request_url) else {
+    return true;
+  };
+  if request.origin().ascii_serialization() == page_origin {
+    return true;
+  }
+  response_headers.iter().any(|(name, value)| {
+    if !name.eq_ignore_ascii_case("access-control-allow-origin") {
+      return false;
     }
-    response_headers.iter().any(|(name, value)| {
-        if !name.eq_ignore_ascii_case("access-control-allow-origin") {
-            return false;
-        }
-        let value = value.trim();
-        value == "*" || value == page_origin
-    })
+    let value = value.trim();
+    value == "*" || value == page_origin
+  })
 }
 
 /// Real mixed-content blocking: a page loaded over `https://` must never
@@ -73,15 +73,15 @@ pub(crate) fn is_response_allowed(
 /// `net::get` calls for page resources) doesn't go through this at all —
 /// scoped to script-initiated requests only.
 pub(crate) fn is_mixed_content_blocked(page_origin: Option<&str>, request_url: &str) -> bool {
-    let Some(page_origin) = page_origin else {
-        return false;
-    };
-    if !page_origin.starts_with("https://") {
-        return false;
-    }
-    url::Url::parse(request_url)
-        .map(|u| u.scheme() == "http")
-        .unwrap_or(false)
+  let Some(page_origin) = page_origin else {
+    return false;
+  };
+  if !page_origin.starts_with("https://") {
+    return false;
+  }
+  url::Url::parse(request_url)
+    .map(|u| u.scheme() == "http")
+    .unwrap_or(false)
 }
 
 /// The `Referer` header value a real browser's default `strict-origin-
@@ -98,27 +98,27 @@ pub(crate) fn is_mixed_content_blocked(page_origin: Option<&str>, request_url: &
 /// `referrerPolicy` option) — this engine has none of those wired in
 /// anywhere, so the browser default is the only policy that exists here.
 pub(crate) unsafe fn referrer_header(
-    ctx: *mut sys::JSContext,
-    request_url: &str,
+  ctx: *mut sys::JSContext,
+  request_url: &str,
 ) -> Option<String> {
-    let page_url = crate::location::current_url(ctx)?;
-    if !page_url.origin().is_tuple() {
-        // Opaque origin (a `data:`/`blob:` page, or any URL the `url`
-        // crate can't derive a real scheme/host/port tuple from) — a real
-        // browser never discloses a referrer from one, since there's no
-        // real origin to disclose (unlike the cross-origin case, which
-        // still discloses *something*, just not the full URL).
-        return None;
-    }
-    let request_url = url::Url::parse(request_url).ok()?;
-    if page_url.scheme() == "https" && request_url.scheme() == "http" {
-        return None;
-    }
-    if request_url.origin() == page_url.origin() {
-        let mut referrer = page_url;
-        referrer.set_fragment(None);
-        Some(referrer.to_string())
-    } else {
-        Some(format!("{}/", page_url.origin().ascii_serialization()))
-    }
+  let page_url = crate::location::current_url(ctx)?;
+  if !page_url.origin().is_tuple() {
+    // Opaque origin (a `data:`/`blob:` page, or any URL the `url`
+    // crate can't derive a real scheme/host/port tuple from) — a real
+    // browser never discloses a referrer from one, since there's no
+    // real origin to disclose (unlike the cross-origin case, which
+    // still discloses *something*, just not the full URL).
+    return None;
+  }
+  let request_url = url::Url::parse(request_url).ok()?;
+  if page_url.scheme() == "https" && request_url.scheme() == "http" {
+    return None;
+  }
+  if request_url.origin() == page_url.origin() {
+    let mut referrer = page_url;
+    referrer.set_fragment(None);
+    Some(referrer.to_string())
+  } else {
+    Some(format!("{}/", page_url.origin().ascii_serialization()))
+  }
 }

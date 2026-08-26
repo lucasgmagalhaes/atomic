@@ -21,31 +21,31 @@ pub use windows_job::{confine, query_limits, Sandbox, SandboxError};
 
 #[cfg(not(windows))]
 mod unsupported {
-    use std::process::Child;
+  use std::process::Child;
 
-    #[derive(Debug)]
-    pub enum SandboxError {
-        Unsupported,
+  #[derive(Debug)]
+  pub enum SandboxError {
+    Unsupported,
+  }
+
+  impl std::fmt::Display for SandboxError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+      write!(
+        f,
+        "process sandboxing is not implemented on this platform yet"
+      )
     }
+  }
 
-    impl std::fmt::Display for SandboxError {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(
-                f,
-                "process sandboxing is not implemented on this platform yet"
-            )
-        }
-    }
+  impl std::error::Error for SandboxError {}
 
-    impl std::error::Error for SandboxError {}
+  /// Zero-sized: nothing to hold on a platform where `confine` never
+  /// succeeds.
+  pub struct Sandbox;
 
-    /// Zero-sized: nothing to hold on a platform where `confine` never
-    /// succeeds.
-    pub struct Sandbox;
-
-    pub fn confine(_child: &Child, _memory_limit_bytes: u64) -> Result<Sandbox, SandboxError> {
-        Err(SandboxError::Unsupported)
-    }
+  pub fn confine(_child: &Child, _memory_limit_bytes: u64) -> Result<Sandbox, SandboxError> {
+    Err(SandboxError::Unsupported)
+  }
 }
 #[cfg(not(windows))]
 pub use unsupported::{confine, Sandbox, SandboxError};

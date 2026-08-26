@@ -4,7 +4,7 @@ pub mod process_stats;
 /// (BCryptGenRandom on Windows, getrandom(2)/arc4random on Linux/macOS via
 /// the `getrandom` crate). Backs `crypto.getRandomValues` in `js-runtime`.
 pub fn fill_random(buf: &mut [u8]) -> Result<(), getrandom::Error> {
-    getrandom::fill(buf)
+  getrandom::fill(buf)
 }
 
 /// Real OS clipboard access via `arboard` (Win32 clipboard / X11-or-
@@ -13,9 +13,9 @@ pub fn fill_random(buf: &mut [u8]) -> Result<(), getrandom::Error> {
 /// clipboard.rs`). Text only, matching `Clipboard.readText`/`writeText`;
 /// no images/HTML.
 pub fn clipboard_write_text(text: &str) -> Result<(), arboard::Error> {
-    arboard::Clipboard::new()?.set_text(text)
+  arboard::Clipboard::new()?.set_text(text)
 }
 
 pub fn clipboard_read_text() -> Result<String, arboard::Error> {
-    arboard::Clipboard::new()?.get_text()
+  arboard::Clipboard::new()?.get_text()
 }

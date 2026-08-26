@@ -25,7 +25,6 @@ mod listeners;
 mod util;
 
 pub(crate) use dispatch::{
-    define_event_target, define_simple_event_target, dispatch, dispatch_event_object,
-    dispatch_simple,
+  define_event_target, define_simple_event_target, dispatch, dispatch_event_object, dispatch_simple,
 };
 pub(crate) use event_class::{create_event, register};

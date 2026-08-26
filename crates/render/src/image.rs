@@ -28,74 +28,74 @@ use crate::display_list::{ClipRect, ImageQuad};
 /// sampled pixel's alpha by `quad.opacity` (real `opacity`, see
 /// `display_list`'s own doc on its per-primitive scope).
 pub fn composite_images(pixels: &mut [u8], width: u32, height: u32, quads: &[ImageQuad]) {
-    for quad in quads {
-        if quad.width <= 0.0
-            || quad.height <= 0.0
-            || quad.image.width == 0
-            || quad.image.height == 0
-            || quad.opacity <= 0.0
-        {
-            continue;
-        }
-        let src = &quad.image;
-        let scale_x = src.width as f32 / quad.width;
-        let scale_y = src.height as f32 / quad.height;
-
-        let (clip_x0, clip_y0, clip_x1, clip_y1) = clip_bounds(&quad.clip);
-        let dest_x0 = quad.x.floor().max(0.0).max(clip_x0) as i32;
-        let dest_y0 = quad.y.floor().max(0.0).max(clip_y0) as i32;
-        let dest_x1 = (quad.x + quad.width).ceil().min(width as f32).min(clip_x1) as i32;
-        let dest_y1 = (quad.y + quad.height)
-            .ceil()
-            .min(height as f32)
-            .min(clip_y1) as i32;
-
-        for py in dest_y0..dest_y1 {
-            let rel_y = py as f32 - quad.y;
-            if rel_y < 0.0 {
-                continue;
-            }
-            let src_y = ((rel_y * scale_y) as u32).min(src.height - 1);
-            for px in dest_x0..dest_x1 {
-                let rel_x = px as f32 - quad.x;
-                if rel_x < 0.0 {
-                    continue;
-                }
-                let src_x = ((rel_x * scale_x) as u32).min(src.width - 1);
-
-                let src_idx = ((src_y * src.width + src_x) * 4) as usize;
-                let alpha = (src.rgba[src_idx + 3] as f64 * quad.opacity)
-                    .round()
-                    .clamp(0.0, 255.0) as u8;
-                let src_px = [
-                    src.rgba[src_idx],
-                    src.rgba[src_idx + 1],
-                    src.rgba[src_idx + 2],
-                    alpha,
-                ];
-                if src_px[3] == 0 {
-                    continue;
-                }
-
-                let dst_idx = ((py as u32 * width + px as u32) * 4) as usize;
-                blend_over(&mut pixels[dst_idx..dst_idx + 4], src_px);
-            }
-        }
+  for quad in quads {
+    if quad.width <= 0.0
+      || quad.height <= 0.0
+      || quad.image.width == 0
+      || quad.image.height == 0
+      || quad.opacity <= 0.0
+    {
+      continue;
     }
+    let src = &quad.image;
+    let scale_x = src.width as f32 / quad.width;
+    let scale_y = src.height as f32 / quad.height;
+
+    let (clip_x0, clip_y0, clip_x1, clip_y1) = clip_bounds(&quad.clip);
+    let dest_x0 = quad.x.floor().max(0.0).max(clip_x0) as i32;
+    let dest_y0 = quad.y.floor().max(0.0).max(clip_y0) as i32;
+    let dest_x1 = (quad.x + quad.width).ceil().min(width as f32).min(clip_x1) as i32;
+    let dest_y1 = (quad.y + quad.height)
+      .ceil()
+      .min(height as f32)
+      .min(clip_y1) as i32;
+
+    for py in dest_y0..dest_y1 {
+      let rel_y = py as f32 - quad.y;
+      if rel_y < 0.0 {
+        continue;
+      }
+      let src_y = ((rel_y * scale_y) as u32).min(src.height - 1);
+      for px in dest_x0..dest_x1 {
+        let rel_x = px as f32 - quad.x;
+        if rel_x < 0.0 {
+          continue;
+        }
+        let src_x = ((rel_x * scale_x) as u32).min(src.width - 1);
+
+        let src_idx = ((src_y * src.width + src_x) * 4) as usize;
+        let alpha = (src.rgba[src_idx + 3] as f64 * quad.opacity)
+          .round()
+          .clamp(0.0, 255.0) as u8;
+        let src_px = [
+          src.rgba[src_idx],
+          src.rgba[src_idx + 1],
+          src.rgba[src_idx + 2],
+          alpha,
+        ];
+        if src_px[3] == 0 {
+          continue;
+        }
+
+        let dst_idx = ((py as u32 * width + px as u32) * 4) as usize;
+        blend_over(&mut pixels[dst_idx..dst_idx + 4], src_px);
+      }
+    }
+  }
 }
 
 /// `clip` as an `(x0, y0, x1, y1)` bounding box - `(-inf, -inf, +inf,
 /// +inf)` (effectively no-op against a `min`/`max` chain) when `None`.
 fn clip_bounds(clip: &Option<ClipRect>) -> (f32, f32, f32, f32) {
-    match clip {
-        Some(c) => (c.x, c.y, c.x + c.width, c.y + c.height),
-        None => (
-            f32::NEG_INFINITY,
-            f32::NEG_INFINITY,
-            f32::INFINITY,
-            f32::INFINITY,
-        ),
-    }
+  match clip {
+    Some(c) => (c.x, c.y, c.x + c.width, c.y + c.height),
+    None => (
+      f32::NEG_INFINITY,
+      f32::NEG_INFINITY,
+      f32::INFINITY,
+      f32::INFINITY,
+    ),
+  }
 }
 
 /// `dst = src over dst`, both straight (non-premultiplied) RGBA8 - same
@@ -103,16 +103,16 @@ fn clip_bounds(clip: &Option<ClipRect>) -> (f32, f32, f32, f32) {
 /// rather than sharing one function across two independent compositing
 /// passes with no other reason to depend on each other).
 fn blend_over(dst: &mut [u8], src: [u8; 4]) {
-    let sa = src[3] as f32 / 255.0;
-    let da = dst[3] as f32 / 255.0;
-    let out_a = sa + da * (1.0 - sa);
-    if out_a <= 0.0 {
-        dst.copy_from_slice(&[0, 0, 0, 0]);
-        return;
-    }
-    for c in 0..3 {
-        let out_c = (src[c] as f32 * sa + dst[c] as f32 * da * (1.0 - sa)) / out_a;
-        dst[c] = out_c.round().clamp(0.0, 255.0) as u8;
-    }
-    dst[3] = (out_a * 255.0).round().clamp(0.0, 255.0) as u8;
+  let sa = src[3] as f32 / 255.0;
+  let da = dst[3] as f32 / 255.0;
+  let out_a = sa + da * (1.0 - sa);
+  if out_a <= 0.0 {
+    dst.copy_from_slice(&[0, 0, 0, 0]);
+    return;
+  }
+  for c in 0..3 {
+    let out_c = (src[c] as f32 * sa + dst[c] as f32 * da * (1.0 - sa)) / out_a;
+    dst[c] = out_c.round().clamp(0.0, 255.0) as u8;
+  }
+  dst[3] = (out_a * 255.0).round().clamp(0.0, 255.0) as u8;
 }

@@ -17,15 +17,15 @@ use quickjs_sys as sys;
 static PANE_CLASS_ID: AtomicU32 = AtomicU32::new(0);
 
 unsafe fn read_js_string(ctx: *mut sys::JSContext, val: sys::JSValue) -> Option<String> {
-    let mut len: usize = 0;
-    let ptr = sys::JS_ToCStringLen2(ctx, &mut len, val, false);
-    if ptr.is_null() {
-        return None;
-    }
-    let bytes = std::slice::from_raw_parts(ptr as *const u8, len);
-    let s = String::from_utf8_lossy(bytes).into_owned();
-    sys::JS_FreeCString(ctx, ptr);
-    Some(s)
+  let mut len: usize = 0;
+  let ptr = sys::JS_ToCStringLen2(ctx, &mut len, val, false);
+  if ptr.is_null() {
+    return None;
+  }
+  let bytes = std::slice::from_raw_parts(ptr as *const u8, len);
+  let s = String::from_utf8_lossy(bytes).into_owned();
+  sys::JS_FreeCString(ctx, ptr);
+  Some(s)
 }
 
 // `quickjs-sys` only binds the low-level `JS_Throw(ctx, JSValue)`, not the
@@ -35,181 +35,178 @@ unsafe fn read_js_string(ctx: *mut sys::JSContext, val: sys::JSValue) -> Option<
 // still observes, just not an `instanceof Error` — same "no real error
 // value yet" gap `Context::eval`'s own doc comment already flags.
 unsafe fn throw(ctx: *mut sys::JSContext, message: &str) -> sys::JSValue {
-    let msg = sys::JS_NewStringLen(
-        ctx,
-        message.as_ptr() as *const std::os::raw::c_char,
-        message.len(),
-    );
-    sys::JS_Throw(ctx, msg)
+  let msg = sys::JS_NewStringLen(
+    ctx,
+    message.as_ptr() as *const std::os::raw::c_char,
+    message.len(),
+  );
+  sys::JS_Throw(ctx, msg)
 }
 
 unsafe fn pane_name<'a>(class_id: sys::JSClassID, this_val: sys::JSValue) -> Option<&'a str> {
-    let ptr = sys::JS_GetOpaque(this_val, class_id) as *const String;
-    ptr.as_ref().map(String::as_str)
+  let ptr = sys::JS_GetOpaque(this_val, class_id) as *const String;
+  ptr.as_ref().map(String::as_str)
 }
 
 unsafe fn with_pane<R>(
-    ctx: *mut sys::JSContext,
-    class_id: sys::JSClassID,
-    this_val: sys::JSValue,
-    f: impl FnOnce(&mut profile::Profile) -> R,
+  ctx: *mut sys::JSContext,
+  class_id: sys::JSClassID,
+  this_val: sys::JSValue,
+  f: impl FnOnce(&mut profile::Profile) -> R,
 ) -> Result<R, String> {
-    let name = pane_name(class_id, this_val).ok_or("pane object missing its name")?;
-    let panes = sys::JS_GetContextOpaque(ctx)
-        as *mut std::collections::HashMap<
-            String,
-            std::rc::Rc<std::cell::RefCell<profile::Profile>>,
-        >;
-    if panes.is_null() {
-        return Err("automation engine not initialized".to_string());
-    }
-    match (*panes).get(name) {
-        Some(cell) => Ok(f(&mut cell.borrow_mut())),
-        None => Err(format!("no pane named \"{name}\"")),
-    }
+  let name = pane_name(class_id, this_val).ok_or("pane object missing its name")?;
+  let panes = sys::JS_GetContextOpaque(ctx)
+    as *mut std::collections::HashMap<String, std::rc::Rc<std::cell::RefCell<profile::Profile>>>;
+  if panes.is_null() {
+    return Err("automation engine not initialized".to_string());
+  }
+  match (*panes).get(name) {
+    Some(cell) => Ok(f(&mut cell.borrow_mut())),
+    None => Err(format!("no pane named \"{name}\"")),
+  }
 }
 
 unsafe extern "C" fn pane_finalizer(_rt: *mut sys::JSRuntime, val: sys::JSValue) {
-    let class_id = PANE_CLASS_ID.load(std::sync::atomic::Ordering::Relaxed);
-    let ptr = sys::JS_GetOpaque(val, class_id) as *mut String;
-    if !ptr.is_null() {
-        drop(Box::from_raw(ptr));
-    }
+  let class_id = PANE_CLASS_ID.load(std::sync::atomic::Ordering::Relaxed);
+  let ptr = sys::JS_GetOpaque(val, class_id) as *mut String;
+  if !ptr.is_null() {
+    drop(Box::from_raw(ptr));
+  }
 }
 
 unsafe extern "C" fn pane_goto(
-    ctx: *mut sys::JSContext,
-    this_val: sys::JSValue,
-    argc: c_int,
-    argv: *mut sys::JSValue,
+  ctx: *mut sys::JSContext,
+  this_val: sys::JSValue,
+  argc: c_int,
+  argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-    if argc < 1 {
-        return throw(ctx, "pane.goto(url) requires a URL");
-    }
-    let Some(url) = read_js_string(ctx, *argv) else {
-        return throw(ctx, "pane.goto(url): url must be a string");
-    };
-    let class_id = PANE_CLASS_ID.load(std::sync::atomic::Ordering::Relaxed);
-    match with_pane(ctx, class_id, this_val, |profile| profile.navigate(&url)) {
-        Ok(Ok(Ok(()))) => sys::js_undefined(),
-        Ok(Ok(Err(message))) => throw(ctx, &format!("pane.goto failed: {message}")),
-        Ok(Err(io_err)) => throw(ctx, &format!("pane.goto: worker unreachable: {io_err}")),
-        Err(message) => throw(ctx, &message),
-    }
+  if argc < 1 {
+    return throw(ctx, "pane.goto(url) requires a URL");
+  }
+  let Some(url) = read_js_string(ctx, *argv) else {
+    return throw(ctx, "pane.goto(url): url must be a string");
+  };
+  let class_id = PANE_CLASS_ID.load(std::sync::atomic::Ordering::Relaxed);
+  match with_pane(ctx, class_id, this_val, |profile| profile.navigate(&url)) {
+    Ok(Ok(Ok(()))) => sys::js_undefined(),
+    Ok(Ok(Err(message))) => throw(ctx, &format!("pane.goto failed: {message}")),
+    Ok(Err(io_err)) => throw(ctx, &format!("pane.goto: worker unreachable: {io_err}")),
+    Err(message) => throw(ctx, &message),
+  }
 }
 
 unsafe extern "C" fn pane_fill(
-    ctx: *mut sys::JSContext,
-    this_val: sys::JSValue,
-    argc: c_int,
-    argv: *mut sys::JSValue,
+  ctx: *mut sys::JSContext,
+  this_val: sys::JSValue,
+  argc: c_int,
+  argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-    if argc < 2 {
-        return throw(
-            ctx,
-            "pane.fill(selector, value) requires a selector and a value",
-        );
-    }
-    let Some(selector) = read_js_string(ctx, *argv) else {
-        return throw(ctx, "pane.fill(selector, value): selector must be a string");
-    };
-    let Some(value) = read_js_string(ctx, *argv.add(1)) else {
-        return throw(ctx, "pane.fill(selector, value): value must be a string");
-    };
-    let class_id = PANE_CLASS_ID.load(std::sync::atomic::Ordering::Relaxed);
-    // Only `#id` selectors and a `textContent` assignment, not a real
-    // `HTMLInputElement.value` — see `profile-worker`'s own doc on the
-    // `FILL` command for why.
-    match with_pane(ctx, class_id, this_val, |profile| {
-        profile.fill(&selector, &value)
-    }) {
-        Ok(Ok(Ok(()))) => sys::js_undefined(),
-        Ok(Ok(Err(message))) => throw(ctx, &format!("pane.fill failed: {message}")),
-        Ok(Err(io_err)) => throw(ctx, &format!("pane.fill: worker unreachable: {io_err}")),
-        Err(message) => throw(ctx, &message),
-    }
+  if argc < 2 {
+    return throw(
+      ctx,
+      "pane.fill(selector, value) requires a selector and a value",
+    );
+  }
+  let Some(selector) = read_js_string(ctx, *argv) else {
+    return throw(ctx, "pane.fill(selector, value): selector must be a string");
+  };
+  let Some(value) = read_js_string(ctx, *argv.add(1)) else {
+    return throw(ctx, "pane.fill(selector, value): value must be a string");
+  };
+  let class_id = PANE_CLASS_ID.load(std::sync::atomic::Ordering::Relaxed);
+  // Only `#id` selectors and a `textContent` assignment, not a real
+  // `HTMLInputElement.value` — see `profile-worker`'s own doc on the
+  // `FILL` command for why.
+  match with_pane(ctx, class_id, this_val, |profile| {
+    profile.fill(&selector, &value)
+  }) {
+    Ok(Ok(Ok(()))) => sys::js_undefined(),
+    Ok(Ok(Err(message))) => throw(ctx, &format!("pane.fill failed: {message}")),
+    Ok(Err(io_err)) => throw(ctx, &format!("pane.fill: worker unreachable: {io_err}")),
+    Err(message) => throw(ctx, &message),
+  }
 }
 
 unsafe extern "C" fn pane_click(
-    ctx: *mut sys::JSContext,
-    this_val: sys::JSValue,
-    argc: c_int,
-    argv: *mut sys::JSValue,
+  ctx: *mut sys::JSContext,
+  this_val: sys::JSValue,
+  argc: c_int,
+  argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-    if argc < 1 {
-        return throw(ctx, "pane.click(selector) requires a selector");
-    }
-    let Some(selector) = read_js_string(ctx, *argv) else {
-        return throw(ctx, "pane.click(selector): selector must be a string");
-    };
-    let class_id = PANE_CLASS_ID.load(std::sync::atomic::Ordering::Relaxed);
-    match with_pane(ctx, class_id, this_val, |profile| profile.click(&selector)) {
-        Ok(Ok(Ok(()))) => sys::js_undefined(),
-        Ok(Ok(Err(message))) => throw(ctx, &format!("pane.click failed: {message}")),
-        Ok(Err(io_err)) => throw(ctx, &format!("pane.click: worker unreachable: {io_err}")),
-        Err(message) => throw(ctx, &message),
-    }
+  if argc < 1 {
+    return throw(ctx, "pane.click(selector) requires a selector");
+  }
+  let Some(selector) = read_js_string(ctx, *argv) else {
+    return throw(ctx, "pane.click(selector): selector must be a string");
+  };
+  let class_id = PANE_CLASS_ID.load(std::sync::atomic::Ordering::Relaxed);
+  match with_pane(ctx, class_id, this_val, |profile| profile.click(&selector)) {
+    Ok(Ok(Ok(()))) => sys::js_undefined(),
+    Ok(Ok(Err(message))) => throw(ctx, &format!("pane.click failed: {message}")),
+    Ok(Err(io_err)) => throw(ctx, &format!("pane.click: worker unreachable: {io_err}")),
+    Err(message) => throw(ctx, &message),
+  }
 }
 
 /// Registers the `Pane` class on `ctx`'s runtime (if not already done for
 /// this runtime) and builds this context's `Pane.prototype`. Mirrors
 /// `dom_bindings::ensure_node_class` exactly.
 unsafe fn ensure_pane_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
-    let rt = sys::JS_GetRuntime(ctx);
-    let class_id = sys::JS_NewClassID(rt, PANE_CLASS_ID.as_ptr());
+  let rt = sys::JS_GetRuntime(ctx);
+  let class_id = sys::JS_NewClassID(rt, PANE_CLASS_ID.as_ptr());
 
-    let class_name = CString::new("Pane").unwrap();
-    let def = sys::JSClassDef {
-        class_name: class_name.as_ptr(),
-        finalizer: Some(pane_finalizer),
-        gc_mark: std::ptr::null_mut(),
-        call: std::ptr::null_mut(),
-        exotic: std::ptr::null_mut(),
-    };
-    sys::JS_NewClass(rt, class_id, &def);
+  let class_name = CString::new("Pane").unwrap();
+  let def = sys::JSClassDef {
+    class_name: class_name.as_ptr(),
+    finalizer: Some(pane_finalizer),
+    gc_mark: std::ptr::null_mut(),
+    call: std::ptr::null_mut(),
+    exotic: std::ptr::null_mut(),
+  };
+  sys::JS_NewClass(rt, class_id, &def);
 
-    let proto = sys::JS_NewObject(ctx);
-    add_method(ctx, proto, "goto", pane_goto, 1);
-    add_method(ctx, proto, "fill", pane_fill, 2);
-    add_method(ctx, proto, "click", pane_click, 1);
-    sys::JS_SetClassProto(ctx, class_id, proto);
+  let proto = sys::JS_NewObject(ctx);
+  add_method(ctx, proto, "goto", pane_goto, 1);
+  add_method(ctx, proto, "fill", pane_fill, 2);
+  add_method(ctx, proto, "click", pane_click, 1);
+  sys::JS_SetClassProto(ctx, class_id, proto);
 
-    class_id
+  class_id
 }
 
 unsafe fn add_method(
-    ctx: *mut sys::JSContext,
-    proto: sys::JSValue,
-    name: &str,
-    func: sys::JSCFunction,
-    length: c_int,
+  ctx: *mut sys::JSContext,
+  proto: sys::JSValue,
+  name: &str,
+  func: sys::JSCFunction,
+  length: c_int,
 ) {
-    let name_c = CString::new(name).unwrap();
-    let f = sys::JS_NewCFunction2(ctx, func, name_c.as_ptr(), length, sys::JS_CFUNC_GENERIC, 0);
-    sys::JS_SetPropertyStr(ctx, proto, name_c.as_ptr(), f);
+  let name_c = CString::new(name).unwrap();
+  let f = sys::JS_NewCFunction2(ctx, func, name_c.as_ptr(), length, sys::JS_CFUNC_GENERIC, 0);
+  sys::JS_SetPropertyStr(ctx, proto, name_c.as_ptr(), f);
 }
 
 unsafe extern "C" fn pane_constructor(
-    ctx: *mut sys::JSContext,
-    _this_val: sys::JSValue,
-    argc: c_int,
-    argv: *mut sys::JSValue,
+  ctx: *mut sys::JSContext,
+  _this_val: sys::JSValue,
+  argc: c_int,
+  argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-    if argc < 1 {
-        return throw(ctx, "pane(name) requires a pane name");
-    }
-    let Some(name) = read_js_string(ctx, *argv) else {
-        return throw(ctx, "pane(name): name must be a string");
-    };
+  if argc < 1 {
+    return throw(ctx, "pane(name) requires a pane name");
+  }
+  let Some(name) = read_js_string(ctx, *argv) else {
+    return throw(ctx, "pane(name): name must be a string");
+  };
 
-    let class_id = PANE_CLASS_ID.load(std::sync::atomic::Ordering::Relaxed);
-    let obj = sys::JS_NewObjectClass(ctx, class_id);
-    if sys::js_is_exception(&obj) {
-        return obj;
-    }
-    let boxed = Box::new(name);
-    sys::JS_SetOpaque(obj, Box::into_raw(boxed) as *mut c_void);
-    obj
+  let class_id = PANE_CLASS_ID.load(std::sync::atomic::Ordering::Relaxed);
+  let obj = sys::JS_NewObjectClass(ctx, class_id);
+  if sys::js_is_exception(&obj) {
+    return obj;
+  }
+  let boxed = Box::new(name);
+  sys::JS_SetOpaque(obj, Box::into_raw(boxed) as *mut c_void);
+  obj
 }
 
 /// Registers the `pane` global and its `Pane` class on `ctx`, and stashes
@@ -218,25 +215,22 @@ unsafe extern "C" fn pane_constructor(
 /// because `AutomationEngine` always constructs a plain `Context::new`,
 /// never `with_dom`/`with_storage`.
 pub(crate) unsafe fn register(
-    ctx: *mut sys::JSContext,
-    panes: *mut std::collections::HashMap<
-        String,
-        std::rc::Rc<std::cell::RefCell<profile::Profile>>,
-    >,
+  ctx: *mut sys::JSContext,
+  panes: *mut std::collections::HashMap<String, std::rc::Rc<std::cell::RefCell<profile::Profile>>>,
 ) {
-    sys::JS_SetContextOpaque(ctx, panes as *mut c_void);
-    ensure_pane_class(ctx);
+  sys::JS_SetContextOpaque(ctx, panes as *mut c_void);
+  ensure_pane_class(ctx);
 
-    let global = sys::JS_GetGlobalObject(ctx);
-    let name_c = CString::new("pane").unwrap();
-    let f = sys::JS_NewCFunction2(
-        ctx,
-        pane_constructor,
-        name_c.as_ptr(),
-        1,
-        sys::JS_CFUNC_GENERIC,
-        0,
-    );
-    sys::JS_SetPropertyStr(ctx, global, name_c.as_ptr(), f);
-    sys::JS_FreeValue(ctx, global);
+  let global = sys::JS_GetGlobalObject(ctx);
+  let name_c = CString::new("pane").unwrap();
+  let f = sys::JS_NewCFunction2(
+    ctx,
+    pane_constructor,
+    name_c.as_ptr(),
+    1,
+    sys::JS_CFUNC_GENERIC,
+    0,
+  );
+  sys::JS_SetPropertyStr(ctx, global, name_c.as_ptr(), f);
+  sys::JS_FreeValue(ctx, global);
 }

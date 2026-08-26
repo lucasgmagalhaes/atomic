@@ -35,10 +35,10 @@ use crate::text::PositionedGlyph;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Dimensions {
-    pub x: f64,
-    pub y: f64,
-    pub width: f64,
-    pub height: f64,
+  pub x: f64,
+  pub y: f64,
+  pub width: f64,
+  pub height: f64,
 }
 
 /// Real resolved (pixel) border thickness per side, set by
@@ -50,10 +50,10 @@ pub struct Dimensions {
 /// already treats it.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct ResolvedBorder {
-    pub top: f64,
-    pub right: f64,
-    pub bottom: f64,
-    pub left: f64,
+  pub top: f64,
+  pub right: f64,
+  pub bottom: f64,
+  pub left: f64,
 }
 
 /// One already-styled run of text within a synthetic inline box
@@ -63,44 +63,44 @@ pub struct ResolvedBorder {
 /// form is what survives across the box-tree/layout boundary).
 #[derive(Debug, Clone)]
 pub struct InlineSpanSource {
-    pub text: String,
-    pub font_size: f64,
-    pub color: Color,
+  pub text: String,
+  pub font_size: f64,
+  pub color: Color,
 }
 
 #[derive(Debug, Clone)]
 pub struct LayoutBox {
-    pub node: NodeId,
-    pub style: ComputedStyle,
-    pub children: Vec<LayoutBox>,
-    pub dimensions: Dimensions,
-    /// See [`ResolvedBorder`]. Set by `layout::layout_block`; zero for
-    /// every box until layout actually runs.
-    pub border: ResolvedBorder,
-    /// `Some` only for boxes built from a single `dom::NodeData::Text`
-    /// node with no inline-element siblings next to it (the common "just
-    /// text inside a block element" case). Mutually exclusive with
-    /// `inline_spans` and non-empty `children`.
-    pub text: Option<String>,
-    /// `Some` only for a synthetic inline formatting context box grouping
-    /// a run of text + `display: inline` element siblings — see the
-    /// module doc. Mutually exclusive with `text` and non-empty
-    /// `children`; `node` on a box like this identifies only its first
-    /// source child (there's no single DOM node a merged inline run
-    /// "is" — same idea as a real anonymous CSS box).
-    pub inline_spans: Option<Vec<InlineSpanSource>>,
-    /// Filled in by `layout::layout_children` once the text/inline box's
-    /// width constraint is known; empty until then and always empty for
-    /// boxes with real (non-text, non-inline-span) children.
-    pub glyphs: Vec<PositionedGlyph>,
-    /// `Some` only for an `<img>` element box whose image was actually
-    /// fetched and decoded successfully (a caller supplies this via
-    /// [`apply_image_sizes`] — box tree construction itself never fetches
-    /// anything over the network). `None` for every other box, and for
-    /// an `<img>` with no `src`, a failed fetch, or undecodable bytes -
-    /// those all render as an empty box, same as this engine already
-    /// treats an unknown/unstyled element.
-    pub image: Option<std::rc::Rc<image_decode::DecodedImage>>,
+  pub node: NodeId,
+  pub style: ComputedStyle,
+  pub children: Vec<LayoutBox>,
+  pub dimensions: Dimensions,
+  /// See [`ResolvedBorder`]. Set by `layout::layout_block`; zero for
+  /// every box until layout actually runs.
+  pub border: ResolvedBorder,
+  /// `Some` only for boxes built from a single `dom::NodeData::Text`
+  /// node with no inline-element siblings next to it (the common "just
+  /// text inside a block element" case). Mutually exclusive with
+  /// `inline_spans` and non-empty `children`.
+  pub text: Option<String>,
+  /// `Some` only for a synthetic inline formatting context box grouping
+  /// a run of text + `display: inline` element siblings — see the
+  /// module doc. Mutually exclusive with `text` and non-empty
+  /// `children`; `node` on a box like this identifies only its first
+  /// source child (there's no single DOM node a merged inline run
+  /// "is" — same idea as a real anonymous CSS box).
+  pub inline_spans: Option<Vec<InlineSpanSource>>,
+  /// Filled in by `layout::layout_children` once the text/inline box's
+  /// width constraint is known; empty until then and always empty for
+  /// boxes with real (non-text, non-inline-span) children.
+  pub glyphs: Vec<PositionedGlyph>,
+  /// `Some` only for an `<img>` element box whose image was actually
+  /// fetched and decoded successfully (a caller supplies this via
+  /// [`apply_image_sizes`] — box tree construction itself never fetches
+  /// anything over the network). `None` for every other box, and for
+  /// an `<img>` with no `src`, a failed fetch, or undecodable bytes -
+  /// those all render as an empty box, same as this engine already
+  /// treats an unknown/unstyled element.
+  pub image: Option<std::rc::Rc<image_decode::DecodedImage>>,
 }
 
 /// Tags a real browser's UA stylesheet gives `display: none` unconditionally
@@ -117,40 +117,40 @@ pub struct LayoutBox {
 /// rendering process (a `<script>` unconditionally never renders, `display`
 /// or not).
 fn is_never_rendered(tag: &str) -> bool {
-    matches!(
-        tag,
-        "head" | "style" | "script" | "title" | "meta" | "link" | "base" | "noscript"
-    )
+  matches!(
+    tag,
+    "head" | "style" | "script" | "title" | "meta" | "link" | "base" | "noscript"
+  )
 }
 
 fn classes_of(attributes: &std::collections::HashMap<String, String>) -> Vec<String> {
-    attributes
-        .get("class")
-        .map(|c| c.split_whitespace().map(str::to_string).collect())
-        .unwrap_or_default()
+  attributes
+    .get("class")
+    .map(|c| c.split_whitespace().map(str::to_string).collect())
+    .unwrap_or_default()
 }
 
 /// Resolves `node`'s own style (pushing/matching/popping `chain`) — shared
 /// by `build` (for a block-level element) and `collect_inline_spans` (for
 /// an inline one), since both need the exact same cascade step.
 fn resolve_element_style(
-    dom: &Dom,
-    node: NodeId,
-    tag: &str,
-    attributes: &std::collections::HashMap<String, String>,
-    sheet: &Stylesheet,
-    viewport_width: f64,
-    chain: &mut Vec<ElementSnapshot>,
-    parent_font_size: f64,
-    parent_color: Color,
+  dom: &Dom,
+  node: NodeId,
+  tag: &str,
+  attributes: &std::collections::HashMap<String, String>,
+  sheet: &Stylesheet,
+  viewport_width: f64,
+  chain: &mut Vec<ElementSnapshot>,
+  parent_font_size: f64,
+  parent_color: Color,
 ) -> ComputedStyle {
-    let _ = (tag, attributes); // already folded into build_element_snapshot's own dom lookup
-    chain.push(build_element_snapshot(dom, node));
-    resolve_style(
-        &matching_declarations(sheet, chain, viewport_width),
-        parent_font_size,
-        parent_color,
-    )
+  let _ = (tag, attributes); // already folded into build_element_snapshot's own dom lookup
+  chain.push(build_element_snapshot(dom, node));
+  resolve_style(
+    &matching_declarations(sheet, chain, viewport_width),
+    parent_font_size,
+    parent_color,
+  )
 }
 
 /// Real sibling/attribute data for `node`'s own [`ElementSnapshot`] entry
@@ -165,27 +165,27 @@ fn resolve_element_style(
 /// (the document root) or that isn't itself an element gets an empty/
 /// default snapshot.
 fn build_element_snapshot(dom: &Dom, node: NodeId) -> ElementSnapshot {
-    let Some(n) = dom.get(node) else {
-        return ElementSnapshot::default();
-    };
-    let NodeData::Element {
-        tag, attributes, ..
-    } = &n.data
-    else {
-        return ElementSnapshot::default();
-    };
-    let (preceding_siblings, has_following_sibling) = sibling_snapshots(dom, node);
-    ElementSnapshot {
-        tag: tag.clone(),
-        id: attributes.get("id").cloned(),
-        classes: classes_of(attributes),
-        attributes: attributes
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect(),
-        preceding_siblings,
-        has_following_sibling,
-    }
+  let Some(n) = dom.get(node) else {
+    return ElementSnapshot::default();
+  };
+  let NodeData::Element {
+    tag, attributes, ..
+  } = &n.data
+  else {
+    return ElementSnapshot::default();
+  };
+  let (preceding_siblings, has_following_sibling) = sibling_snapshots(dom, node);
+  ElementSnapshot {
+    tag: tag.clone(),
+    id: attributes.get("id").cloned(),
+    classes: classes_of(attributes),
+    attributes: attributes
+      .iter()
+      .map(|(k, v)| (k.clone(), v.clone()))
+      .collect(),
+    preceding_siblings,
+    has_following_sibling,
+  }
 }
 
 /// Element siblings (skipping text/comment nodes) sharing `node`'s parent:
@@ -197,30 +197,30 @@ fn build_element_snapshot(dom: &Dom, node: NodeId) -> ElementSnapshot {
 /// doesn't panic on DOM inconsistency elsewhere either) gets `(empty,
 /// false)`.
 fn sibling_snapshots(dom: &Dom, node: NodeId) -> (Vec<ElementSnapshot>, bool) {
-    let Some(parent) = dom.get(node).and_then(|n| n.parent) else {
-        return (Vec::new(), false);
-    };
-    let Some(parent_node) = dom.get(parent) else {
-        return (Vec::new(), false);
-    };
+  let Some(parent) = dom.get(node).and_then(|n| n.parent) else {
+    return (Vec::new(), false);
+  };
+  let Some(parent_node) = dom.get(parent) else {
+    return (Vec::new(), false);
+  };
 
-    let element_siblings: Vec<NodeId> = parent_node
-        .children
-        .iter()
-        .copied()
-        .filter(|&c| matches!(dom.get(c).map(|n| &n.data), Some(NodeData::Element { .. })))
-        .collect();
+  let element_siblings: Vec<NodeId> = parent_node
+    .children
+    .iter()
+    .copied()
+    .filter(|&c| matches!(dom.get(c).map(|n| &n.data), Some(NodeData::Element { .. })))
+    .collect();
 
-    let Some(pos) = element_siblings.iter().position(|&c| c == node) else {
-        return (Vec::new(), false);
-    };
+  let Some(pos) = element_siblings.iter().position(|&c| c == node) else {
+    return (Vec::new(), false);
+  };
 
-    let preceding_siblings = element_siblings[..pos]
-        .iter()
-        .map(|&sib| build_element_snapshot(dom, sib))
-        .collect();
-    let has_following_sibling = pos + 1 < element_siblings.len();
-    (preceding_siblings, has_following_sibling)
+  let preceding_siblings = element_siblings[..pos]
+    .iter()
+    .map(|&sib| build_element_snapshot(dom, sib))
+    .collect();
+  let has_following_sibling = pos + 1 < element_siblings.len();
+  (preceding_siblings, has_following_sibling)
 }
 
 /// Recursively flattens `node`'s subtree into `out` as [`InlineSpanSource`]
@@ -230,62 +230,62 @@ fn sibling_snapshots(dom: &Dom, node: NodeId) -> (Vec<ElementSnapshot>, bool) {
 /// inline — this doesn't re-check `display` on nested elements, per the
 /// module doc's "block-inside-inline isn't de-inlined" scope cut.
 fn collect_inline_spans(
-    dom: &Dom,
-    node: NodeId,
-    sheet: &Stylesheet,
-    viewport_width: f64,
-    chain: &mut Vec<ElementSnapshot>,
-    parent_font_size: f64,
-    parent_color: Color,
-    out: &mut Vec<InlineSpanSource>,
+  dom: &Dom,
+  node: NodeId,
+  sheet: &Stylesheet,
+  viewport_width: f64,
+  chain: &mut Vec<ElementSnapshot>,
+  parent_font_size: f64,
+  parent_color: Color,
+  out: &mut Vec<InlineSpanSource>,
 ) {
-    let Some(n) = dom.get(node) else { return };
+  let Some(n) = dom.get(node) else { return };
 
-    match &n.data {
-        NodeData::Text(text) => {
-            if !text.trim().is_empty() {
-                out.push(InlineSpanSource {
-                    text: text.clone(),
-                    font_size: parent_font_size,
-                    color: parent_color,
-                });
-            }
-        }
-        NodeData::Element {
-            tag, attributes, ..
-        } => {
-            if is_never_rendered(tag) {
-                return;
-            }
-            let style = resolve_element_style(
-                dom,
-                node,
-                tag,
-                attributes,
-                sheet,
-                viewport_width,
-                chain,
-                parent_font_size,
-                parent_color,
-            );
-            if style.display != Display::None {
-                for &child in &n.children {
-                    collect_inline_spans(
-                        dom,
-                        child,
-                        sheet,
-                        viewport_width,
-                        chain,
-                        style.font_size,
-                        style.color,
-                        out,
-                    );
-                }
-            }
-            chain.pop();
-        }
-        NodeData::Comment(_) | NodeData::Document | NodeData::DocumentFragment => {}
+  match &n.data {
+    NodeData::Text(text) => {
+      if !text.trim().is_empty() {
+        out.push(InlineSpanSource {
+          text: text.clone(),
+          font_size: parent_font_size,
+          color: parent_color,
+        });
+      }
     }
+    NodeData::Element {
+      tag, attributes, ..
+    } => {
+      if is_never_rendered(tag) {
+        return;
+      }
+      let style = resolve_element_style(
+        dom,
+        node,
+        tag,
+        attributes,
+        sheet,
+        viewport_width,
+        chain,
+        parent_font_size,
+        parent_color,
+      );
+      if style.display != Display::None {
+        for &child in &n.children {
+          collect_inline_spans(
+            dom,
+            child,
+            sheet,
+            viewport_width,
+            chain,
+            style.font_size,
+            style.color,
+            out,
+          );
+        }
+      }
+      chain.pop();
+    }
+    NodeData::Comment(_) | NodeData::Document | NodeData::DocumentFragment => {}
+  }
 }
 
 /// `true` for a DOM child that starts/continues an inline run: a
@@ -296,38 +296,38 @@ fn collect_inline_spans(
 /// of declaration lookups) that recomputing it once more beats threading a
 /// pre-resolved style through both call shapes.
 fn is_inline_level(
-    dom: &Dom,
-    node: NodeId,
-    sheet: &Stylesheet,
-    viewport_width: f64,
-    chain: &mut Vec<ElementSnapshot>,
-    parent_font_size: f64,
-    parent_color: Color,
+  dom: &Dom,
+  node: NodeId,
+  sheet: &Stylesheet,
+  viewport_width: f64,
+  chain: &mut Vec<ElementSnapshot>,
+  parent_font_size: f64,
+  parent_color: Color,
 ) -> bool {
-    match dom.get(node).map(|n| &n.data) {
-        Some(NodeData::Text(text)) => !text.trim().is_empty(),
-        Some(NodeData::Element {
-            tag, attributes, ..
-        }) => {
-            if is_never_rendered(tag) {
-                return false;
-            }
-            let style = resolve_element_style(
-                dom,
-                node,
-                tag,
-                attributes,
-                sheet,
-                viewport_width,
-                chain,
-                parent_font_size,
-                parent_color,
-            );
-            chain.pop();
-            style.display == Display::Inline
-        }
-        _ => false,
+  match dom.get(node).map(|n| &n.data) {
+    Some(NodeData::Text(text)) => !text.trim().is_empty(),
+    Some(NodeData::Element {
+      tag, attributes, ..
+    }) => {
+      if is_never_rendered(tag) {
+        return false;
+      }
+      let style = resolve_element_style(
+        dom,
+        node,
+        tag,
+        attributes,
+        sheet,
+        viewport_width,
+        chain,
+        parent_font_size,
+        parent_color,
+      );
+      chain.pop();
+      style.display == Display::Inline
     }
+    _ => false,
+  }
 }
 
 /// Builds every child box of `node` in one pass, grouping consecutive
@@ -338,187 +338,187 @@ fn is_inline_level(
 /// the cheaper pre-existing `text: Some(...)` path via `build` instead,
 /// unchanged from before multi-span runs existed.
 fn build_children(
-    dom: &Dom,
-    child_ids: &[NodeId],
-    sheet: &Stylesheet,
-    viewport_width: f64,
-    chain: &mut Vec<ElementSnapshot>,
-    parent_font_size: f64,
-    parent_color: Color,
+  dom: &Dom,
+  child_ids: &[NodeId],
+  sheet: &Stylesheet,
+  viewport_width: f64,
+  chain: &mut Vec<ElementSnapshot>,
+  parent_font_size: f64,
+  parent_color: Color,
 ) -> Vec<LayoutBox> {
-    let mut result = Vec::new();
-    let mut pending_inline_run: Vec<NodeId> = Vec::new();
+  let mut result = Vec::new();
+  let mut pending_inline_run: Vec<NodeId> = Vec::new();
 
-    let flush =
-        |run: &mut Vec<NodeId>, result: &mut Vec<LayoutBox>, chain: &mut Vec<ElementSnapshot>| {
-            if run.is_empty() {
-                return;
-            }
-            if run.len() == 1 {
-                if let Some(NodeData::Text(_)) = dom.get(run[0]).map(|n| &n.data) {
-                    if let Some(b) = build(
-                        dom,
-                        run[0],
-                        sheet,
-                        viewport_width,
-                        chain,
-                        parent_font_size,
-                        parent_color,
-                    ) {
-                        result.push(b);
-                    }
-                    run.clear();
-                    return;
-                }
-            }
-
-            let mut spans = Vec::new();
-            let first_node = run[0];
-            for &id in run.iter() {
-                collect_inline_spans(
-                    dom,
-                    id,
-                    sheet,
-                    viewport_width,
-                    chain,
-                    parent_font_size,
-                    parent_color,
-                    &mut spans,
-                );
-            }
-            run.clear();
-            if !spans.is_empty() {
-                // The run's own baseline style, for the common single-span
-                // case (plain text, no inline element siblings) where it's
-                // exactly the text's real style - matches what a plain text
-                // leaf box carried before this module supported multi-span
-                // runs. When a run mixes multiple differently-styled spans,
-                // this is just the run's inherited starting point, not
-                // necessarily any one glyph's actual color/size - each glyph
-                // still gets its own correct value via `inline_spans`.
-                let mut style = ComputedStyle::initial();
-                style.font_size = parent_font_size;
-                style.color = parent_color;
-                result.push(LayoutBox {
-                    node: first_node,
-                    style,
-                    children: Vec::new(),
-                    dimensions: Dimensions::default(),
-                    border: ResolvedBorder::default(),
-                    text: None,
-                    inline_spans: Some(spans),
-                    glyphs: Vec::new(),
-                    image: None,
-                });
-            }
-        };
-
-    for &child in child_ids {
-        if is_inline_level(
+  let flush =
+    |run: &mut Vec<NodeId>, result: &mut Vec<LayoutBox>, chain: &mut Vec<ElementSnapshot>| {
+      if run.is_empty() {
+        return;
+      }
+      if run.len() == 1 {
+        if let Some(NodeData::Text(_)) = dom.get(run[0]).map(|n| &n.data) {
+          if let Some(b) = build(
             dom,
-            child,
+            run[0],
             sheet,
             viewport_width,
             chain,
             parent_font_size,
             parent_color,
-        ) {
-            pending_inline_run.push(child);
-        } else {
-            flush(&mut pending_inline_run, &mut result, chain);
-            if let Some(b) = build(
-                dom,
-                child,
-                sheet,
-                viewport_width,
-                chain,
-                parent_font_size,
-                parent_color,
-            ) {
-                result.push(b);
-            }
+          ) {
+            result.push(b);
+          }
+          run.clear();
+          return;
         }
-    }
-    flush(&mut pending_inline_run, &mut result, chain);
+      }
 
-    result
-}
-
-fn build(
-    dom: &Dom,
-    node: NodeId,
-    sheet: &Stylesheet,
-    viewport_width: f64,
-    chain: &mut Vec<ElementSnapshot>,
-    parent_font_size: f64,
-    parent_color: Color,
-) -> Option<LayoutBox> {
-    let n = dom.get(node)?;
-
-    if let NodeData::Text(text) = &n.data {
-        if text.trim().is_empty() {
-            return None;
-        }
+      let mut spans = Vec::new();
+      let first_node = run[0];
+      for &id in run.iter() {
+        collect_inline_spans(
+          dom,
+          id,
+          sheet,
+          viewport_width,
+          chain,
+          parent_font_size,
+          parent_color,
+          &mut spans,
+        );
+      }
+      run.clear();
+      if !spans.is_empty() {
+        // The run's own baseline style, for the common single-span
+        // case (plain text, no inline element siblings) where it's
+        // exactly the text's real style - matches what a plain text
+        // leaf box carried before this module supported multi-span
+        // runs. When a run mixes multiple differently-styled spans,
+        // this is just the run's inherited starting point, not
+        // necessarily any one glyph's actual color/size - each glyph
+        // still gets its own correct value via `inline_spans`.
         let mut style = ComputedStyle::initial();
         style.font_size = parent_font_size;
         style.color = parent_color;
-        return Some(LayoutBox {
-            node,
-            style,
-            children: Vec::new(),
-            dimensions: Dimensions::default(),
-            border: ResolvedBorder::default(),
-            text: Some(text.clone()),
-            inline_spans: None,
-            glyphs: Vec::new(),
-            image: None,
+        result.push(LayoutBox {
+          node: first_node,
+          style,
+          children: Vec::new(),
+          dimensions: Dimensions::default(),
+          border: ResolvedBorder::default(),
+          text: None,
+          inline_spans: Some(spans),
+          glyphs: Vec::new(),
+          image: None,
         });
-    }
-
-    let NodeData::Element { tag, .. } = &n.data else {
-        return None;
+      }
     };
-    if is_never_rendered(tag) {
-        return None;
-    }
 
-    chain.push(build_element_snapshot(dom, node));
-    let style = resolve_style(
-        &matching_declarations(sheet, chain, viewport_width),
+  for &child in child_ids {
+    if is_inline_level(
+      dom,
+      child,
+      sheet,
+      viewport_width,
+      chain,
+      parent_font_size,
+      parent_color,
+    ) {
+      pending_inline_run.push(child);
+    } else {
+      flush(&mut pending_inline_run, &mut result, chain);
+      if let Some(b) = build(
+        dom,
+        child,
+        sheet,
+        viewport_width,
+        chain,
         parent_font_size,
         parent_color,
-    );
-
-    let children = if style.display == Display::None {
-        Vec::new()
-    } else {
-        build_children(
-            dom,
-            &n.children,
-            sheet,
-            viewport_width,
-            chain,
-            style.font_size,
-            style.color,
-        )
-    };
-    chain.pop();
-
-    if style.display == Display::None {
-        return None;
+      ) {
+        result.push(b);
+      }
     }
+  }
+  flush(&mut pending_inline_run, &mut result, chain);
 
-    Some(LayoutBox {
-        node,
-        style,
-        children,
-        dimensions: Dimensions::default(),
-        border: ResolvedBorder::default(),
-        text: None,
-        inline_spans: None,
-        glyphs: Vec::new(),
-        image: None,
-    })
+  result
+}
+
+fn build(
+  dom: &Dom,
+  node: NodeId,
+  sheet: &Stylesheet,
+  viewport_width: f64,
+  chain: &mut Vec<ElementSnapshot>,
+  parent_font_size: f64,
+  parent_color: Color,
+) -> Option<LayoutBox> {
+  let n = dom.get(node)?;
+
+  if let NodeData::Text(text) = &n.data {
+    if text.trim().is_empty() {
+      return None;
+    }
+    let mut style = ComputedStyle::initial();
+    style.font_size = parent_font_size;
+    style.color = parent_color;
+    return Some(LayoutBox {
+      node,
+      style,
+      children: Vec::new(),
+      dimensions: Dimensions::default(),
+      border: ResolvedBorder::default(),
+      text: Some(text.clone()),
+      inline_spans: None,
+      glyphs: Vec::new(),
+      image: None,
+    });
+  }
+
+  let NodeData::Element { tag, .. } = &n.data else {
+    return None;
+  };
+  if is_never_rendered(tag) {
+    return None;
+  }
+
+  chain.push(build_element_snapshot(dom, node));
+  let style = resolve_style(
+    &matching_declarations(sheet, chain, viewport_width),
+    parent_font_size,
+    parent_color,
+  );
+
+  let children = if style.display == Display::None {
+    Vec::new()
+  } else {
+    build_children(
+      dom,
+      &n.children,
+      sheet,
+      viewport_width,
+      chain,
+      style.font_size,
+      style.color,
+    )
+  };
+  chain.pop();
+
+  if style.display == Display::None {
+    return None;
+  }
+
+  Some(LayoutBox {
+    node,
+    style,
+    children,
+    dimensions: Dimensions::default(),
+    border: ResolvedBorder::default(),
+    text: None,
+    inline_spans: None,
+    glyphs: Vec::new(),
+    image: None,
+  })
 }
 
 /// Real, viewport-width-agnostic box tree construction - defaults to a
@@ -529,29 +529,29 @@ fn build(
 pub const DEFAULT_VIEWPORT_WIDTH: f64 = 1280.0;
 
 pub fn build_box_tree(dom: &Dom, node: NodeId, sheet: &Stylesheet) -> Option<LayoutBox> {
-    build_box_tree_with_viewport(dom, node, sheet, DEFAULT_VIEWPORT_WIDTH)
+  build_box_tree_with_viewport(dom, node, sheet, DEFAULT_VIEWPORT_WIDTH)
 }
 
 /// Same as [`build_box_tree`], but resolves any `@media (min-width: ...)`/
 /// `(max-width: ...)` conditions in `sheet` against a real `viewport_width`
 /// instead of the arbitrary default.
 pub fn build_box_tree_with_viewport(
-    dom: &Dom,
-    node: NodeId,
-    sheet: &Stylesheet,
-    viewport_width: f64,
+  dom: &Dom,
+  node: NodeId,
+  sheet: &Stylesheet,
+  viewport_width: f64,
 ) -> Option<LayoutBox> {
-    let mut chain = Vec::new();
-    let initial = ComputedStyle::initial();
-    build(
-        dom,
-        node,
-        sheet,
-        viewport_width,
-        &mut chain,
-        initial.font_size,
-        initial.color,
-    )
+  let mut chain = Vec::new();
+  let initial = ComputedStyle::initial();
+  build(
+    dom,
+    node,
+    sheet,
+    viewport_width,
+    &mut chain,
+    initial.font_size,
+    initial.color,
+  )
 }
 
 /// Applies real fetched/decoded `<img>` images onto an already-built box
@@ -573,28 +573,28 @@ pub fn build_box_tree_with_viewport(
 /// fetch, undecodable bytes) is left as a plain empty box, same as any
 /// other unstyled element.
 pub fn apply_image_sizes(
-    dom: &Dom,
-    box_: &mut LayoutBox,
-    images: &std::collections::HashMap<NodeId, std::rc::Rc<image_decode::DecodedImage>>,
+  dom: &Dom,
+  box_: &mut LayoutBox,
+  images: &std::collections::HashMap<NodeId, std::rc::Rc<image_decode::DecodedImage>>,
 ) {
-    if let Some(dom::Node {
-        data: NodeData::Element { tag, .. },
-        ..
-    }) = dom.get(box_.node)
-    {
-        if tag.eq_ignore_ascii_case("img") {
-            if let Some(image) = images.get(&box_.node) {
-                if box_.style.width == crate::style::Length::Auto {
-                    box_.style.width = crate::style::Length::Px(image.width as f64);
-                }
-                if box_.style.height == crate::style::Length::Auto {
-                    box_.style.height = crate::style::Length::Px(image.height as f64);
-                }
-                box_.image = Some(image.clone());
-            }
+  if let Some(dom::Node {
+    data: NodeData::Element { tag, .. },
+    ..
+  }) = dom.get(box_.node)
+  {
+    if tag.eq_ignore_ascii_case("img") {
+      if let Some(image) = images.get(&box_.node) {
+        if box_.style.width == crate::style::Length::Auto {
+          box_.style.width = crate::style::Length::Px(image.width as f64);
         }
+        if box_.style.height == crate::style::Length::Auto {
+          box_.style.height = crate::style::Length::Px(image.height as f64);
+        }
+        box_.image = Some(image.clone());
+      }
     }
-    for child in &mut box_.children {
-        apply_image_sizes(dom, child, images);
-    }
+  }
+  for child in &mut box_.children {
+    apply_image_sizes(dom, child, images);
+  }
 }

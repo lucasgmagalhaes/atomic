@@ -11,12 +11,12 @@ use std::path::PathBuf;
 /// real `Io` error from those if it doesn't, same as any other bad path).
 #[cfg(windows)]
 pub fn default_profile_dir() -> Option<PathBuf> {
-    default_user_data_dir().map(|dir| dir.join("Default"))
+  default_user_data_dir().map(|dir| dir.join("Default"))
 }
 
 #[cfg(not(windows))]
 pub fn default_profile_dir() -> Option<PathBuf> {
-    None
+  None
 }
 
 /// Chrome's top-level `User Data` directory - the parent of `Default`/
@@ -25,31 +25,31 @@ pub fn default_profile_dir() -> Option<PathBuf> {
 /// not inside a profile directory itself.
 #[cfg(windows)]
 pub fn default_user_data_dir() -> Option<PathBuf> {
-    std::env::var_os("LOCALAPPDATA").map(|dir| {
-        PathBuf::from(dir)
-            .join("Google")
-            .join("Chrome")
-            .join("User Data")
-    })
+  std::env::var_os("LOCALAPPDATA").map(|dir| {
+    PathBuf::from(dir)
+      .join("Google")
+      .join("Chrome")
+      .join("User Data")
+  })
 }
 
 #[cfg(not(windows))]
 pub fn default_user_data_dir() -> Option<PathBuf> {
-    None
+  None
 }
 
 pub fn bookmarks_path(profile_dir: &std::path::Path) -> PathBuf {
-    profile_dir.join("Bookmarks")
+  profile_dir.join("Bookmarks")
 }
 
 pub fn history_path(profile_dir: &std::path::Path) -> PathBuf {
-    profile_dir.join("History")
+  profile_dir.join("History")
 }
 
 pub fn cookies_path(profile_dir: &std::path::Path) -> PathBuf {
-    profile_dir.join("Network").join("Cookies")
+  profile_dir.join("Network").join("Cookies")
 }
 
 pub fn login_data_path(profile_dir: &std::path::Path) -> PathBuf {
-    profile_dir.join("Login Data")
+  profile_dir.join("Login Data")
 }

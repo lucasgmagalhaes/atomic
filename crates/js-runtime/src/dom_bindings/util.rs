@@ -20,29 +20,29 @@ pub(super) const MAX_TEXT_NODE_LENGTH: usize = 16 * 1024;
 pub(super) const MAX_HTML_LENGTH: usize = 64 * 1024;
 
 pub(super) type Getter =
-    unsafe extern "C" fn(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue;
+  unsafe extern "C" fn(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue;
 pub(super) type Setter = unsafe extern "C" fn(
-    ctx: *mut sys::JSContext,
-    this_val: sys::JSValue,
-    val: sys::JSValue,
+  ctx: *mut sys::JSContext,
+  this_val: sys::JSValue,
+  val: sys::JSValue,
 ) -> sys::JSValue;
 
 pub(super) unsafe fn read_js_string(ctx: *mut sys::JSContext, val: sys::JSValue) -> Option<String> {
-    let mut len: usize = 0;
-    let ptr = sys::JS_ToCStringLen2(ctx, &mut len, val, false);
-    if ptr.is_null() {
-        return None;
-    }
-    let bytes = std::slice::from_raw_parts(ptr as *const u8, len);
-    let s = String::from_utf8_lossy(bytes).into_owned();
-    sys::JS_FreeCString(ctx, ptr);
-    Some(s)
+  let mut len: usize = 0;
+  let ptr = sys::JS_ToCStringLen2(ctx, &mut len, val, false);
+  if ptr.is_null() {
+    return None;
+  }
+  let bytes = std::slice::from_raw_parts(ptr as *const u8, len);
+  let s = String::from_utf8_lossy(bytes).into_owned();
+  sys::JS_FreeCString(ctx, ptr);
+  Some(s)
 }
 
 pub(super) unsafe fn new_js_string(ctx: *mut sys::JSContext, s: &str) -> sys::JSValue {
-    sys::JS_NewStringLen(ctx, s.as_ptr() as *const std::os::raw::c_char, s.len())
+  sys::JS_NewStringLen(ctx, s.as_ptr() as *const std::os::raw::c_char, s.len())
 }
 
 pub(super) unsafe fn throw_type_error(ctx: *mut sys::JSContext, message: &str) -> sys::JSValue {
-    sys::JS_Throw(ctx, new_js_string(ctx, message))
+  sys::JS_Throw(ctx, new_js_string(ctx, message))
 }

@@ -13,12 +13,12 @@ use crate::page::Page;
 /// `Dom`). Rejects any other form up front rather than silently matching
 /// nothing.
 fn require_id_selector(selector: &str) -> Result<&str, String> {
-    selector
-        .strip_prefix('#')
-        .filter(|id| !id.is_empty())
-        .ok_or_else(|| {
-            format!("unsupported selector \"{selector}\" - only #id selectors are implemented")
-        })
+  selector
+    .strip_prefix('#')
+    .filter(|id| !id.is_empty())
+    .ok_or_else(|| {
+      format!("unsupported selector \"{selector}\" - only #id selectors are implemented")
+    })
 }
 
 /// A valid JS double-quoted string literal for `s` - just enough escaping
@@ -29,19 +29,19 @@ fn require_id_selector(selector: &str) -> Result<&str, String> {
 /// public entry point into a `Context` is `eval(source)` - see that
 /// method's own doc).
 fn js_string_literal(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            _ => out.push(c),
-        }
+  let mut out = String::with_capacity(s.len() + 2);
+  out.push('"');
+  for c in s.chars() {
+    match c {
+      '"' => out.push_str("\\\""),
+      '\\' => out.push_str("\\\\"),
+      '\n' => out.push_str("\\n"),
+      '\r' => out.push_str("\\r"),
+      _ => out.push(c),
     }
-    out.push('"');
-    out
+  }
+  out.push('"');
+  out
 }
 
 /// Dispatches a real `"click"` event at the `#id` element via the
@@ -52,15 +52,16 @@ fn js_string_literal(s: &str) -> String {
 /// message (see its doc comment) can't currently distinguish the two, so
 /// this reports the more actionable one.
 pub(crate) fn dispatch_click(ctx: &Context, selector: &str) -> Result<(), String> {
-    let id = require_id_selector(selector)?;
-    let script = format!(
+  let id = require_id_selector(selector)?;
+  let script = format!(
         "(function(){{ var el = document.getElementById({id}); if (el === null) throw {missing}; el.dispatchEvent(\"click\"); }})();",
         id = js_string_literal(id),
         missing = js_string_literal(&format!("no element with id \"{id}\"")),
     );
-    ctx.eval(&script, "<pane click>")
-        .map(|_| ())
-        .map_err(|_| format!("no element with id \"{id}\" (or its click handler threw)"))
+  ctx
+    .eval(&script, "<pane click>")
+    .map(|_| ())
+    .map_err(|_| format!("no element with id \"{id}\" (or its click handler threw)"))
 }
 
 /// Real focus, via the JS `.focus()` binding rather than calling
@@ -69,14 +70,15 @@ pub(crate) fn dispatch_click(ctx: &Context, selector: &str) -> Result<(), String
 /// `events::dispatch` after mutating `dom::Dom`'s focus state), same
 /// reasoning `dispatch_click` already applies to clicks.
 fn focus_element(ctx: &Context, id: &str) -> Result<(), String> {
-    let script = format!(
+  let script = format!(
         "(function(){{ var el = document.getElementById({id}); if (el === null) throw {missing}; el.focus(); }})();",
         id = js_string_literal(id),
         missing = js_string_literal(&format!("no element with id \"{id}\"")),
     );
-    ctx.eval(&script, "<pane focus>")
-        .map(|_| ())
-        .map_err(|_| format!("no element with id \"{id}\""))
+  ctx
+    .eval(&script, "<pane focus>")
+    .map(|_| ())
+    .map_err(|_| format!("no element with id \"{id}\""))
 }
 
 /// Real blur, via the JS `.blur()` binding — see `focus_element`'s own doc
@@ -84,14 +86,15 @@ fn focus_element(ctx: &Context, id: &str) -> Result<(), String> {
 /// `dom_bindings::node_blur` dispatches a real `"blur"` event, and a real
 /// `"change"` event too if `.value` moved since the matching `focus()`.
 fn blur_element(ctx: &Context, id: &str) -> Result<(), String> {
-    let script = format!(
+  let script = format!(
         "(function(){{ var el = document.getElementById({id}); if (el === null) throw {missing}; el.blur(); }})();",
         id = js_string_literal(id),
         missing = js_string_literal(&format!("no element with id \"{id}\"")),
     );
-    ctx.eval(&script, "<pane blur>")
-        .map(|_| ())
-        .map_err(|_| format!("no element with id \"{id}\""))
+  ctx
+    .eval(&script, "<pane blur>")
+    .map(|_| ())
+    .map_err(|_| format!("no element with id \"{id}\""))
 }
 
 /// `true` if `node` is a real `<input>`/`<textarea>` — the only tags this
@@ -99,7 +102,7 @@ fn blur_element(ctx: &Context, id: &str) -> Result<(), String> {
 /// on why that's exposed generically on `Node` rather than a typed
 /// `HTMLInputElement`/`HTMLTextAreaElement` subclass).
 fn is_input_like(dom: &Dom, node: NodeId) -> bool {
-    matches!(&dom.get(node).map(|n| &n.data), Some(dom::NodeData::Element { tag, .. }) if tag == "input" || tag == "textarea")
+  matches!(&dom.get(node).map(|n| &n.data), Some(dom::NodeData::Element { tag, .. }) if tag == "input" || tag == "textarea")
 }
 
 /// Sets the `#id` element's `.value` (a real, independent `dom::Dom`
@@ -107,27 +110,28 @@ fn is_input_like(dom: &Dom, node: NodeId) -> bool {
 /// `<input>`/`<textarea>`, `textContent` otherwise (this engine's only
 /// settable string for a generic element).
 pub(crate) fn fill_element(ctx: &Context, selector: &str, value: &str) -> Result<(), String> {
-    let id = require_id_selector(selector)?;
-    let prop = {
-        let dom_ref = ctx.dom().ok_or("no DOM available")?;
-        let node = dom_ref
-            .find_by_id(id)
-            .ok_or_else(|| format!("no element with id \"{id}\""))?;
-        if is_input_like(dom_ref, node) {
-            "value"
-        } else {
-            "textContent"
-        }
-    };
-    let script = format!(
+  let id = require_id_selector(selector)?;
+  let prop = {
+    let dom_ref = ctx.dom().ok_or("no DOM available")?;
+    let node = dom_ref
+      .find_by_id(id)
+      .ok_or_else(|| format!("no element with id \"{id}\""))?;
+    if is_input_like(dom_ref, node) {
+      "value"
+    } else {
+      "textContent"
+    }
+  };
+  let script = format!(
         "(function(){{ var el = document.getElementById({id}); if (el === null) throw {missing}; el.{prop} = {value}; }})();",
         id = js_string_literal(id),
         missing = js_string_literal(&format!("no element with id \"{id}\"")),
         value = js_string_literal(value),
     );
-    ctx.eval(&script, "<pane fill>")
-        .map(|_| ())
-        .map_err(|_| format!("no element with id \"{id}\""))
+  ctx
+    .eval(&script, "<pane fill>")
+    .map(|_| ())
+    .map_err(|_| format!("no element with id \"{id}\""))
 }
 
 /// Walks from `node` up through real `dom::Dom` parent links (not a JS
@@ -142,14 +146,14 @@ pub(crate) fn fill_element(ctx: &Context, selector: &str, value: &str) -> Result
 /// on a page with no ids anywhere genuinely can't be dispatched, and this
 /// returns `None` rather than silently no-opping past that.
 fn nearest_id_ancestor(dom: &Dom, node: NodeId) -> Option<String> {
-    let mut current = Some(node);
-    while let Some(id) = current {
-        if let Some(value) = dom.attribute(id, "id") {
-            return Some(value.to_string());
-        }
-        current = dom.get(id).and_then(|n| n.parent);
+  let mut current = Some(node);
+  while let Some(id) = current {
+    if let Some(value) = dom.attribute(id, "id") {
+      return Some(value.to_string());
     }
-    None
+    current = dom.get(id).and_then(|n| n.parent);
+  }
+  None
 }
 
 /// Real coordinate click: hit-tests `(x, y)`, dispatches a real `"click"`
@@ -169,54 +173,53 @@ fn nearest_id_ancestor(dom: &Dom, node: NodeId) -> Option<String> {
 /// focus on a click to a field that already has it. See `tab_focus` for
 /// the other way focus moves - a real `Tab`/`Shift+Tab` press.
 pub(crate) fn dispatch_click_at(
-    page: &mut Page,
-    width: u32,
-    x: f64,
-    y: f64,
-    scroll_top: f64,
+  page: &mut Page,
+  width: u32,
+  x: f64,
+  y: f64,
+  scroll_top: f64,
 ) -> Result<Option<String>, String> {
-    let node = page
-        .hit_test_at(width, x, y, scroll_top)
-        .ok_or("no element at that point")?;
-    let click_id = {
-        let dom_ref = page.ctx.dom().ok_or("no DOM available")?;
-        nearest_id_ancestor(dom_ref, node)
-            .ok_or("no id-addressable element at or above that point")?
-    };
-    dispatch_click(&page.ctx, &format!("#{click_id}"))?;
+  let node = page
+    .hit_test_at(width, x, y, scroll_top)
+    .ok_or("no element at that point")?;
+  let click_id = {
+    let dom_ref = page.ctx.dom().ok_or("no DOM available")?;
+    nearest_id_ancestor(dom_ref, node).ok_or("no id-addressable element at or above that point")?
+  };
+  dispatch_click(&page.ctx, &format!("#{click_id}"))?;
 
-    // Re-borrow fresh rather than reusing the pre-dispatch `dom_ref` - the
-    // click listener that just ran (real JS, via `dispatch_click` above)
-    // could have mutated the DOM, and this engine's arena (`dom::Dom`'s
-    // internal `Vec<Slot>`) isn't guaranteed not to reallocate on a node
-    // creation in between.
-    let (focusable, focus_id, already_focused, previously_focused_id) = {
-        let dom_ref = page.ctx.dom().ok_or("no DOM available")?;
-        let focusable = is_input_like(dom_ref, node);
-        let focus_id = if focusable {
-            dom_ref.attribute(node, "id").map(str::to_string)
-        } else {
-            None
-        };
-        let already_focused = focusable && dom_ref.active_element() == Some(node);
-        let previously_focused_id = if already_focused {
-            None
-        } else {
-            dom_ref
-                .active_element()
-                .and_then(|prev| dom_ref.attribute(prev, "id").map(str::to_string))
-        };
-        (focusable, focus_id, already_focused, previously_focused_id)
+  // Re-borrow fresh rather than reusing the pre-dispatch `dom_ref` - the
+  // click listener that just ran (real JS, via `dispatch_click` above)
+  // could have mutated the DOM, and this engine's arena (`dom::Dom`'s
+  // internal `Vec<Slot>`) isn't guaranteed not to reallocate on a node
+  // creation in between.
+  let (focusable, focus_id, already_focused, previously_focused_id) = {
+    let dom_ref = page.ctx.dom().ok_or("no DOM available")?;
+    let focusable = is_input_like(dom_ref, node);
+    let focus_id = if focusable {
+      dom_ref.attribute(node, "id").map(str::to_string)
+    } else {
+      None
     };
-    if let Some(prev_id) = previously_focused_id {
-        let _ = blur_element(&page.ctx, &prev_id);
+    let already_focused = focusable && dom_ref.active_element() == Some(node);
+    let previously_focused_id = if already_focused {
+      None
+    } else {
+      dom_ref
+        .active_element()
+        .and_then(|prev| dom_ref.attribute(prev, "id").map(str::to_string))
+    };
+    (focusable, focus_id, already_focused, previously_focused_id)
+  };
+  if let Some(prev_id) = previously_focused_id {
+    let _ = blur_element(&page.ctx, &prev_id);
+  }
+  if focusable && !already_focused {
+    if let Some(id) = &focus_id {
+      let _ = focus_element(&page.ctx, id);
     }
-    if focusable && !already_focused {
-        if let Some(id) = &focus_id {
-            let _ = focus_element(&page.ctx, id);
-        }
-    }
-    Ok(focus_id)
+  }
+  Ok(focus_id)
 }
 
 /// Types `key` into whichever real `<input>`/`<textarea>` id `CLICK_AT`
@@ -229,29 +232,30 @@ pub(crate) fn dispatch_click_at(
 /// runs, same as a real browser firing the event before applying the
 /// default action.
 pub(crate) fn type_key(ctx: &Context, focused_id: &str, key: &str) -> Result<(), String> {
-    let current = {
-        let dom_ref = ctx.dom().ok_or("no DOM available")?;
-        let node = dom_ref
-            .find_by_id(focused_id)
-            .ok_or_else(|| format!("no element with id \"{focused_id}\""))?;
-        dom_ref.value(node)
-    };
-    let updated = if key == "Backspace" {
-        let mut chars: Vec<char> = current.chars().collect();
-        chars.pop();
-        chars.into_iter().collect()
-    } else {
-        format!("{current}{key}")
-    };
-    let script = format!(
+  let current = {
+    let dom_ref = ctx.dom().ok_or("no DOM available")?;
+    let node = dom_ref
+      .find_by_id(focused_id)
+      .ok_or_else(|| format!("no element with id \"{focused_id}\""))?;
+    dom_ref.value(node)
+  };
+  let updated = if key == "Backspace" {
+    let mut chars: Vec<char> = current.chars().collect();
+    chars.pop();
+    chars.into_iter().collect()
+  } else {
+    format!("{current}{key}")
+  };
+  let script = format!(
         "(function(){{ var el = document.getElementById({id}); if (el === null) throw {missing}; el.dispatchEvent(\"keydown\"); el.value = {value}; }})();",
         id = js_string_literal(focused_id),
         missing = js_string_literal(&format!("no element with id \"{focused_id}\"")),
         value = js_string_literal(&updated),
     );
-    ctx.eval(&script, "<pane key>")
-        .map(|_| ())
-        .map_err(|_| format!("no element with id \"{focused_id}\" (or its keydown handler threw)"))
+  ctx
+    .eval(&script, "<pane key>")
+    .map(|_| ())
+    .map_err(|_| format!("no element with id \"{focused_id}\" (or its keydown handler threw)"))
 }
 
 /// Real `Tab` (`reverse: false`) / `Shift+Tab` (`reverse: true`) focus
@@ -270,41 +274,40 @@ pub(crate) fn type_key(ctx: &Context, focused_id: &str, key: &str) -> Result<(),
 /// lacks an `id` - both report as "nothing to tab to" to the caller, same
 /// as `hit_test_at`'s "nothing there" convention for `CLICK_AT`.
 pub(crate) fn tab_focus(page: &mut Page, reverse: bool) -> Result<Option<String>, String> {
-    let (target_id, previously_focused_id) = {
-        let dom_ref = page.ctx.dom().ok_or("no DOM available")?;
-        let order = dom_ref.tab_order();
-        if order.is_empty() {
-            return Ok(None);
-        }
-        let current_index = dom_ref
-            .active_element()
-            .and_then(|id| order.iter().position(|&n| n == id));
-        let start = match (current_index, reverse) {
-            (Some(i), false) => (i + 1) % order.len(),
-            (Some(i), true) => (i + order.len() - 1) % order.len(),
-            (None, false) => 0,
-            (None, true) => order.len() - 1,
-        };
-        let step: i64 = if reverse { -1 } else { 1 };
-        let target_id = (0..order.len()).find_map(|offset| {
-            let index =
-                (start as i64 + step * offset as i64).rem_euclid(order.len() as i64) as usize;
-            dom_ref.attribute(order[index], "id").map(str::to_string)
-        });
-        let previously_focused_id = dom_ref
-            .active_element()
-            .and_then(|prev| dom_ref.attribute(prev, "id").map(str::to_string));
-        (target_id, previously_focused_id)
-    };
-
-    let Some(target_id) = target_id else {
-        return Ok(None);
-    };
-    if let Some(prev_id) = previously_focused_id {
-        if prev_id != target_id {
-            let _ = blur_element(&page.ctx, &prev_id);
-        }
+  let (target_id, previously_focused_id) = {
+    let dom_ref = page.ctx.dom().ok_or("no DOM available")?;
+    let order = dom_ref.tab_order();
+    if order.is_empty() {
+      return Ok(None);
     }
-    focus_element(&page.ctx, &target_id)?;
-    Ok(Some(target_id))
+    let current_index = dom_ref
+      .active_element()
+      .and_then(|id| order.iter().position(|&n| n == id));
+    let start = match (current_index, reverse) {
+      (Some(i), false) => (i + 1) % order.len(),
+      (Some(i), true) => (i + order.len() - 1) % order.len(),
+      (None, false) => 0,
+      (None, true) => order.len() - 1,
+    };
+    let step: i64 = if reverse { -1 } else { 1 };
+    let target_id = (0..order.len()).find_map(|offset| {
+      let index = (start as i64 + step * offset as i64).rem_euclid(order.len() as i64) as usize;
+      dom_ref.attribute(order[index], "id").map(str::to_string)
+    });
+    let previously_focused_id = dom_ref
+      .active_element()
+      .and_then(|prev| dom_ref.attribute(prev, "id").map(str::to_string));
+    (target_id, previously_focused_id)
+  };
+
+  let Some(target_id) = target_id else {
+    return Ok(None);
+  };
+  if let Some(prev_id) = previously_focused_id {
+    if prev_id != target_id {
+      let _ = blur_element(&page.ctx, &prev_id);
+    }
+  }
+  focus_element(&page.ctx, &target_id)?;
+  Ok(Some(target_id))
 }

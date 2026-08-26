@@ -12,56 +12,52 @@
 //! real, honest limitation for a caller that hasn't been updated yet, not
 //! fake behavior.
 use crate::parser::{
-    Combinator, ComplexSelector, Declaration, PseudoClass, SimpleSelector, Stylesheet,
+  Combinator, ComplexSelector, Declaration, PseudoClass, SimpleSelector, Stylesheet,
 };
 
 #[derive(Debug, Clone, Default)]
 pub struct ElementSnapshot {
-    pub tag: String,
-    pub id: Option<String>,
-    pub classes: Vec<String>,
-    pub attributes: Vec<(String, String)>,
-    /// Element siblings under the same parent that come *before* this one,
-    /// in document order (the immediately preceding sibling is last) —
-    /// used by `+`/`~` and `:nth-child`/`:first-child`. Flat, not
-    /// recursively nested: matching a chain like `a + b + c` only ever
-    /// needs to walk *this* element's own preceding-sibling list, since
-    /// every compound in such a chain refers to a sibling under the same
-    /// parent.
-    pub preceding_siblings: Vec<ElementSnapshot>,
-    /// Whether at least one element sibling follows this one under the
-    /// same parent — used by `:last-child`.
-    pub has_following_sibling: bool,
+  pub tag: String,
+  pub id: Option<String>,
+  pub classes: Vec<String>,
+  pub attributes: Vec<(String, String)>,
+  /// Element siblings under the same parent that come *before* this one,
+  /// in document order (the immediately preceding sibling is last) —
+  /// used by `+`/`~` and `:nth-child`/`:first-child`. Flat, not
+  /// recursively nested: matching a chain like `a + b + c` only ever
+  /// needs to walk *this* element's own preceding-sibling list, since
+  /// every compound in such a chain refers to a sibling under the same
+  /// parent.
+  pub preceding_siblings: Vec<ElementSnapshot>,
+  /// Whether at least one element sibling follows this one under the
+  /// same parent — used by `:last-child`.
+  pub has_following_sibling: bool,
 }
 
 fn compound_matches(compound: &crate::parser::CompoundSelector, el: &ElementSnapshot) -> bool {
-    compound.0.iter().all(|simple| match simple {
-        SimpleSelector::Universal => true,
-        SimpleSelector::Type(name) => el.tag == *name,
-        SimpleSelector::Id(id) => el.id.as_deref() == Some(id.as_str()),
-        SimpleSelector::Class(class) => el.classes.iter().any(|c| c == class),
-        SimpleSelector::Attribute(attr) => match &attr.match_ {
-            crate::parser::AttributeMatch::Has => {
-                el.attributes.iter().any(|(k, _)| *k == attr.name)
-            }
-            crate::parser::AttributeMatch::Equals(v) => el
-                .attributes
-                .iter()
-                .any(|(k, val)| *k == attr.name && val == v),
-        },
-        SimpleSelector::PseudoClass(pseudo) => match pseudo {
-            PseudoClass::FirstChild => el.preceding_siblings.is_empty(),
-            PseudoClass::LastChild => !el.has_following_sibling,
-            PseudoClass::NthChild(formula) => {
-                formula.matches(el.preceding_siblings.len() as i64 + 1)
-            }
-            // No real hover/focus state is tracked anywhere in this engine
-            // yet (no input-event plumbing reaches selector matching) -
-            // always false rather than faking a match. See the parser
-            // module doc.
-            PseudoClass::Hover | PseudoClass::Focus => false,
-        },
-    })
+  compound.0.iter().all(|simple| match simple {
+    SimpleSelector::Universal => true,
+    SimpleSelector::Type(name) => el.tag == *name,
+    SimpleSelector::Id(id) => el.id.as_deref() == Some(id.as_str()),
+    SimpleSelector::Class(class) => el.classes.iter().any(|c| c == class),
+    SimpleSelector::Attribute(attr) => match &attr.match_ {
+      crate::parser::AttributeMatch::Has => el.attributes.iter().any(|(k, _)| *k == attr.name),
+      crate::parser::AttributeMatch::Equals(v) => el
+        .attributes
+        .iter()
+        .any(|(k, val)| *k == attr.name && val == v),
+    },
+    SimpleSelector::PseudoClass(pseudo) => match pseudo {
+      PseudoClass::FirstChild => el.preceding_siblings.is_empty(),
+      PseudoClass::LastChild => !el.has_following_sibling,
+      PseudoClass::NthChild(formula) => formula.matches(el.preceding_siblings.len() as i64 + 1),
+      // No real hover/focus state is tracked anywhere in this engine
+      // yet (no input-event plumbing reaches selector matching) -
+      // always false rather than faking a match. See the parser
+      // module doc.
+      PseudoClass::Hover | PseudoClass::Focus => false,
+    },
+  })
 }
 
 /// `chain` is the ancestor path from document root to the target element,
@@ -79,76 +75,76 @@ fn compound_matches(compound: &crate::parser::CompoundSelector, el: &ElementSnap
 /// keep consuming from what's left of that *same* list, not `b`'s own
 /// - likely empty - `preceding_siblings`).
 pub fn selector_matches(selector: &ComplexSelector, chain: &[ElementSnapshot]) -> bool {
-    let compounds = &selector.0;
-    let combinators = &selector.1;
-    if compounds.is_empty() {
-        return false;
-    }
-    let Some((target_el, ancestor_els)) = chain.split_last() else {
-        return false;
-    };
-    if !compound_matches(&compounds[compounds.len() - 1], target_el) {
-        return false;
-    }
+  let compounds = &selector.0;
+  let combinators = &selector.1;
+  if compounds.is_empty() {
+    return false;
+  }
+  let Some((target_el, ancestor_els)) = chain.split_last() else {
+    return false;
+  };
+  if !compound_matches(&compounds[compounds.len() - 1], target_el) {
+    return false;
+  }
 
-    let mut remaining_ancestors = ancestor_els;
-    let mut remaining_siblings = target_el.preceding_siblings.as_slice();
+  let mut remaining_ancestors = ancestor_els;
+  let mut remaining_siblings = target_el.preceding_siblings.as_slice();
 
-    for i in (0..compounds.len() - 1).rev() {
-        let compound = &compounds[i];
-        match combinators[i] {
-            Combinator::Descendant => loop {
-                let Some((candidate, rest)) = remaining_ancestors.split_last() else {
-                    return false; // ran out of ancestors before matching every compound
-                };
-                remaining_ancestors = rest;
-                if compound_matches(compound, candidate) {
-                    remaining_siblings = candidate.preceding_siblings.as_slice();
-                    break;
-                }
-            },
-            Combinator::Child => {
-                let Some((candidate, rest)) = remaining_ancestors.split_last() else {
-                    return false;
-                };
-                if !compound_matches(compound, candidate) {
-                    return false;
-                }
-                remaining_ancestors = rest;
-                remaining_siblings = candidate.preceding_siblings.as_slice();
-            }
-            Combinator::NextSibling => {
-                let Some((candidate, rest)) = remaining_siblings.split_last() else {
-                    return false;
-                };
-                if !compound_matches(compound, candidate) {
-                    return false;
-                }
-                remaining_siblings = rest;
-            }
-            Combinator::SubsequentSibling => {
-                let Some(idx) = remaining_siblings
-                    .iter()
-                    .enumerate()
-                    .rev()
-                    .find(|(_, c)| compound_matches(compound, c))
-                    .map(|(idx, _)| idx)
-                else {
-                    return false;
-                };
-                remaining_siblings = &remaining_siblings[..idx];
-            }
+  for i in (0..compounds.len() - 1).rev() {
+    let compound = &compounds[i];
+    match combinators[i] {
+      Combinator::Descendant => loop {
+        let Some((candidate, rest)) = remaining_ancestors.split_last() else {
+          return false; // ran out of ancestors before matching every compound
+        };
+        remaining_ancestors = rest;
+        if compound_matches(compound, candidate) {
+          remaining_siblings = candidate.preceding_siblings.as_slice();
+          break;
         }
+      },
+      Combinator::Child => {
+        let Some((candidate, rest)) = remaining_ancestors.split_last() else {
+          return false;
+        };
+        if !compound_matches(compound, candidate) {
+          return false;
+        }
+        remaining_ancestors = rest;
+        remaining_siblings = candidate.preceding_siblings.as_slice();
+      }
+      Combinator::NextSibling => {
+        let Some((candidate, rest)) = remaining_siblings.split_last() else {
+          return false;
+        };
+        if !compound_matches(compound, candidate) {
+          return false;
+        }
+        remaining_siblings = rest;
+      }
+      Combinator::SubsequentSibling => {
+        let Some(idx) = remaining_siblings
+          .iter()
+          .enumerate()
+          .rev()
+          .find(|(_, c)| compound_matches(compound, c))
+          .map(|(idx, _)| idx)
+        else {
+          return false;
+        };
+        remaining_siblings = &remaining_siblings[..idx];
+      }
     }
-    true
+  }
+  true
 }
 
 /// A rule's declarations paired with the specificity/order it should be
 /// applied at, for a specific matched selector within that rule.
 pub struct MatchedDeclarations<'a> {
-    pub specificity: (u32, u32, u32),
-    pub source_order: usize,
-    pub declarations: &'a [Declaration],
+  pub specificity: (u32, u32, u32),
+  pub source_order: usize,
+  pub declarations: &'a [Declaration],
 }
 
 /// Every declaration block whose selector matches `chain` *and* whose
@@ -159,32 +155,32 @@ pub struct MatchedDeclarations<'a> {
 /// block that doesn't match `viewport_width` is skipped before selector
 /// matching even runs, same as a real engine's media-query gate.
 pub fn matching_declarations<'a>(
-    sheet: &'a Stylesheet,
-    chain: &[ElementSnapshot],
-    viewport_width: f64,
+  sheet: &'a Stylesheet,
+  chain: &[ElementSnapshot],
+  viewport_width: f64,
 ) -> Vec<MatchedDeclarations<'a>> {
-    let mut matches = Vec::new();
-    for (order, rule) in sheet.rules.iter().enumerate() {
-        if let Some(media) = &rule.media {
-            if !media.matches(viewport_width) {
-                continue;
-            }
-        }
-        let best = rule
-            .selectors
-            .0
-            .iter()
-            .filter(|s| selector_matches(s, chain))
-            .map(|s| s.specificity())
-            .max();
-        if let Some(specificity) = best {
-            matches.push(MatchedDeclarations {
-                specificity,
-                source_order: order,
-                declarations: &rule.declarations,
-            });
-        }
+  let mut matches = Vec::new();
+  for (order, rule) in sheet.rules.iter().enumerate() {
+    if let Some(media) = &rule.media {
+      if !media.matches(viewport_width) {
+        continue;
+      }
     }
-    matches.sort_by_key(|m| (m.specificity, m.source_order));
-    matches
+    let best = rule
+      .selectors
+      .0
+      .iter()
+      .filter(|s| selector_matches(s, chain))
+      .map(|s| s.specificity())
+      .max();
+    if let Some(specificity) = best {
+      matches.push(MatchedDeclarations {
+        specificity,
+        source_order: order,
+        declarations: &rule.declarations,
+      });
+    }
+  }
+  matches.sort_by_key(|m| (m.specificity, m.source_order));
+  matches
 }

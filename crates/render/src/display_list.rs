@@ -35,19 +35,19 @@ use layout_engine::{BorderStyle, Color, LayoutBox, Overflow, PositionedGlyph};
 /// Scales `color`'s alpha channel by `opacity` (`1.0` = unchanged) -
 /// shared by every paint primitive's opacity handling in this module.
 fn scale_alpha(color: Color, opacity: f64) -> Color {
-    Color {
-        a: (color.a as f64 * opacity).round().clamp(0.0, 255.0) as u8,
-        ..color
-    }
+  Color {
+    a: (color.a as f64 * opacity).round().clamp(0.0, 255.0) as u8,
+    ..color
+  }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Rect {
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
-    pub height: f32,
-    pub color: Color,
+  pub x: f32,
+  pub y: f32,
+  pub width: f32,
+  pub height: f32,
+  pub color: Color,
 }
 
 /// An axis-aligned clip region in absolute page coordinates - the
@@ -56,25 +56,25 @@ pub struct Rect {
 /// (which also carries a `color`) since a clip region is pure geometry.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ClipRect {
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
-    pub height: f32,
+  pub x: f32,
+  pub y: f32,
+  pub width: f32,
+  pub height: f32,
 }
 
 impl ClipRect {
-    fn intersect(&self, other: &ClipRect) -> ClipRect {
-        let x0 = self.x.max(other.x);
-        let y0 = self.y.max(other.y);
-        let x1 = (self.x + self.width).min(other.x + other.width);
-        let y1 = (self.y + self.height).min(other.y + other.height);
-        ClipRect {
-            x: x0,
-            y: y0,
-            width: (x1 - x0).max(0.0),
-            height: (y1 - y0).max(0.0),
-        }
+  fn intersect(&self, other: &ClipRect) -> ClipRect {
+    let x0 = self.x.max(other.x);
+    let y0 = self.y.max(other.y);
+    let x1 = (self.x + self.width).min(other.x + other.width);
+    let y1 = (self.y + self.height).min(other.y + other.height);
+    ClipRect {
+      x: x0,
+      y: y0,
+      width: (x1 - x0).max(0.0),
+      height: (y1 - y0).max(0.0),
     }
+  }
 }
 
 /// Intersects `rect` against `clip` (`None` = unclipped, passes through
@@ -82,22 +82,22 @@ impl ClipRect {
 /// the rect entirely, same as an already-transparent box contributing
 /// nothing.
 fn clip_rect(rect: Rect, clip: Option<ClipRect>) -> Option<Rect> {
-    let Some(clip) = clip else { return Some(rect) };
-    let x0 = rect.x.max(clip.x);
-    let y0 = rect.y.max(clip.y);
-    let x1 = (rect.x + rect.width).min(clip.x + clip.width);
-    let y1 = (rect.y + rect.height).min(clip.y + clip.height);
-    if x1 <= x0 || y1 <= y0 {
-        None
-    } else {
-        Some(Rect {
-            x: x0,
-            y: y0,
-            width: x1 - x0,
-            height: y1 - y0,
-            color: rect.color,
-        })
-    }
+  let Some(clip) = clip else { return Some(rect) };
+  let x0 = rect.x.max(clip.x);
+  let y0 = rect.y.max(clip.y);
+  let x1 = (rect.x + rect.width).min(clip.x + clip.width);
+  let y1 = (rect.y + rect.height).min(clip.y + clip.height);
+  if x1 <= x0 || y1 <= y0 {
+    None
+  } else {
+    Some(Rect {
+      x: x0,
+      y: y0,
+      width: x1 - x0,
+      height: y1 - y0,
+      color: rect.color,
+    })
+  }
 }
 
 /// `box_`'s own border box as a [`ClipRect`], intersected with whatever
@@ -105,16 +105,16 @@ fn clip_rect(rect: Rect, clip: Option<ClipRect>) -> Option<Rect> {
 /// only if `box_` itself doesn't clip either (checked by the caller
 /// before calling this; this function always produces a real bound).
 fn tighten_clip(box_: &LayoutBox, clip: Option<ClipRect>) -> ClipRect {
-    let own = ClipRect {
-        x: box_.dimensions.x as f32,
-        y: box_.dimensions.y as f32,
-        width: box_.dimensions.width as f32,
-        height: box_.dimensions.height as f32,
-    };
-    match clip {
-        Some(c) => c.intersect(&own),
-        None => own,
-    }
+  let own = ClipRect {
+    x: box_.dimensions.x as f32,
+    y: box_.dimensions.y as f32,
+    width: box_.dimensions.width as f32,
+    height: box_.dimensions.height as f32,
+  };
+  match clip {
+    Some(c) => c.intersect(&own),
+    None => own,
+  }
 }
 
 /// Walks `box_` in paint order (parent before children, so later-painted
@@ -123,41 +123,41 @@ fn tighten_clip(box_: &LayoutBox, clip: Option<ClipRect>) -> ClipRect {
 /// Transparent boxes are skipped rather than emitted with a zero-alpha
 /// rect — nothing downstream needs to know they exist.
 pub fn build_display_list(box_: &LayoutBox) -> Vec<Rect> {
-    let mut list = Vec::new();
-    collect(box_, &mut list, None, 1.0);
-    list
+  let mut list = Vec::new();
+  collect(box_, &mut list, None, 1.0);
+  list
 }
 
 fn collect(box_: &LayoutBox, out: &mut Vec<Rect>, clip: Option<ClipRect>, parent_opacity: f64) {
-    let opacity = parent_opacity * box_.style.opacity;
-    if let Some(shadow) = box_.style.box_shadow {
-        if shadow.color.a > 0 {
-            push_box_shadow_rect(box_, shadow, out, clip, opacity);
-        }
+  let opacity = parent_opacity * box_.style.opacity;
+  if let Some(shadow) = box_.style.box_shadow {
+    if shadow.color.a > 0 {
+      push_box_shadow_rect(box_, shadow, out, clip, opacity);
     }
-    if box_.style.background_color.a > 0 {
-        let rect = Rect {
-            x: box_.dimensions.x as f32,
-            y: box_.dimensions.y as f32,
-            width: box_.dimensions.width as f32,
-            height: box_.dimensions.height as f32,
-            color: scale_alpha(box_.style.background_color, opacity),
-        };
-        if let Some(clipped) = clip_rect(rect, clip) {
-            out.push(clipped);
-        }
-    }
-    if box_.style.border_style != BorderStyle::None && box_.style.border_color.a > 0 {
-        push_border_rects(box_, out, clip, opacity);
-    }
-    let child_clip = if box_.style.overflow == Overflow::Hidden {
-        Some(tighten_clip(box_, clip))
-    } else {
-        clip
+  }
+  if box_.style.background_color.a > 0 {
+    let rect = Rect {
+      x: box_.dimensions.x as f32,
+      y: box_.dimensions.y as f32,
+      width: box_.dimensions.width as f32,
+      height: box_.dimensions.height as f32,
+      color: scale_alpha(box_.style.background_color, opacity),
     };
-    for child in &box_.children {
-        collect(child, out, child_clip, opacity);
+    if let Some(clipped) = clip_rect(rect, clip) {
+      out.push(clipped);
     }
+  }
+  if box_.style.border_style != BorderStyle::None && box_.style.border_color.a > 0 {
+    push_border_rects(box_, out, clip, opacity);
+  }
+  let child_clip = if box_.style.overflow == Overflow::Hidden {
+    Some(tighten_clip(box_, clip))
+  } else {
+    clip
+  };
+  for child in &box_.children {
+    collect(child, out, child_clip, opacity);
+  }
 }
 
 /// Real, but flat and blur-less: paints one solid rect behind `box_`'s
@@ -169,23 +169,23 @@ fn collect(box_: &LayoutBox, out: &mut Vec<Rect>, clip: Option<ClipRect>, parent
 /// "later rects paint over earlier ones" convention - no explicit
 /// z-ordering needed.
 fn push_box_shadow_rect(
-    box_: &LayoutBox,
-    shadow: layout_engine::BoxShadow,
-    out: &mut Vec<Rect>,
-    clip: Option<ClipRect>,
-    opacity: f64,
+  box_: &LayoutBox,
+  shadow: layout_engine::BoxShadow,
+  out: &mut Vec<Rect>,
+  clip: Option<ClipRect>,
+  opacity: f64,
 ) {
-    let d = box_.dimensions;
-    let rect = Rect {
-        x: (d.x + shadow.offset_x - shadow.spread) as f32,
-        y: (d.y + shadow.offset_y - shadow.spread) as f32,
-        width: (d.width + shadow.spread * 2.0).max(0.0) as f32,
-        height: (d.height + shadow.spread * 2.0).max(0.0) as f32,
-        color: scale_alpha(shadow.color, opacity),
-    };
-    if let Some(clipped) = clip_rect(rect, clip) {
-        out.push(clipped);
-    }
+  let d = box_.dimensions;
+  let rect = Rect {
+    x: (d.x + shadow.offset_x - shadow.spread) as f32,
+    y: (d.y + shadow.offset_y - shadow.spread) as f32,
+    width: (d.width + shadow.spread * 2.0).max(0.0) as f32,
+    height: (d.height + shadow.spread * 2.0).max(0.0) as f32,
+    color: scale_alpha(shadow.color, opacity),
+  };
+  if let Some(clipped) = clip_rect(rect, clip) {
+    out.push(clipped);
+  }
 }
 
 /// Real, but flat: paints `box_`'s border as up to 4 solid-color strips
@@ -201,50 +201,50 @@ fn push_box_shadow_rect(
 /// every side shares one solid `border_color`, so double-painting the
 /// same pixel with the same color is a no-op.
 fn push_border_rects(box_: &LayoutBox, out: &mut Vec<Rect>, clip: Option<ClipRect>, opacity: f64) {
-    let d = box_.dimensions;
-    let b = box_.border;
-    let color = scale_alpha(box_.style.border_color, opacity);
-    let mut push = |rect: Rect| {
-        if let Some(clipped) = clip_rect(rect, clip) {
-            out.push(clipped);
-        }
-    };
-    if b.top > 0.0 {
-        push(Rect {
-            x: d.x as f32,
-            y: d.y as f32,
-            width: d.width as f32,
-            height: b.top as f32,
-            color,
-        });
+  let d = box_.dimensions;
+  let b = box_.border;
+  let color = scale_alpha(box_.style.border_color, opacity);
+  let mut push = |rect: Rect| {
+    if let Some(clipped) = clip_rect(rect, clip) {
+      out.push(clipped);
     }
-    if b.bottom > 0.0 {
-        push(Rect {
-            x: d.x as f32,
-            y: (d.y + d.height - b.bottom) as f32,
-            width: d.width as f32,
-            height: b.bottom as f32,
-            color,
-        });
-    }
-    if b.left > 0.0 {
-        push(Rect {
-            x: d.x as f32,
-            y: d.y as f32,
-            width: b.left as f32,
-            height: d.height as f32,
-            color,
-        });
-    }
-    if b.right > 0.0 {
-        push(Rect {
-            x: (d.x + d.width - b.right) as f32,
-            y: d.y as f32,
-            width: b.right as f32,
-            height: d.height as f32,
-            color,
-        });
-    }
+  };
+  if b.top > 0.0 {
+    push(Rect {
+      x: d.x as f32,
+      y: d.y as f32,
+      width: d.width as f32,
+      height: b.top as f32,
+      color,
+    });
+  }
+  if b.bottom > 0.0 {
+    push(Rect {
+      x: d.x as f32,
+      y: (d.y + d.height - b.bottom) as f32,
+      width: d.width as f32,
+      height: b.bottom as f32,
+      color,
+    });
+  }
+  if b.left > 0.0 {
+    push(Rect {
+      x: d.x as f32,
+      y: d.y as f32,
+      width: b.left as f32,
+      height: d.height as f32,
+      color,
+    });
+  }
+  if b.right > 0.0 {
+    push(Rect {
+      x: (d.x + d.width - b.right) as f32,
+      y: d.y as f32,
+      width: b.right as f32,
+      height: d.height as f32,
+      color,
+    });
+  }
 }
 
 /// A shaped glyph plus the clip region in effect where it's painted
@@ -260,9 +260,9 @@ fn push_border_rects(box_: &LayoutBox, out: &mut Vec<Rect>, clip: Option<ClipRec
 /// since it already iterates pixel-by-pixel.
 #[derive(Debug, Clone, Copy)]
 pub struct ClippedGlyph {
-    pub glyph: PositionedGlyph,
-    pub clip: Option<ClipRect>,
-    pub opacity: f64,
+  pub glyph: PositionedGlyph,
+  pub clip: Option<ClipRect>,
+  pub opacity: f64,
 }
 
 /// Same paint-order walk as [`build_display_list`], but collects glyphs
@@ -271,37 +271,37 @@ pub struct ClippedGlyph {
 /// them to absolute page coordinates by adding the box's `Dimensions`, so
 /// callers don't need to track box offsets themselves.
 pub fn build_glyph_list(box_: &LayoutBox) -> Vec<ClippedGlyph> {
-    let mut list = Vec::new();
-    collect_glyphs(box_, &mut list, None, 1.0);
-    list
+  let mut list = Vec::new();
+  collect_glyphs(box_, &mut list, None, 1.0);
+  list
 }
 
 fn collect_glyphs(
-    box_: &LayoutBox,
-    out: &mut Vec<ClippedGlyph>,
-    clip: Option<ClipRect>,
-    parent_opacity: f64,
+  box_: &LayoutBox,
+  out: &mut Vec<ClippedGlyph>,
+  clip: Option<ClipRect>,
+  parent_opacity: f64,
 ) {
-    let opacity = parent_opacity * box_.style.opacity;
-    let ox = box_.dimensions.x as i32;
-    let oy = box_.dimensions.y as i32;
-    out.extend(box_.glyphs.iter().map(|g| ClippedGlyph {
-        glyph: PositionedGlyph {
-            x: g.x + ox,
-            y: g.y + oy,
-            ..*g
-        },
-        clip,
-        opacity,
-    }));
-    let child_clip = if box_.style.overflow == Overflow::Hidden {
-        Some(tighten_clip(box_, clip))
-    } else {
-        clip
-    };
-    for child in &box_.children {
-        collect_glyphs(child, out, child_clip, opacity);
-    }
+  let opacity = parent_opacity * box_.style.opacity;
+  let ox = box_.dimensions.x as i32;
+  let oy = box_.dimensions.y as i32;
+  out.extend(box_.glyphs.iter().map(|g| ClippedGlyph {
+    glyph: PositionedGlyph {
+      x: g.x + ox,
+      y: g.y + oy,
+      ..*g
+    },
+    clip,
+    opacity,
+  }));
+  let child_clip = if box_.style.overflow == Overflow::Hidden {
+    Some(tighten_clip(box_, clip))
+  } else {
+    clip
+  };
+  for child in &box_.children {
+    collect_glyphs(child, out, child_clip, opacity);
+  }
 }
 
 /// One decoded `<img>`, positioned at its box's painted rect - the
@@ -319,13 +319,13 @@ fn collect_glyphs(
 /// `composite_images` multiplies it into each sampled pixel's alpha.
 #[derive(Clone)]
 pub struct ImageQuad {
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
-    pub height: f32,
-    pub image: std::rc::Rc<image_decode::DecodedImage>,
-    pub clip: Option<ClipRect>,
-    pub opacity: f64,
+  pub x: f32,
+  pub y: f32,
+  pub width: f32,
+  pub height: f32,
+  pub image: std::rc::Rc<image_decode::DecodedImage>,
+  pub clip: Option<ClipRect>,
+  pub opacity: f64,
 }
 
 /// Same paint-order walk as [`build_display_list`]/[`build_glyph_list`],
@@ -335,35 +335,35 @@ pub struct ImageQuad {
 /// nothing, same as a box with a transparent background contributes no
 /// [`Rect`].
 pub fn build_image_list(box_: &LayoutBox) -> Vec<ImageQuad> {
-    let mut list = Vec::new();
-    collect_images(box_, &mut list, None, 1.0);
-    list
+  let mut list = Vec::new();
+  collect_images(box_, &mut list, None, 1.0);
+  list
 }
 
 fn collect_images(
-    box_: &LayoutBox,
-    out: &mut Vec<ImageQuad>,
-    clip: Option<ClipRect>,
-    parent_opacity: f64,
+  box_: &LayoutBox,
+  out: &mut Vec<ImageQuad>,
+  clip: Option<ClipRect>,
+  parent_opacity: f64,
 ) {
-    let opacity = parent_opacity * box_.style.opacity;
-    if let Some(image) = &box_.image {
-        out.push(ImageQuad {
-            x: box_.dimensions.x as f32,
-            y: box_.dimensions.y as f32,
-            width: box_.dimensions.width as f32,
-            height: box_.dimensions.height as f32,
-            image: image.clone(),
-            clip,
-            opacity,
-        });
-    }
-    let child_clip = if box_.style.overflow == Overflow::Hidden {
-        Some(tighten_clip(box_, clip))
-    } else {
-        clip
-    };
-    for child in &box_.children {
-        collect_images(child, out, child_clip, opacity);
-    }
+  let opacity = parent_opacity * box_.style.opacity;
+  if let Some(image) = &box_.image {
+    out.push(ImageQuad {
+      x: box_.dimensions.x as f32,
+      y: box_.dimensions.y as f32,
+      width: box_.dimensions.width as f32,
+      height: box_.dimensions.height as f32,
+      image: image.clone(),
+      clip,
+      opacity,
+    });
+  }
+  let child_clip = if box_.style.overflow == Overflow::Hidden {
+    Some(tighten_clip(box_, clip))
+  } else {
+    clip
+  };
+  for child in &box_.children {
+    collect_images(child, out, child_clip, opacity);
+  }
 }

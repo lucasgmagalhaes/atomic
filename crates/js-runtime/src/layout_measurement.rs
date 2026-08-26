@@ -25,136 +25,136 @@ use std::ffi::CString;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Rect {
-    pub x: f64,
-    pub y: f64,
-    pub width: f64,
-    pub height: f64,
+  pub x: f64,
+  pub y: f64,
+  pub width: f64,
+  pub height: f64,
 }
 
 unsafe fn rect_for(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> Rect {
-    let Some(id) = crate::dom_bindings::node_id(ctx, this_val) else {
-        return Rect::default();
-    };
-    let state = crate::host_state::get(ctx);
-    if state.is_null() {
-        return Rect::default();
-    }
-    (*state).layout_rects.get(&id).copied().unwrap_or_default()
+  let Some(id) = crate::dom_bindings::node_id(ctx, this_val) else {
+    return Rect::default();
+  };
+  let state = crate::host_state::get(ctx);
+  if state.is_null() {
+    return Rect::default();
+  }
+  (*state).layout_rects.get(&id).copied().unwrap_or_default()
 }
 
 unsafe fn new_object(ctx: *mut sys::JSContext) -> sys::JSValue {
-    sys::JS_NewObject(ctx)
+  sys::JS_NewObject(ctx)
 }
 unsafe fn set_number(ctx: *mut sys::JSContext, obj: sys::JSValue, name: &str, value: f64) {
-    let cname = CString::new(name).unwrap();
-    sys::JS_SetPropertyStr(ctx, obj, cname.as_ptr(), sys::js_float64(value));
+  let cname = CString::new(name).unwrap();
+  sys::JS_SetPropertyStr(ctx, obj, cname.as_ptr(), sys::js_float64(value));
 }
 
 unsafe extern "C" fn get_bounding_client_rect(
-    ctx: *mut sys::JSContext,
-    this_val: sys::JSValue,
-    _argc: std::os::raw::c_int,
-    _argv: *mut sys::JSValue,
+  ctx: *mut sys::JSContext,
+  this_val: sys::JSValue,
+  _argc: std::os::raw::c_int,
+  _argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-    let rect = rect_for(ctx, this_val);
-    let object = new_object(ctx);
-    set_number(ctx, object, "x", rect.x);
-    set_number(ctx, object, "y", rect.y);
-    set_number(ctx, object, "width", rect.width);
-    set_number(ctx, object, "height", rect.height);
-    set_number(ctx, object, "top", rect.y);
-    set_number(ctx, object, "left", rect.x);
-    set_number(ctx, object, "right", rect.x + rect.width);
-    set_number(ctx, object, "bottom", rect.y + rect.height);
-    object
+  let rect = rect_for(ctx, this_val);
+  let object = new_object(ctx);
+  set_number(ctx, object, "x", rect.x);
+  set_number(ctx, object, "y", rect.y);
+  set_number(ctx, object, "width", rect.width);
+  set_number(ctx, object, "height", rect.height);
+  set_number(ctx, object, "top", rect.y);
+  set_number(ctx, object, "left", rect.x);
+  set_number(ctx, object, "right", rect.x + rect.width);
+  set_number(ctx, object, "bottom", rect.y + rect.height);
+  object
 }
 
 type Getter = unsafe extern "C" fn(*mut sys::JSContext, sys::JSValue) -> sys::JSValue;
 
 unsafe extern "C" fn offset_width_get(
-    ctx: *mut sys::JSContext,
-    this_val: sys::JSValue,
+  ctx: *mut sys::JSContext,
+  this_val: sys::JSValue,
 ) -> sys::JSValue {
-    sys::js_float64(rect_for(ctx, this_val).width)
+  sys::js_float64(rect_for(ctx, this_val).width)
 }
 unsafe extern "C" fn offset_height_get(
-    ctx: *mut sys::JSContext,
-    this_val: sys::JSValue,
+  ctx: *mut sys::JSContext,
+  this_val: sys::JSValue,
 ) -> sys::JSValue {
-    sys::js_float64(rect_for(ctx, this_val).height)
+  sys::js_float64(rect_for(ctx, this_val).height)
 }
 unsafe extern "C" fn offset_top_get(
-    ctx: *mut sys::JSContext,
-    this_val: sys::JSValue,
+  ctx: *mut sys::JSContext,
+  this_val: sys::JSValue,
 ) -> sys::JSValue {
-    sys::js_float64(rect_for(ctx, this_val).y)
+  sys::js_float64(rect_for(ctx, this_val).y)
 }
 unsafe extern "C" fn offset_left_get(
-    ctx: *mut sys::JSContext,
-    this_val: sys::JSValue,
+  ctx: *mut sys::JSContext,
+  this_val: sys::JSValue,
 ) -> sys::JSValue {
-    sys::js_float64(rect_for(ctx, this_val).x)
+  sys::js_float64(rect_for(ctx, this_val).x)
 }
 unsafe extern "C" fn client_width_get(
-    ctx: *mut sys::JSContext,
-    this_val: sys::JSValue,
+  ctx: *mut sys::JSContext,
+  this_val: sys::JSValue,
 ) -> sys::JSValue {
-    sys::js_float64(rect_for(ctx, this_val).width)
+  sys::js_float64(rect_for(ctx, this_val).width)
 }
 unsafe extern "C" fn client_height_get(
-    ctx: *mut sys::JSContext,
-    this_val: sys::JSValue,
+  ctx: *mut sys::JSContext,
+  this_val: sys::JSValue,
 ) -> sys::JSValue {
-    sys::js_float64(rect_for(ctx, this_val).height)
+  sys::js_float64(rect_for(ctx, this_val).height)
 }
 
 unsafe fn define_readonly(
-    ctx: *mut sys::JSContext,
-    proto: sys::JSValue,
-    name: &str,
-    getter: Getter,
+  ctx: *mut sys::JSContext,
+  proto: sys::JSValue,
+  name: &str,
+  getter: Getter,
 ) {
-    let cname = CString::new(name).unwrap();
-    let f = sys::JS_NewCFunction2(
-        ctx,
-        std::mem::transmute::<Getter, sys::JSCFunction>(getter),
-        cname.as_ptr(),
-        0,
-        sys::JS_CFUNC_GETTER,
-        0,
-    );
-    let atom = sys::JS_NewAtom(ctx, cname.as_ptr());
-    sys::JS_DefinePropertyGetSet(
-        ctx,
-        proto,
-        atom,
-        f,
-        sys::js_undefined(),
-        sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE,
-    );
-    sys::JS_FreeAtom(ctx, atom);
+  let cname = CString::new(name).unwrap();
+  let f = sys::JS_NewCFunction2(
+    ctx,
+    std::mem::transmute::<Getter, sys::JSCFunction>(getter),
+    cname.as_ptr(),
+    0,
+    sys::JS_CFUNC_GETTER,
+    0,
+  );
+  let atom = sys::JS_NewAtom(ctx, cname.as_ptr());
+  sys::JS_DefinePropertyGetSet(
+    ctx,
+    proto,
+    atom,
+    f,
+    sys::js_undefined(),
+    sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE,
+  );
+  sys::JS_FreeAtom(ctx, atom);
 }
 
 pub(crate) unsafe fn define_layout_measurement(ctx: *mut sys::JSContext, proto: sys::JSValue) {
-    let name = CString::new("getBoundingClientRect").unwrap();
-    let f = sys::JS_NewCFunction2(
-        ctx,
-        get_bounding_client_rect,
-        name.as_ptr(),
-        0,
-        sys::JS_CFUNC_GENERIC,
-        0,
-    );
-    sys::JS_SetPropertyStr(ctx, proto, name.as_ptr(), f);
+  let name = CString::new("getBoundingClientRect").unwrap();
+  let f = sys::JS_NewCFunction2(
+    ctx,
+    get_bounding_client_rect,
+    name.as_ptr(),
+    0,
+    sys::JS_CFUNC_GENERIC,
+    0,
+  );
+  sys::JS_SetPropertyStr(ctx, proto, name.as_ptr(), f);
 
-    for (name, getter) in [
-        ("offsetWidth", offset_width_get as Getter),
-        ("offsetHeight", offset_height_get as Getter),
-        ("offsetTop", offset_top_get as Getter),
-        ("offsetLeft", offset_left_get as Getter),
-        ("clientWidth", client_width_get as Getter),
-        ("clientHeight", client_height_get as Getter),
-    ] {
-        define_readonly(ctx, proto, name, getter);
-    }
+  for (name, getter) in [
+    ("offsetWidth", offset_width_get as Getter),
+    ("offsetHeight", offset_height_get as Getter),
+    ("offsetTop", offset_top_get as Getter),
+    ("offsetLeft", offset_left_get as Getter),
+    ("clientWidth", client_width_get as Getter),
+    ("clientHeight", client_height_get as Getter),
+  ] {
+    define_readonly(ctx, proto, name, getter);
+  }
 }

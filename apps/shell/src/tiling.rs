@@ -13,10 +13,10 @@
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Rect {
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
-    pub height: f32,
+  pub x: f32,
+  pub y: f32,
+  pub width: f32,
+  pub height: f32,
 }
 
 /// Lays out `pane_count` equal-ish cells inside `container`:
@@ -27,40 +27,40 @@ pub struct Rect {
 /// - 6 -> a 2-row × 3-column grid
 /// - anything else -> `pane_count` equal columns in a single row
 pub fn grid_layout(container: Rect, pane_count: usize) -> Vec<Rect> {
-    match pane_count {
-        0 => Vec::new(),
-        1 => vec![container],
-        4 => rows_of_columns(container, 2, 2),
-        6 => rows_of_columns(container, 2, 3),
-        n => columns(container, n),
-    }
+  match pane_count {
+    0 => Vec::new(),
+    1 => vec![container],
+    4 => rows_of_columns(container, 2, 2),
+    6 => rows_of_columns(container, 2, 3),
+    n => columns(container, n),
+  }
 }
 
 fn columns(container: Rect, n: usize) -> Vec<Rect> {
-    let width = container.width / n as f32;
-    (0..n)
-        .map(|i| Rect {
-            x: container.x + width * i as f32,
-            y: container.y,
-            width,
-            height: container.height,
-        })
-        .collect()
+  let width = container.width / n as f32;
+  (0..n)
+    .map(|i| Rect {
+      x: container.x + width * i as f32,
+      y: container.y,
+      width,
+      height: container.height,
+    })
+    .collect()
 }
 
 fn rows_of_columns(container: Rect, rows: usize, cols: usize) -> Vec<Rect> {
-    let width = container.width / cols as f32;
-    let height = container.height / rows as f32;
-    let mut out = Vec::with_capacity(rows * cols);
-    for r in 0..rows {
-        for c in 0..cols {
-            out.push(Rect {
-                x: container.x + width * c as f32,
-                y: container.y + height * r as f32,
-                width,
-                height,
-            });
-        }
+  let width = container.width / cols as f32;
+  let height = container.height / rows as f32;
+  let mut out = Vec::with_capacity(rows * cols);
+  for r in 0..rows {
+    for c in 0..cols {
+      out.push(Rect {
+        x: container.x + width * c as f32,
+        y: container.y + height * r as f32,
+        width,
+        height,
+      });
     }
-    out
+  }
+  out
 }

@@ -28,7 +28,7 @@ use quickjs_sys as sys;
 /// the next budgeted `eval`, or none while no budgeted script is running
 /// (the handler then never interrupts).
 struct BudgetState {
-    deadline: Option<Instant>,
+  deadline: Option<Instant>,
 }
 
 thread_local! {
@@ -40,47 +40,47 @@ thread_local! {
 }
 
 unsafe extern "C" fn interrupt_handler(_rt: *mut sys::JSRuntime, opaque: *mut c_void) -> c_int {
-    let ctx = opaque as *mut sys::JSContext;
-    BUDGETS.with(
-        |reg| match reg.borrow().get(&(ctx as usize)).and_then(|s| s.deadline) {
-            Some(deadline) => (Instant::now() >= deadline) as c_int,
-            None => 0,
-        },
-    )
+  let ctx = opaque as *mut sys::JSContext;
+  BUDGETS.with(
+    |reg| match reg.borrow().get(&(ctx as usize)).and_then(|s| s.deadline) {
+      Some(deadline) => (Instant::now() >= deadline) as c_int,
+      None => 0,
+    },
+  )
 }
 
 pub(crate) unsafe fn install(ctx: *mut sys::JSContext) {
-    BUDGETS.with(|reg| {
-        let mut map = reg.borrow_mut();
-        let state = map
-            .entry(ctx as usize)
-            .or_insert(BudgetState { deadline: None });
-        // Re-installing must not resurrect a stale deadline.
-        state.deadline = None;
-    });
-    sys::JS_SetInterruptHandler(
-        sys::JS_GetRuntime(ctx),
-        Some(interrupt_handler),
-        ctx as *mut c_void,
-    );
+  BUDGETS.with(|reg| {
+    let mut map = reg.borrow_mut();
+    let state = map
+      .entry(ctx as usize)
+      .or_insert(BudgetState { deadline: None });
+    // Re-installing must not resurrect a stale deadline.
+    state.deadline = None;
+  });
+  sys::JS_SetInterruptHandler(
+    sys::JS_GetRuntime(ctx),
+    Some(interrupt_handler),
+    ctx as *mut c_void,
+  );
 }
 
 /// Stamps (or clears) the deadline the interrupt handler checks while one
 /// `eval` call runs.
 pub(crate) fn set_deadline(ctx: *mut sys::JSContext, deadline: Option<Instant>) {
-    BUDGETS.with(|reg| {
-        if let Some(state) = reg.borrow_mut().get_mut(&(ctx as usize)) {
-            state.deadline = deadline;
-        }
-    });
+  BUDGETS.with(|reg| {
+    if let Some(state) = reg.borrow_mut().get_mut(&(ctx as usize)) {
+      state.deadline = deadline;
+    }
+  });
 }
 
 /// Unregisters the handler and drops the state (context teardown) - a
 /// stale map entry would otherwise be read if a new context ever landed
 /// on the same address.
 pub(crate) unsafe fn cleanup(ctx: *mut sys::JSContext) {
-    let present = BUDGETS.with(|reg| reg.borrow_mut().remove(&(ctx as usize)).is_some());
-    if present {
-        sys::JS_SetInterruptHandler(sys::JS_GetRuntime(ctx), None, std::ptr::null_mut());
-    }
+  let present = BUDGETS.with(|reg| reg.borrow_mut().remove(&(ctx as usize)).is_some());
+  if present {
+    sys::JS_SetInterruptHandler(sys::JS_GetRuntime(ctx), None, std::ptr::null_mut());
+  }
 }

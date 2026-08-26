@@ -47,18 +47,18 @@ use quickjs_sys as sys;
 /// model); a context with no policies at all (`HostState.csp` empty)
 /// never blocks.
 pub(crate) unsafe fn is_request_blocked(ctx: *mut sys::JSContext, request_url: &str) -> bool {
-    let state = crate::host_state::get(ctx);
-    if state.is_null() {
-        return false;
-    }
-    if (*state).csp.is_empty() {
-        return false;
-    }
-    let page_origin = crate::cors::page_origin(ctx);
-    (*state)
-        .csp
-        .iter()
-        .any(|policy| !is_connect_allowed(policy, request_url, page_origin.as_deref()))
+  let state = crate::host_state::get(ctx);
+  if state.is_null() {
+    return false;
+  }
+  if (*state).csp.is_empty() {
+    return false;
+  }
+  let page_origin = crate::cors::page_origin(ctx);
+  (*state)
+    .csp
+    .iter()
+    .any(|policy| !is_connect_allowed(policy, request_url, page_origin.as_deref()))
 }
 
 /// Whether any delivered policy declares `require-trusted-types-for
@@ -70,27 +70,27 @@ pub(crate) unsafe fn is_request_blocked(ctx: *mut sys::JSContext, request_url: &
 /// if *any* entry requires it, so appending a policy can tighten but
 /// never loosen. A context with no policies at all never enforces.
 pub(crate) unsafe fn is_trusted_types_required(ctx: *mut sys::JSContext) -> bool {
-    let state = crate::host_state::get(ctx);
-    if state.is_null() {
-        return false;
-    }
-    (*state).csp.iter().any(|policy| {
-        find_directive(policy, "require-trusted-types-for").is_some_and(|values| {
-            values
-                .iter()
-                .any(|value| value.eq_ignore_ascii_case("'script'"))
-        })
+  let state = crate::host_state::get(ctx);
+  if state.is_null() {
+    return false;
+  }
+  (*state).csp.iter().any(|policy| {
+    find_directive(policy, "require-trusted-types-for").is_some_and(|values| {
+      values
+        .iter()
+        .any(|value| value.eq_ignore_ascii_case("'script'"))
     })
+  })
 }
 
 fn find_directive<'a>(policy: &'a str, name: &str) -> Option<Vec<&'a str>> {
-    policy.split(';').find_map(|part| {
-        let mut tokens = part.split_whitespace();
-        let directive = tokens.next()?;
-        directive
-            .eq_ignore_ascii_case(name)
-            .then(|| tokens.collect())
-    })
+  policy.split(';').find_map(|part| {
+    let mut tokens = part.split_whitespace();
+    let directive = tokens.next()?;
+    directive
+      .eq_ignore_ascii_case(name)
+      .then(|| tokens.collect())
+  })
 }
 
 /// Whether `request_url` may be fetched under `policy`, given the page's
@@ -99,38 +99,34 @@ fn find_directive<'a>(policy: &'a str, name: &str) -> Option<Vec<&'a str>> {
 /// everything (nothing restricts it) — matches real CSP's "unspecified
 /// directive falls through to allow" default.
 pub(crate) fn is_connect_allowed(
-    policy: &str,
-    request_url: &str,
-    page_origin: Option<&str>,
+  policy: &str,
+  request_url: &str,
+  page_origin: Option<&str>,
 ) -> bool {
-    let Some(sources) =
-        find_directive(policy, "connect-src").or_else(|| find_directive(policy, "default-src"))
-    else {
-        return true;
-    };
-    let Ok(request) = url::Url::parse(request_url) else {
-        return true;
-    };
-    for source in sources {
-        let source = source.trim_matches('\'');
-        match source {
-            "none" => {}
-            "*" => return true,
-            "self" => {
-                if page_origin
-                    .is_some_and(|origin| origin == request.origin().ascii_serialization())
-                {
-                    return true;
-                }
-            }
-            other => {
-                if other == request.origin().ascii_serialization()
-                    || request.host_str() == Some(other)
-                {
-                    return true;
-                }
-            }
+  let Some(sources) =
+    find_directive(policy, "connect-src").or_else(|| find_directive(policy, "default-src"))
+  else {
+    return true;
+  };
+  let Ok(request) = url::Url::parse(request_url) else {
+    return true;
+  };
+  for source in sources {
+    let source = source.trim_matches('\'');
+    match source {
+      "none" => {}
+      "*" => return true,
+      "self" => {
+        if page_origin.is_some_and(|origin| origin == request.origin().ascii_serialization()) {
+          return true;
         }
+      }
+      other => {
+        if other == request.origin().ascii_serialization() || request.host_str() == Some(other) {
+          return true;
+        }
+      }
     }
-    false
+  }
+  false
 }

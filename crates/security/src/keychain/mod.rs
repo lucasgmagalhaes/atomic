@@ -12,33 +12,33 @@ pub use windows_credmgr::{delete_credential, read_credential, write_credential, 
 
 #[cfg(not(windows))]
 mod unsupported {
-    #[derive(Debug)]
-    pub enum KeychainError {
-        Unsupported,
-    }
+  #[derive(Debug)]
+  pub enum KeychainError {
+    Unsupported,
+  }
 
-    impl std::fmt::Display for KeychainError {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(
-                f,
-                "OS keychain access is not implemented on this platform yet"
-            )
-        }
+  impl std::fmt::Display for KeychainError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+      write!(
+        f,
+        "OS keychain access is not implemented on this platform yet"
+      )
     }
+  }
 
-    impl std::error::Error for KeychainError {}
+  impl std::error::Error for KeychainError {}
 
-    pub fn write_credential(_target: &str, _secret: &[u8]) -> Result<(), KeychainError> {
-        Err(KeychainError::Unsupported)
-    }
+  pub fn write_credential(_target: &str, _secret: &[u8]) -> Result<(), KeychainError> {
+    Err(KeychainError::Unsupported)
+  }
 
-    pub fn read_credential(_target: &str) -> Result<Vec<u8>, KeychainError> {
-        Err(KeychainError::Unsupported)
-    }
+  pub fn read_credential(_target: &str) -> Result<Vec<u8>, KeychainError> {
+    Err(KeychainError::Unsupported)
+  }
 
-    pub fn delete_credential(_target: &str) -> Result<(), KeychainError> {
-        Err(KeychainError::Unsupported)
-    }
+  pub fn delete_credential(_target: &str) -> Result<(), KeychainError> {
+    Err(KeychainError::Unsupported)
+  }
 }
 #[cfg(not(windows))]
 pub use unsupported::{delete_credential, read_credential, write_credential, KeychainError};

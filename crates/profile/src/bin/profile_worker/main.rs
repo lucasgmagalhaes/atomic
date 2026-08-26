@@ -170,374 +170,373 @@ const TARGET_FPS: u32 = 60;
 const FRAME_INTERVAL: Duration = Duration::from_nanos(1_000_000_000 / TARGET_FPS as u64);
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() < 4 || args.len() > 7 {
-        eprintln!("usage: profile-worker <shmem-name> <width> <height> [proxy: host:port or user:pass@host:port] [dns-server: host:port] [gpu-adapter-index]");
-        std::process::exit(2);
+  let args: Vec<String> = std::env::args().collect();
+  if args.len() < 4 || args.len() > 7 {
+    eprintln!("usage: profile-worker <shmem-name> <width> <height> [proxy: host:port or user:pass@host:port] [dns-server: host:port] [gpu-adapter-index]");
+    std::process::exit(2);
+  }
+  let shmem_name = &args[1];
+  let width: u32 = args[2].parse().expect("width must be a positive integer");
+  let height: u32 = args[3].parse().expect("height must be a positive integer");
+  let proxy = parse_proxy_arg(args.get(4).map(String::as_str));
+  let dns_server = parse_dns_arg(args.get(5).map(String::as_str));
+  // A missing/empty/unparseable value degrades to `render::GpuRenderer::
+  // new`'s own default-adapter heuristic - same "refuse to be strict
+  // about an optional trailing arg" stance as `dns_server`, not `proxy`'s
+  // stricter one (there's no "adapter selection failed" state worth
+  // reporting back over the stdin/stdout protocol; it just falls back).
+  let gpu_adapter: Option<usize> = args
+    .get(6)
+    .filter(|s| !s.is_empty())
+    .and_then(|s| s.parse().ok());
+
+  // One storage root per worker process, keyed by shmem name (already
+  // unique per spawned profile) so two profiles never share cookies/
+  // localStorage, then further split by host under `Page::load` -
+  // real per-origin partitioning. Doesn't persist across the worker
+  // process's own lifetime yet - see `Page::load`'s doc.
+  let storage_root = std::env::temp_dir()
+    .join("nimble-profile-storage")
+    .join(shmem_name);
+
+  let runtime = Runtime::new();
+  let mut current_source = PageSource::Demo;
+  let (mut page, _) = load_source(
+    &runtime,
+    &current_source,
+    width as f64,
+    &storage_root,
+    proxy.as_ref(),
+    dns_server,
+  );
+  let renderer = match gpu_adapter {
+    Some(index) => GpuRenderer::new_with_adapter(index),
+    None => GpuRenderer::new(),
+  };
+
+  let mut writer =
+    ipc::FrameWriter::new(shmem_name, width, height).expect("failed to create/open shared memory");
+  writer.publish(&page.render(&renderer, width, height, 0.0));
+
+  // Commands arrive on a dedicated thread so a slow/absent stdin stream
+  // never blocks the render loop below - `try_recv` drains whatever's
+  // arrived so far on every tick instead.
+  let (cmd_tx, cmd_rx) = mpsc::channel::<String>();
+  thread::spawn(move || {
+    let stdin = io::stdin();
+    for line in stdin.lock().lines() {
+      let Ok(line) = line else { break };
+      if cmd_tx.send(line).is_err() {
+        break;
+      }
     }
-    let shmem_name = &args[1];
-    let width: u32 = args[2].parse().expect("width must be a positive integer");
-    let height: u32 = args[3].parse().expect("height must be a positive integer");
-    let proxy = parse_proxy_arg(args.get(4).map(String::as_str));
-    let dns_server = parse_dns_arg(args.get(5).map(String::as_str));
-    // A missing/empty/unparseable value degrades to `render::GpuRenderer::
-    // new`'s own default-adapter heuristic - same "refuse to be strict
-    // about an optional trailing arg" stance as `dns_server`, not `proxy`'s
-    // stricter one (there's no "adapter selection failed" state worth
-    // reporting back over the stdin/stdout protocol; it just falls back).
-    let gpu_adapter: Option<usize> = args
-        .get(6)
-        .filter(|s| !s.is_empty())
-        .and_then(|s| s.parse().ok());
+  });
 
-    // One storage root per worker process, keyed by shmem name (already
-    // unique per spawned profile) so two profiles never share cookies/
-    // localStorage, then further split by host under `Page::load` -
-    // real per-origin partitioning. Doesn't persist across the worker
-    // process's own lifetime yet - see `Page::load`'s doc.
-    let storage_root = std::env::temp_dir()
-        .join("nimble-profile-storage")
-        .join(shmem_name);
+  let mut stdout = io::stdout();
+  // Mutable, runtime-adjustable cap for the mockup's "Settings >
+  // Performance > frame cap" knob (see `SET_FPS_CAP` below) - starts at
+  // the fixed `FRAME_INTERVAL` this loop always used before that command
+  // existed, so a caller that never sends it gets identical behavior.
+  let mut frame_interval = FRAME_INTERVAL;
+  let mut next_tick = Instant::now() + frame_interval;
+  // Real "background throttling" (mockup's Settings > Performance knob):
+  // while `true`, the tick below skips JS timer pumping and re-rendering
+  // entirely instead of just rendering an unchanged page - a genuinely
+  // idle loop, not a disguised zero-work render. `PING`/`SET_FPS_CAP`/
+  // `QUIT` still work while paused (a hidden pane should still answer
+  // liveness checks and settings changes), only the vsync work itself
+  // stops.
+  let mut paused = false;
+  // Real "which id does the next KEY affect" state - a thin cache of
+  // `dom::Dom`'s own real `active_element()` (see `dispatch_click_at`'s
+  // doc), kept as a `String` id here since `KEY`'s handler goes through
+  // `id`-selector `eval()` scripts like every other command in this
+  // protocol. Reset on `RELOAD`/`NAVIGATE` since a fresh `Page` means a
+  // fresh DOM the old id might not even exist in anymore (a fresh
+  // `dom::Dom` starts with no focus of its own either).
+  let mut focused_id: Option<String> = None;
+  // Real viewport scroll offset (see `SCROLL`'s own handling below and
+  // `Page::render`/`hit_test_at`'s docs) - reset to `0.0` on
+  // `RELOAD`/`NAVIGATE` same as `focused_id`, since a fresh page always
+  // starts scrolled to the top.
+  let mut scroll_top: f64 = 0.0;
 
-    let runtime = Runtime::new();
-    let mut current_source = PageSource::Demo;
-    let (mut page, _) = load_source(
-        &runtime,
-        &current_source,
-        width as f64,
-        &storage_root,
-        proxy.as_ref(),
-        dns_server,
-    );
-    let renderer = match gpu_adapter {
-        Some(index) => GpuRenderer::new_with_adapter(index),
-        None => GpuRenderer::new(),
-    };
-
-    let mut writer = ipc::FrameWriter::new(shmem_name, width, height)
-        .expect("failed to create/open shared memory");
-    writer.publish(&page.render(&renderer, width, height, 0.0));
-
-    // Commands arrive on a dedicated thread so a slow/absent stdin stream
-    // never blocks the render loop below - `try_recv` drains whatever's
-    // arrived so far on every tick instead.
-    let (cmd_tx, cmd_rx) = mpsc::channel::<String>();
-    thread::spawn(move || {
-        let stdin = io::stdin();
-        for line in stdin.lock().lines() {
-            let Ok(line) = line else { break };
-            if cmd_tx.send(line).is_err() {
-                break;
-            }
+  'render_loop: loop {
+    while let Ok(line) = cmd_rx.try_recv() {
+      let line = line.trim();
+      if line == "PING" {
+        let _ = writeln!(stdout, "PONG");
+        let _ = stdout.flush();
+      } else if line == "PAUSE" {
+        paused = true;
+        let _ = writeln!(stdout, "PAUSED");
+        let _ = stdout.flush();
+      } else if line == "RESUME" {
+        paused = false;
+        next_tick = Instant::now() + frame_interval;
+        let _ = writeln!(stdout, "RESUMED");
+        let _ = stdout.flush();
+      } else if line == "RELOAD" {
+        if !page.ctx.fire_before_unload() {
+          let _ = writeln!(stdout, "ERROR navigation canceled by beforeunload");
+          let _ = stdout.flush();
+          continue;
         }
-    });
-
-    let mut stdout = io::stdout();
-    // Mutable, runtime-adjustable cap for the mockup's "Settings >
-    // Performance > frame cap" knob (see `SET_FPS_CAP` below) - starts at
-    // the fixed `FRAME_INTERVAL` this loop always used before that command
-    // existed, so a caller that never sends it gets identical behavior.
-    let mut frame_interval = FRAME_INTERVAL;
-    let mut next_tick = Instant::now() + frame_interval;
-    // Real "background throttling" (mockup's Settings > Performance knob):
-    // while `true`, the tick below skips JS timer pumping and re-rendering
-    // entirely instead of just rendering an unchanged page - a genuinely
-    // idle loop, not a disguised zero-work render. `PING`/`SET_FPS_CAP`/
-    // `QUIT` still work while paused (a hidden pane should still answer
-    // liveness checks and settings changes), only the vsync work itself
-    // stops.
-    let mut paused = false;
-    // Real "which id does the next KEY affect" state - a thin cache of
-    // `dom::Dom`'s own real `active_element()` (see `dispatch_click_at`'s
-    // doc), kept as a `String` id here since `KEY`'s handler goes through
-    // `id`-selector `eval()` scripts like every other command in this
-    // protocol. Reset on `RELOAD`/`NAVIGATE` since a fresh `Page` means a
-    // fresh DOM the old id might not even exist in anymore (a fresh
-    // `dom::Dom` starts with no focus of its own either).
-    let mut focused_id: Option<String> = None;
-    // Real viewport scroll offset (see `SCROLL`'s own handling below and
-    // `Page::render`/`hit_test_at`'s docs) - reset to `0.0` on
-    // `RELOAD`/`NAVIGATE` same as `focused_id`, since a fresh page always
-    // starts scrolled to the top.
-    let mut scroll_top: f64 = 0.0;
-
-    'render_loop: loop {
-        while let Ok(line) = cmd_rx.try_recv() {
-            let line = line.trim();
-            if line == "PING" {
-                let _ = writeln!(stdout, "PONG");
-                let _ = stdout.flush();
-            } else if line == "PAUSE" {
-                paused = true;
-                let _ = writeln!(stdout, "PAUSED");
-                let _ = stdout.flush();
-            } else if line == "RESUME" {
-                paused = false;
-                next_tick = Instant::now() + frame_interval;
-                let _ = writeln!(stdout, "RESUMED");
-                let _ = stdout.flush();
-            } else if line == "RELOAD" {
-                if !page.ctx.fire_before_unload() {
-                    let _ = writeln!(stdout, "ERROR navigation canceled by beforeunload");
-                    let _ = stdout.flush();
-                    continue;
-                }
-                let (loaded, error) = load_source(
-                    &runtime,
-                    &current_source,
-                    width as f64,
-                    &storage_root,
-                    proxy.as_ref(),
-                    dns_server,
-                );
-                page = loaded;
-                focused_id = None;
-                scroll_top = 0.0;
-                writer.publish(&page.render(&renderer, width, height, scroll_top));
-                match error {
-                    Some(message) => {
-                        let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
-                    }
-                    None => {
-                        let _ = writeln!(stdout, "RELOADED");
-                    }
-                }
-                let _ = stdout.flush();
-            } else if let Some(url) = line.strip_prefix("NAVIGATE ") {
-                if !page.ctx.fire_before_unload() {
-                    let _ = writeln!(stdout, "ERROR navigation canceled by beforeunload");
-                    let _ = stdout.flush();
-                    continue;
-                }
-                current_source = PageSource::Url(url.trim().to_string());
-                let (loaded, error) = load_source(
-                    &runtime,
-                    &current_source,
-                    width as f64,
-                    &storage_root,
-                    proxy.as_ref(),
-                    dns_server,
-                );
-                page = loaded;
-                focused_id = None;
-                scroll_top = 0.0;
-                writer.publish(&page.render(&renderer, width, height, scroll_top));
-                match error {
-                    Some(message) => {
-                        let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
-                    }
-                    None => {
-                        let _ = writeln!(stdout, "NAVIGATED");
-                    }
-                }
-                let _ = stdout.flush();
-            } else if let Some(rest) = line.strip_prefix("CLICK ") {
-                let result = dispatch_click(&page.ctx, rest.trim());
-                writer.publish(&page.render(&renderer, width, height, scroll_top));
-                match result {
-                    Ok(()) => {
-                        let _ = writeln!(stdout, "CLICKED");
-                    }
-                    Err(message) => {
-                        let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
-                    }
-                }
-                let _ = stdout.flush();
-            } else if let Some(rest) = line.strip_prefix("CLICK_AT ") {
-                let mut parts = rest.split_whitespace();
-                let coords = parts
-                    .next()
-                    .zip(parts.next())
-                    .and_then(|(x, y)| Some((x.parse::<f64>().ok()?, y.parse::<f64>().ok()?)));
-                match coords {
-                    Some((x, y)) => {
-                        let result = dispatch_click_at(&mut page, width, x, y, scroll_top);
-                        writer.publish(&page.render(&renderer, width, height, scroll_top));
-                        match result {
-                            Ok(focus) => {
-                                focused_id = focus;
-                                let _ = writeln!(stdout, "CLICKED");
-                            }
-                            Err(message) => {
-                                let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
-                            }
-                        }
-                    }
-                    None => {
-                        let _ = writeln!(stdout, "ERROR CLICK_AT requires two numeric coordinates");
-                    }
-                }
-                let _ = stdout.flush();
-            } else if let Some(key) = line.strip_prefix("KEY ") {
-                match &focused_id {
-                    Some(id) => {
-                        let result = type_key(&page.ctx, id, key);
-                        writer.publish(&page.render(&renderer, width, height, scroll_top));
-                        match result {
-                            Ok(()) => {
-                                let _ = writeln!(stdout, "TYPED");
-                            }
-                            Err(message) => {
-                                let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
-                            }
-                        }
-                    }
-                    None => {
-                        let _ = writeln!(
-                            stdout,
-                            "ERROR no element focused - CLICK_AT an <input>/<textarea> first"
-                        );
-                    }
-                }
-                let _ = stdout.flush();
-            } else if line == "TAB" || line == "TAB_REVERSE" {
-                let reverse = line == "TAB_REVERSE";
-                let result = tab_focus(&mut page, reverse);
-                writer.publish(&page.render(&renderer, width, height, scroll_top));
-                match result {
-                    Ok(Some(id)) => {
-                        focused_id = Some(id);
-                        let _ = writeln!(stdout, "TABBED");
-                    }
-                    Ok(None) => {
-                        let _ =
-                            writeln!(stdout, "ERROR no focusable element with an id on this page");
-                    }
-                    Err(message) => {
-                        let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
-                    }
-                }
-                let _ = stdout.flush();
-            } else if let Some(rest) = line.strip_prefix("FILL ") {
-                let mut parts = rest.splitn(2, ' ');
-                let selector = parts.next().unwrap_or("").trim();
-                let value = parts.next().unwrap_or("");
-                let result = fill_element(&page.ctx, selector, value);
-                writer.publish(&page.render(&renderer, width, height, scroll_top));
-                match result {
-                    Ok(()) => {
-                        let _ = writeln!(stdout, "FILLED");
-                    }
-                    Err(message) => {
-                        let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
-                    }
-                }
-                let _ = stdout.flush();
-            } else if let Some(rest) = line.strip_prefix("SCROLL ") {
-                match rest.trim().parse::<f64>() {
-                    Ok(dy) => {
-                        let max_scroll = (page.content_height(width) - height as f64).max(0.0);
-                        scroll_top = (scroll_top + dy).clamp(0.0, max_scroll);
-                        writer.publish(&page.render(&renderer, width, height, scroll_top));
-                        let _ = writeln!(stdout, "SCROLLED");
-                    }
-                    Err(_) => {
-                        let _ = writeln!(stdout, "ERROR SCROLL requires a numeric delta");
-                    }
-                }
-                let _ = stdout.flush();
-            } else if let Some(rest) = line.strip_prefix("SET_FPS_CAP ") {
-                match rest.trim().parse::<u32>() {
-                    Ok(fps) if fps >= 1 => {
-                        frame_interval = Duration::from_nanos(1_000_000_000 / fps as u64);
-                        let _ = writeln!(stdout, "FPS_CAP_SET {fps}");
-                    }
-                    _ => {
-                        let _ = writeln!(stdout, "ERROR fps cap must be a positive integer");
-                    }
-                }
-                let _ = stdout.flush();
-            } else if let Some(script) = line.strip_prefix("EVAL ") {
-                let script = script.trim();
-                // Rendered in both outcomes - a script that mutated the DOM
-                // (or an adopted stylesheet) before throwing still changed
-                // real state worth painting, same convention CLICK's handler
-                // follows when the dispatch itself fails. A NUL byte is
-                // rejected up front rather than passed to `Context::eval`,
-                // whose `CString::new` conversion panics on one - a hostile/
-                // buggy stdin writer must not be able to crash this process.
-                if script.contains('\0') {
-                    let _ = writeln!(stdout, "ERROR script must not contain NUL bytes");
-                    let _ = stdout.flush();
-                } else {
-                    let result = page.ctx.eval(script, "<pane eval>");
-                    writer.publish(&page.render(&renderer, width, height, scroll_top));
-                    match result {
-                        Ok(value) => {
-                            let _ = writeln!(stdout, "EVALUATED {}", value.replace('\n', " "));
-                        }
-                        Err(e) => {
-                            // The real stringified exception (an Error's own
-                            // message, a thrown string verbatim) - a devtools
-                            // console shows what threw, not just that
-                            // something did.
-                            let _ = writeln!(stdout, "ERROR {}", e.0.replace('\n', " "));
-                        }
-                    }
-                    let _ = stdout.flush();
-                }
-            } else if line == "CONSOLE" {
-                // Drains every `console.*` message the page has produced so
-                // far - load-time scripts' output AND anything EVAL'd since
-                // (uncaught script errors land in the same buffer, reported
-                // by `Context::eval` itself). Read-only as far as rendering
-                // goes: no re-render, no frame publish. Draining means a
-                // second CONSOLE only returns messages logged after the
-                // first - devtools-console semantics, and what bounds this
-                // from growing forever across a long session (the buffer is
-                // additionally capped inside js-runtime). Message text is
-                // flattened (newlines -> spaces, our separator -> slashes)
-                // because the reply must be one protocol line.
-                let joined = page
-                    .ctx
-                    .take_console_messages()
-                    .iter()
-                    .map(|m| {
-                        format!(
-                            "{}:{}",
-                            m.level.as_str(),
-                            m.text.replace('\n', " ").replace('|', "/")
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" | ");
-                if joined.is_empty() {
-                    let _ = writeln!(stdout, "MESSAGES");
-                } else {
-                    let _ = writeln!(stdout, "MESSAGES {joined}");
-                }
-                let _ = stdout.flush();
-            } else if line == "QUIT" {
-                break 'render_loop;
-            }
-        }
-
-        if paused {
-            // No timer pumping, no render, no publish - genuinely idle,
-            // not "render the same frame every tick". A short fixed sleep
-            // (not `frame_interval`, which could be very large under a low
-            // fps cap) keeps `PING`/`RESUME`/`QUIT` responsive without
-            // busy-spinning the command-drain loop above.
-            thread::sleep(Duration::from_millis(50));
-            continue 'render_loop;
-        }
-
-        page.ctx.run_pending_timers();
+        let (loaded, error) = load_source(
+          &runtime,
+          &current_source,
+          width as f64,
+          &storage_root,
+          proxy.as_ref(),
+          dns_server,
+        );
+        page = loaded;
+        focused_id = None;
+        scroll_top = 0.0;
         writer.publish(&page.render(&renderer, width, height, scroll_top));
-
-        // Fixed-cadence scheduling, not `sleep(frame_interval)` in a loop -
-        // that drifts by however long each tick's own work took. If a tick
-        // ran long enough to miss its slot entirely, resync to now rather
-        // than trying to render the missed frames back-to-back (a real
-        // vsync loop drops frames under load; it doesn't queue them up).
-        // `frame_interval` is read fresh each tick, not captured once, so a
-        // `SET_FPS_CAP` takes effect on the very next tick.
-        let now = Instant::now();
-        if next_tick > now {
-            thread::sleep(next_tick - now);
-            next_tick += frame_interval;
-        } else {
-            next_tick = now + frame_interval;
+        match error {
+          Some(message) => {
+            let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
+          }
+          None => {
+            let _ = writeln!(stdout, "RELOADED");
+          }
         }
+        let _ = stdout.flush();
+      } else if let Some(url) = line.strip_prefix("NAVIGATE ") {
+        if !page.ctx.fire_before_unload() {
+          let _ = writeln!(stdout, "ERROR navigation canceled by beforeunload");
+          let _ = stdout.flush();
+          continue;
+        }
+        current_source = PageSource::Url(url.trim().to_string());
+        let (loaded, error) = load_source(
+          &runtime,
+          &current_source,
+          width as f64,
+          &storage_root,
+          proxy.as_ref(),
+          dns_server,
+        );
+        page = loaded;
+        focused_id = None;
+        scroll_top = 0.0;
+        writer.publish(&page.render(&renderer, width, height, scroll_top));
+        match error {
+          Some(message) => {
+            let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
+          }
+          None => {
+            let _ = writeln!(stdout, "NAVIGATED");
+          }
+        }
+        let _ = stdout.flush();
+      } else if let Some(rest) = line.strip_prefix("CLICK ") {
+        let result = dispatch_click(&page.ctx, rest.trim());
+        writer.publish(&page.render(&renderer, width, height, scroll_top));
+        match result {
+          Ok(()) => {
+            let _ = writeln!(stdout, "CLICKED");
+          }
+          Err(message) => {
+            let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
+          }
+        }
+        let _ = stdout.flush();
+      } else if let Some(rest) = line.strip_prefix("CLICK_AT ") {
+        let mut parts = rest.split_whitespace();
+        let coords = parts
+          .next()
+          .zip(parts.next())
+          .and_then(|(x, y)| Some((x.parse::<f64>().ok()?, y.parse::<f64>().ok()?)));
+        match coords {
+          Some((x, y)) => {
+            let result = dispatch_click_at(&mut page, width, x, y, scroll_top);
+            writer.publish(&page.render(&renderer, width, height, scroll_top));
+            match result {
+              Ok(focus) => {
+                focused_id = focus;
+                let _ = writeln!(stdout, "CLICKED");
+              }
+              Err(message) => {
+                let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
+              }
+            }
+          }
+          None => {
+            let _ = writeln!(stdout, "ERROR CLICK_AT requires two numeric coordinates");
+          }
+        }
+        let _ = stdout.flush();
+      } else if let Some(key) = line.strip_prefix("KEY ") {
+        match &focused_id {
+          Some(id) => {
+            let result = type_key(&page.ctx, id, key);
+            writer.publish(&page.render(&renderer, width, height, scroll_top));
+            match result {
+              Ok(()) => {
+                let _ = writeln!(stdout, "TYPED");
+              }
+              Err(message) => {
+                let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
+              }
+            }
+          }
+          None => {
+            let _ = writeln!(
+              stdout,
+              "ERROR no element focused - CLICK_AT an <input>/<textarea> first"
+            );
+          }
+        }
+        let _ = stdout.flush();
+      } else if line == "TAB" || line == "TAB_REVERSE" {
+        let reverse = line == "TAB_REVERSE";
+        let result = tab_focus(&mut page, reverse);
+        writer.publish(&page.render(&renderer, width, height, scroll_top));
+        match result {
+          Ok(Some(id)) => {
+            focused_id = Some(id);
+            let _ = writeln!(stdout, "TABBED");
+          }
+          Ok(None) => {
+            let _ = writeln!(stdout, "ERROR no focusable element with an id on this page");
+          }
+          Err(message) => {
+            let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
+          }
+        }
+        let _ = stdout.flush();
+      } else if let Some(rest) = line.strip_prefix("FILL ") {
+        let mut parts = rest.splitn(2, ' ');
+        let selector = parts.next().unwrap_or("").trim();
+        let value = parts.next().unwrap_or("");
+        let result = fill_element(&page.ctx, selector, value);
+        writer.publish(&page.render(&renderer, width, height, scroll_top));
+        match result {
+          Ok(()) => {
+            let _ = writeln!(stdout, "FILLED");
+          }
+          Err(message) => {
+            let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
+          }
+        }
+        let _ = stdout.flush();
+      } else if let Some(rest) = line.strip_prefix("SCROLL ") {
+        match rest.trim().parse::<f64>() {
+          Ok(dy) => {
+            let max_scroll = (page.content_height(width) - height as f64).max(0.0);
+            scroll_top = (scroll_top + dy).clamp(0.0, max_scroll);
+            writer.publish(&page.render(&renderer, width, height, scroll_top));
+            let _ = writeln!(stdout, "SCROLLED");
+          }
+          Err(_) => {
+            let _ = writeln!(stdout, "ERROR SCROLL requires a numeric delta");
+          }
+        }
+        let _ = stdout.flush();
+      } else if let Some(rest) = line.strip_prefix("SET_FPS_CAP ") {
+        match rest.trim().parse::<u32>() {
+          Ok(fps) if fps >= 1 => {
+            frame_interval = Duration::from_nanos(1_000_000_000 / fps as u64);
+            let _ = writeln!(stdout, "FPS_CAP_SET {fps}");
+          }
+          _ => {
+            let _ = writeln!(stdout, "ERROR fps cap must be a positive integer");
+          }
+        }
+        let _ = stdout.flush();
+      } else if let Some(script) = line.strip_prefix("EVAL ") {
+        let script = script.trim();
+        // Rendered in both outcomes - a script that mutated the DOM
+        // (or an adopted stylesheet) before throwing still changed
+        // real state worth painting, same convention CLICK's handler
+        // follows when the dispatch itself fails. A NUL byte is
+        // rejected up front rather than passed to `Context::eval`,
+        // whose `CString::new` conversion panics on one - a hostile/
+        // buggy stdin writer must not be able to crash this process.
+        if script.contains('\0') {
+          let _ = writeln!(stdout, "ERROR script must not contain NUL bytes");
+          let _ = stdout.flush();
+        } else {
+          let result = page.ctx.eval(script, "<pane eval>");
+          writer.publish(&page.render(&renderer, width, height, scroll_top));
+          match result {
+            Ok(value) => {
+              let _ = writeln!(stdout, "EVALUATED {}", value.replace('\n', " "));
+            }
+            Err(e) => {
+              // The real stringified exception (an Error's own
+              // message, a thrown string verbatim) - a devtools
+              // console shows what threw, not just that
+              // something did.
+              let _ = writeln!(stdout, "ERROR {}", e.0.replace('\n', " "));
+            }
+          }
+          let _ = stdout.flush();
+        }
+      } else if line == "CONSOLE" {
+        // Drains every `console.*` message the page has produced so
+        // far - load-time scripts' output AND anything EVAL'd since
+        // (uncaught script errors land in the same buffer, reported
+        // by `Context::eval` itself). Read-only as far as rendering
+        // goes: no re-render, no frame publish. Draining means a
+        // second CONSOLE only returns messages logged after the
+        // first - devtools-console semantics, and what bounds this
+        // from growing forever across a long session (the buffer is
+        // additionally capped inside js-runtime). Message text is
+        // flattened (newlines -> spaces, our separator -> slashes)
+        // because the reply must be one protocol line.
+        let joined = page
+          .ctx
+          .take_console_messages()
+          .iter()
+          .map(|m| {
+            format!(
+              "{}:{}",
+              m.level.as_str(),
+              m.text.replace('\n', " ").replace('|', "/")
+            )
+          })
+          .collect::<Vec<_>>()
+          .join(" | ");
+        if joined.is_empty() {
+          let _ = writeln!(stdout, "MESSAGES");
+        } else {
+          let _ = writeln!(stdout, "MESSAGES {joined}");
+        }
+        let _ = stdout.flush();
+      } else if line == "QUIT" {
+        break 'render_loop;
+      }
     }
+
+    if paused {
+      // No timer pumping, no render, no publish - genuinely idle,
+      // not "render the same frame every tick". A short fixed sleep
+      // (not `frame_interval`, which could be very large under a low
+      // fps cap) keeps `PING`/`RESUME`/`QUIT` responsive without
+      // busy-spinning the command-drain loop above.
+      thread::sleep(Duration::from_millis(50));
+      continue 'render_loop;
+    }
+
+    page.ctx.run_pending_timers();
+    writer.publish(&page.render(&renderer, width, height, scroll_top));
+
+    // Fixed-cadence scheduling, not `sleep(frame_interval)` in a loop -
+    // that drifts by however long each tick's own work took. If a tick
+    // ran long enough to miss its slot entirely, resync to now rather
+    // than trying to render the missed frames back-to-back (a real
+    // vsync loop drops frames under load; it doesn't queue them up).
+    // `frame_interval` is read fresh each tick, not captured once, so a
+    // `SET_FPS_CAP` takes effect on the very next tick.
+    let now = Instant::now();
+    if next_tick > now {
+      thread::sleep(next_tick - now);
+      next_tick += frame_interval;
+    } else {
+      next_tick = now + frame_interval;
+    }
+  }
 }

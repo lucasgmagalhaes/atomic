@@ -16,29 +16,29 @@ use quickjs_sys as sys;
 static PROCESS_START: OnceLock<Instant> = OnceLock::new();
 
 unsafe extern "C" fn now(
-    _ctx: *mut sys::JSContext,
-    _this_val: sys::JSValue,
-    _argc: c_int,
-    _argv: *mut sys::JSValue,
+  _ctx: *mut sys::JSContext,
+  _this_val: sys::JSValue,
+  _argc: c_int,
+  _argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-    let start = PROCESS_START.get_or_init(Instant::now);
-    let ms = start.elapsed().as_secs_f64() * 1000.0;
-    sys::js_float64(ms)
+  let start = PROCESS_START.get_or_init(Instant::now);
+  let ms = start.elapsed().as_secs_f64() * 1000.0;
+  sys::js_float64(ms)
 }
 
 /// Registers `performance.now` as a global on `ctx`.
 pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
-    use std::ffi::CString;
+  use std::ffi::CString;
 
-    let global = sys::JS_GetGlobalObject(ctx);
-    let performance = sys::JS_NewObject(ctx);
+  let global = sys::JS_GetGlobalObject(ctx);
+  let performance = sys::JS_NewObject(ctx);
 
-    let now_name = CString::new("now").unwrap();
-    let now_fn = sys::JS_NewCFunction2(ctx, now, now_name.as_ptr(), 0, sys::JS_CFUNC_GENERIC, 0);
-    sys::JS_SetPropertyStr(ctx, performance, now_name.as_ptr(), now_fn);
+  let now_name = CString::new("now").unwrap();
+  let now_fn = sys::JS_NewCFunction2(ctx, now, now_name.as_ptr(), 0, sys::JS_CFUNC_GENERIC, 0);
+  sys::JS_SetPropertyStr(ctx, performance, now_name.as_ptr(), now_fn);
 
-    let performance_name = CString::new("performance").unwrap();
-    sys::JS_SetPropertyStr(ctx, global, performance_name.as_ptr(), performance);
+  let performance_name = CString::new("performance").unwrap();
+  sys::JS_SetPropertyStr(ctx, global, performance_name.as_ptr(), performance);
 
-    sys::JS_FreeValue(ctx, global);
+  sys::JS_FreeValue(ctx, global);
 }

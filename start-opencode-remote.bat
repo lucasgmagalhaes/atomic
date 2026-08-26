@@ -7,18 +7,19 @@ REM
 REM Usage:
 REM   start-opencode-remote.bat [port] [project-folder]
 REM
-REM If [project-folder] is omitted, opencode is rooted at E:\GitHub (see
-REM start-opencode-remote.ps1's own -ProjectPath default) - NOT wherever
-REM Windows happened to launch this .bat from. That's what fixes "I can
-REM only reach C:\": a shortcut/Start Menu entry often launches with C:\
-REM (or C:\Windows\System32) as the working directory, which opencode
-REM would otherwise treat as its project root.
+REM opencode is always rooted at the folder this .bat file lives in
+REM (%~dp0, explicitly passed as -ProjectPath below) - i.e. just this one
+REM project (nimble), regardless of what working directory Windows
+REM happened to launch the .bat with (a shortcut/Start Menu entry often
+REM defaults to C:\ or C:\Windows\System32, which is what caused "I can
+REM only reach C:\" before this was pinned down explicitly). Pass a second
+REM argument to point at a different folder instead.
 setlocal
 
 set "PORT_ARG="
 if not "%~1"=="" set "PORT_ARG=-Port %~1"
 
-set "PROJECT_ARG="
+set "PROJECT_ARG=-ProjectPath \"%~dp0\""
 if not "%~2"=="" set "PROJECT_ARG=-ProjectPath \"%~2\""
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0start-opencode-remote.ps1" %PORT_ARG% %PROJECT_ARG%

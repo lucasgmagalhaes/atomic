@@ -20,8 +20,10 @@
     gets launched with some other folder as the working directory (very
     common for shortcuts / Start Menu / Task Scheduler - they often default
     to C:\Windows\System32 or C:\), opencode ends up rooted at that folder
-    instead of your actual project. Defaults to E:\GitHub (your projects
-    folder) - pass a different path to root it somewhere else instead.
+    instead of your actual project. Defaults to the folder this script
+    itself lives in ($PSScriptRoot) - i.e. just this one project (nimble),
+    not every repo under E:\GitHub. Pass a different path to root it
+    somewhere else instead.
 
 .PARAMETER ExtraArgs
     Extra arguments passed through to `opencode serve` as-is.
@@ -40,7 +42,7 @@
 #>
 param(
     [int]$Port = 4096,
-    [string]$ProjectPath = "E:\GitHub",
+    [string]$ProjectPath = $PSScriptRoot,
     [string[]]$ExtraArgs = @()
 )
 

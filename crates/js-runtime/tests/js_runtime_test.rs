@@ -1466,7 +1466,7 @@ fn before_and_after_insert_relative_to_the_reference_node() {
 }
 
 #[test]
-fn replace_with_swaps_position_and_frees_the_old_node() {
+fn replace_with_swaps_position_and_keeps_the_old_node_alive() {
     let mut d = dom::Dom::new();
     let root = d.root();
     let parent = d.create_element("div");
@@ -1494,12 +1494,65 @@ fn replace_with_swaps_position_and_frees_the_old_node() {
                 b.id = 'b'; \
                 old.replaceWith(a, 'text-between', b); \
                 const parent = document.getElementById('parent'); \
-                return `${Array.from(parent.childNodes).map(n => n.id || n.textContent).join(',')},${document.getElementById('old')}`; \
+                const before = `${Array.from(parent.childNodes).map(n => n.id || n.textContent).join(',')},${document.getElementById('old')}`; \
+                const other = document.createElement('section'); \
+                parent.appendChild(other); \
+                other.appendChild(old); \
+                return `${before},${other.firstChild === old},${old.id}`; \
             })()",
             "<test>",
         )
         .unwrap();
-    assert_eq!(result, "first,a,text-between,b,last,null");
+    assert_eq!(result, "first,a,text-between,b,last,null,true,old");
+}
+
+/// Roadmap P0 item 1 (spec/architecture/primitives.md §4.1): a node
+/// removed via `removeChild`/`remove` must not be destroyed — it keeps its
+/// JS identity, its own expando properties, its event listeners, and its
+/// own subtree, and can be reattached anywhere afterward. Covers both
+/// removal entry points and both "detached" evidence (identity survives)
+/// and "still alive" evidence (listener still fires, subtree intact).
+#[test]
+fn removed_nodes_are_detached_not_destroyed() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let parent = d.create_element("div");
+    d.set_attribute(parent, "id", "parent");
+    let child = d.create_element("span");
+    d.set_attribute(child, "id", "child");
+    let grandchild = d.create_element("em");
+    d.set_attribute(grandchild, "id", "grandchild");
+    d.append_child(root, parent);
+    d.append_child(parent, child);
+    d.append_child(child, grandchild);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { \
+                const parent = document.getElementById('parent'); \
+                const child = document.getElementById('child'); \
+                let fired = 0; \
+                child.addEventListener('custom', () => { fired++; }); \
+                child.marker = 'kept'; \
+                const removed = parent.removeChild(child); \
+                const sameIdentity = removed === child; \
+                const stillHasSubtree = child.firstChild && child.firstChild.id === 'grandchild'; \
+                const stillHasExpando = child.marker === 'kept'; \
+                child.dispatchEvent(new Event('custom')); \
+                const listenerSurvived = fired === 1; \
+                const isDetached = child.parentNode === null && !parent.contains(child); \
+                const other = document.createElement('section'); \
+                parent.appendChild(other); \
+                other.appendChild(child); \
+                const reattached = other.firstChild === child && child.id === 'child'; \
+                return [sameIdentity, stillHasSubtree, stillHasExpando, listenerSurvived, isDetached, reattached].join(','); \
+            })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "true,true,true,true,true,true");
 }
 
 #[test]

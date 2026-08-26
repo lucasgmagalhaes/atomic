@@ -20,24 +20,6 @@ thread_local! {
     static ATTRS_LENGTHS: RefCell<HashMap<usize, HashMap<dom::NodeId, usize>>> = RefCell::new(HashMap::new());
 }
 
-/// Evicts this node's cached `attributes` collection object and its
-/// synced-length entry — called from `node_registry::evict_node_object`.
-pub(super) unsafe fn evict(ctx: *mut sys::JSContext, id: dom::NodeId) {
-    let cached = ATTRS_OBJECTS.with(|reg| {
-        reg.borrow_mut()
-            .get_mut(&(ctx as usize))
-            .and_then(|nodes| nodes.remove(&id))
-    });
-    if let Some(object) = cached {
-        sys::JS_FreeValue(ctx, object);
-    }
-    ATTRS_LENGTHS.with(|reg| {
-        if let Some(nodes) = reg.borrow_mut().get_mut(&(ctx as usize)) {
-            nodes.remove(&id);
-        }
-    });
-}
-
 /// Frees every cached `attributes` collection object for `ctx` — called
 /// from `node_registry::cleanup`.
 pub(super) unsafe fn cleanup(ctx: *mut sys::JSContext) {

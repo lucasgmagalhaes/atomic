@@ -22,24 +22,6 @@ thread_local! {
     static DATASET_KEYS: RefCell<HashMap<usize, HashMap<dom::NodeId, Vec<String>>>> = RefCell::new(HashMap::new());
 }
 
-/// Evicts this node's cached `dataset` object and its synced-keys entry —
-/// called from `node_registry::evict_node_object`.
-pub(super) unsafe fn evict(ctx: *mut sys::JSContext, id: dom::NodeId) {
-    let cached = DATASET_OBJECTS.with(|reg| {
-        reg.borrow_mut()
-            .get_mut(&(ctx as usize))
-            .and_then(|nodes| nodes.remove(&id))
-    });
-    if let Some(object) = cached {
-        sys::JS_FreeValue(ctx, object);
-    }
-    DATASET_KEYS.with(|reg| {
-        if let Some(nodes) = reg.borrow_mut().get_mut(&(ctx as usize)) {
-            nodes.remove(&id);
-        }
-    });
-}
-
 /// Frees every cached `dataset` object for `ctx` — called from
 /// `node_registry::cleanup`.
 pub(super) unsafe fn cleanup(ctx: *mut sys::JSContext) {

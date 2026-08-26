@@ -20,9 +20,8 @@
     gets launched with some other folder as the working directory (very
     common for shortcuts / Start Menu / Task Scheduler - they often default
     to C:\Windows\System32 or C:\), opencode ends up rooted at that folder
-    instead of your actual project. Defaults to the folder this script
-    itself lives in ($PSScriptRoot); pass your real project folder if you
-    keep this script somewhere else, e.g. a "scripts" folder.
+    instead of your actual project. Defaults to E:\GitHub (your projects
+    folder) - pass a different path to root it somewhere else instead.
 
 .PARAMETER ExtraArgs
     Extra arguments passed through to `opencode serve` as-is.
@@ -41,7 +40,7 @@
 #>
 param(
     [int]$Port = 4096,
-    [string]$ProjectPath = $PSScriptRoot,
+    [string]$ProjectPath = "E:\GitHub",
     [string[]]$ExtraArgs = @()
 )
 

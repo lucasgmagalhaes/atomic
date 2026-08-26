@@ -23,6 +23,8 @@
 use quickjs_sys as sys;
 use std::ffi::CString;
 
+use crate::js_helpers::Getter;
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Rect {
     pub x: f64,
@@ -68,8 +70,6 @@ unsafe extern "C" fn get_bounding_client_rect(
     set_number(ctx, object, "bottom", rect.y + rect.height);
     object
 }
-
-type Getter = unsafe extern "C" fn(*mut sys::JSContext, sys::JSValue) -> sys::JSValue;
 
 unsafe extern "C" fn offset_width_get(
     ctx: *mut sys::JSContext,

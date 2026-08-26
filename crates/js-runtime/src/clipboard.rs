@@ -16,6 +16,8 @@ use std::os::raw::c_int;
 
 use quickjs_sys as sys;
 
+use crate::js_helpers::define_method;
+
 unsafe fn read_js_string(ctx: *mut sys::JSContext, val: sys::JSValue) -> Option<String> {
     let mut len: usize = 0;
     let ptr = sys::JS_ToCStringLen2(ctx, &mut len, val, false);
@@ -30,18 +32,6 @@ unsafe fn read_js_string(ctx: *mut sys::JSContext, val: sys::JSValue) -> Option<
 
 unsafe fn new_js_string(ctx: *mut sys::JSContext, s: &str) -> sys::JSValue {
     sys::JS_NewStringLen(ctx, s.as_ptr() as *const std::os::raw::c_char, s.len())
-}
-
-unsafe fn define_method(
-    ctx: *mut sys::JSContext,
-    obj: sys::JSValue,
-    name: &str,
-    func: sys::JSCFunction,
-    length: c_int,
-) {
-    let name_c = CString::new(name).unwrap();
-    let f = sys::JS_NewCFunction2(ctx, func, name_c.as_ptr(), length, sys::JS_CFUNC_GENERIC, 0);
-    sys::JS_SetPropertyStr(ctx, obj, name_c.as_ptr(), f);
 }
 
 /// Settles a fresh Promise immediately: `Ok(value)` resolves with

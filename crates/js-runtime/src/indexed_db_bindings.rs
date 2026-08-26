@@ -20,6 +20,8 @@ use std::os::raw::{c_int, c_void};
 
 use quickjs_sys as sys;
 
+use crate::js_helpers::define_method;
+
 /// See `crate::class_registry` - one registry entry per `JSRuntime`.
 const DB_CLASS_KIND: &str = "IDBDatabaseHandle";
 
@@ -71,18 +73,6 @@ unsafe fn ensure_db_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
     sys::JS_SetClassProto(ctx, class_id, proto);
 
     class_id
-}
-
-unsafe fn define_method(
-    ctx: *mut sys::JSContext,
-    proto: sys::JSValue,
-    name: &str,
-    func: sys::JSCFunction,
-    length: c_int,
-) {
-    let name_c = CString::new(name).unwrap();
-    let f = sys::JS_NewCFunction2(ctx, func, name_c.as_ptr(), length, sys::JS_CFUNC_GENERIC, 0);
-    sys::JS_SetPropertyStr(ctx, proto, name_c.as_ptr(), f);
 }
 
 unsafe extern "C" fn create_object_store(

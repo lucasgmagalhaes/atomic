@@ -26,14 +26,8 @@ thread_local! {
 /// Frees every cached `classList` object for `ctx` — called from
 /// `node_registry::cleanup`.
 pub(super) unsafe fn cleanup(ctx: *mut sys::JSContext) {
-    if let Some(objects) = CLASS_LIST_OBJECTS.with(|reg| reg.borrow_mut().remove(&(ctx as usize))) {
-        for (_, obj) in objects {
-            sys::JS_FreeValue(ctx, obj);
-        }
-    }
-    CLASS_LIST_LENGTHS.with(|reg| {
-        reg.borrow_mut().remove(&(ctx as usize));
-    });
+    crate::js_helpers::cleanup_object_cache(&CLASS_LIST_OBJECTS, ctx);
+    crate::js_helpers::cleanup_aux_map(&CLASS_LIST_LENGTHS, ctx);
 }
 
 unsafe fn class_list_owner(ctx: *mut sys::JSContext, value: sys::JSValue) -> Option<dom::NodeId> {

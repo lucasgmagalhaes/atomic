@@ -77,7 +77,7 @@ pub(crate) struct Page<'rt> {
     /// the exact inputs it was computed from. `layout()` reuses it
     /// (a clone — far cheaper than re-running `build_box_tree_with_viewport`
     /// + text shaping/flex resolution + `layout_block` from scratch) when
-    /// none of `width`/`dom.mutation_count()`/`adopted_stylesheet_text()`
+    /// none of `width`/`dom.mutation_count()`/`adopted_stylesheet_version()`
     /// have changed since. `RefCell` because `layout()` is called from
     /// both `&self` methods (`content_height`, `hit_test_at`) and `&mut
     /// self` ones (`render`) — a shared cache needs interior mutability
@@ -88,7 +88,7 @@ pub(crate) struct Page<'rt> {
 struct LayoutCache {
     width: u32,
     dom_mutations: u64,
-    adopted_text: String,
+    adopted_version: u64,
     tree: LayoutBox,
 }
 
@@ -212,25 +212,27 @@ impl<'rt> Page<'rt> {
         let dom = self.ctx.dom()?;
         let dom_mutations = dom.mutation_count();
         // Real `document.adoptedStyleSheets` mutation support (see
-        // `js_runtime::cssom_stylesheet`): re-read every adopted sheet's
-        // rules so a script's `insertRule`/`deleteRule` (which don't bump
-        // `dom.mutation_count()` - they touch a `CSSStyleSheet`, not the
-        // DOM) still invalidates the cache below.
-        let adopted_text = self.ctx.adopted_stylesheet_text();
+        // `js_runtime::cssom_stylesheet`): a script's `insertRule`/
+        // `deleteRule` doesn't bump `dom.mutation_count()` (it touches a
+        // `CSSStyleSheet`, not the DOM), so this cheap version key (no
+        // rule text touched) still invalidates the cache below.
+        let adopted_version = self.ctx.adopted_stylesheet_version();
 
         if let Some(cached) = self.layout_cache.borrow().as_ref() {
             if cached.width == width
                 && cached.dom_mutations == dom_mutations
-                && cached.adopted_text == adopted_text
+                && cached.adopted_version == adopted_version
             {
                 return Some(cached.tree.clone());
             }
         }
 
-        // Merges the page's own base stylesheet (built once at `load()`
+        // Only paid for on an actual cache miss: the real rule text, for
+        // merging the page's own base stylesheet (built once at `load()`
         // time) with whatever's currently adopted - cloning rather than
         // mutating `self.sheet` in place keeps the base untouched if a
         // later layout has nothing adopted anymore.
+        let adopted_text = self.ctx.adopted_stylesheet_text();
         let sheet = if adopted_text.is_empty() {
             std::borrow::Cow::Borrowed(&self.sheet)
         } else {
@@ -245,7 +247,7 @@ impl<'rt> Page<'rt> {
         *self.layout_cache.borrow_mut() = Some(LayoutCache {
             width,
             dom_mutations,
-            adopted_text,
+            adopted_version,
             tree: tree.clone(),
         });
         Some(tree)

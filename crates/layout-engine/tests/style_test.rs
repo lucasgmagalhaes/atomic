@@ -8,9 +8,9 @@ const BLACK: Color = Color {
     a: 255,
 };
 
-fn el(tag: &str) -> ElementSnapshot {
+fn el(tag: &str) -> ElementSnapshot<'_> {
     ElementSnapshot {
-        tag: tag.to_string(),
+        tag,
         id: None,
         classes: vec![],
         ..Default::default()
@@ -86,8 +86,8 @@ fn longhand_overrides_shorthand_when_cascaded_later() {
 fn higher_specificity_wins_the_cascade() {
     let sheet = parse_stylesheet("div { width: 10px; } #id { width: 20px; }");
     let chain = vec![ElementSnapshot {
-        tag: "div".into(),
-        id: Some("id".into()),
+        tag: "div",
+        id: Some("id"),
         classes: vec![],
         ..Default::default()
     }];
@@ -213,8 +213,8 @@ fn box_shadow_none_clears_a_previously_cascaded_shadow() {
         &matching_declarations(
             &sheet,
             &[ElementSnapshot {
-                tag: "div".into(),
-                id: Some("a".into()),
+                tag: "div",
+                id: Some("a"),
                 classes: vec![],
                 ..Default::default()
             }],

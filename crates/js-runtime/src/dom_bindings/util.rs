@@ -19,13 +19,7 @@ pub(super) const MAX_TEXT_NODE_LENGTH: usize = 16 * 1024;
 /// `MAX_TEXT_NODE_LENGTH` already take).
 pub(super) const MAX_HTML_LENGTH: usize = 64 * 1024;
 
-pub(super) type Getter =
-    unsafe extern "C" fn(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue;
-pub(super) type Setter = unsafe extern "C" fn(
-    ctx: *mut sys::JSContext,
-    this_val: sys::JSValue,
-    val: sys::JSValue,
-) -> sys::JSValue;
+pub(super) use crate::js_helpers::{Getter, Setter};
 
 pub(super) unsafe fn read_js_string(ctx: *mut sys::JSContext, val: sys::JSValue) -> Option<String> {
     let mut len: usize = 0;

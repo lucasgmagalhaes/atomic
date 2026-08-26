@@ -36,6 +36,8 @@ use std::os::raw::c_int;
 
 use quickjs_sys as sys;
 
+use crate::js_helpers::{define_getter, define_method};
+
 const STYLESHEET_CLASS_KIND: &str = "CSSStyleSheet";
 const MAX_RULE_LENGTH: usize = 8192;
 const MAX_RULES_PER_SHEET: usize = 4096;
@@ -67,9 +69,22 @@ fn read_js_number(val: sys::JSValue) -> Option<f64> {
     }
 }
 
-unsafe fn sheet_opaque(rt: *mut sys::JSRuntime, this_val: sys::JSValue) -> *mut Vec<String> {
+/// A sheet's real rule text plus a version counter bumped on every
+/// mutation (`insertRule`/`deleteRule`) — lets a host (`Context::
+/// adopted_stylesheet_version`) cheaply detect "did any adopted sheet
+/// change since I last looked" via one integer comparison per sheet,
+/// instead of rebuilding and string-comparing every rule's text on every
+/// call (what `adopted_stylesheet_text` alone forced before this existed
+/// — see that method's own doc and `spec/RULES.md`'s cache rule).
+#[derive(Default)]
+pub(crate) struct StylesheetData {
+    pub(crate) rules: Vec<String>,
+    pub(crate) version: u64,
+}
+
+unsafe fn sheet_opaque(rt: *mut sys::JSRuntime, this_val: sys::JSValue) -> *mut StylesheetData {
     let class_id = crate::class_registry::class_id_for(rt, STYLESHEET_CLASS_KIND);
-    sys::JS_GetOpaque(this_val, class_id) as *mut Vec<String>
+    sys::JS_GetOpaque(this_val, class_id) as *mut StylesheetData
 }
 
 unsafe extern "C" fn stylesheet_finalizer(rt: *mut sys::JSRuntime, val: sys::JSValue) {
@@ -101,7 +116,7 @@ unsafe extern "C" fn stylesheet_constructor(
     }
     sys::JS_SetOpaque(
         obj,
-        Box::into_raw(Box::<Vec<String>>::default()) as *mut std::os::raw::c_void,
+        Box::into_raw(Box::<StylesheetData>::default()) as *mut std::os::raw::c_void,
     );
     obj
 }
@@ -136,17 +151,18 @@ unsafe extern "C" fn insert_rule(
     if !is_single_valid_rule(&text) {
         return throw_type_error(ctx, "rule does not parse as exactly one CSS rule");
     }
-    let rules = &mut *ptr;
-    if rules.len() >= MAX_RULES_PER_SHEET {
+    let data = &mut *ptr;
+    if data.rules.len() >= MAX_RULES_PER_SHEET {
         return throw_type_error(ctx, "stylesheet has reached the maximum rule count");
     }
     let index = if argc >= 2 {
         let n = read_js_number(*argv.add(1)).unwrap_or(0.0) as i64;
-        (n.max(0) as usize).min(rules.len())
+        (n.max(0) as usize).min(data.rules.len())
     } else {
-        rules.len()
+        data.rules.len()
     };
-    rules.insert(index, text);
+    data.rules.insert(index, text);
+    data.version = data.version.wrapping_add(1);
     sys::js_float64(index as f64)
 }
 
@@ -160,16 +176,17 @@ unsafe extern "C" fn delete_rule(
     if ptr.is_null() {
         return throw_type_error(ctx, "invalid CSSStyleSheet receiver");
     }
-    let rules = &mut *ptr;
+    let data = &mut *ptr;
     let index = if argc >= 1 {
         read_js_number(*argv).unwrap_or(-1.0) as i64
     } else {
         -1
     };
-    if index < 0 || index as usize >= rules.len() {
+    if index < 0 || index as usize >= data.rules.len() {
         return throw_type_error(ctx, "rule index out of range");
     }
-    rules.remove(index as usize);
+    data.rules.remove(index as usize);
+    data.version = data.version.wrapping_add(1);
     sys::js_undefined()
 }
 
@@ -182,54 +199,13 @@ unsafe extern "C" fn css_rules_get(
     if ptr.is_null() {
         return array;
     }
-    for (index, text) in (*ptr).iter().enumerate() {
+    for (index, text) in (*ptr).rules.iter().enumerate() {
         let entry = sys::JS_NewObject(ctx);
         let key = CString::new("cssText").unwrap();
         sys::JS_SetPropertyStr(ctx, entry, key.as_ptr(), new_js_string(ctx, text));
         sys::JS_SetPropertyUint32(ctx, array, index as u32, entry);
     }
     array
-}
-
-unsafe fn define_getter(
-    ctx: *mut sys::JSContext,
-    proto: sys::JSValue,
-    name: &str,
-    getter: unsafe extern "C" fn(*mut sys::JSContext, sys::JSValue) -> sys::JSValue,
-) {
-    let name_c = CString::new(name).unwrap();
-    type Getter =
-        unsafe extern "C" fn(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue;
-    let f = sys::JS_NewCFunction2(
-        ctx,
-        std::mem::transmute::<Getter, sys::JSCFunction>(getter),
-        name_c.as_ptr(),
-        0,
-        sys::JS_CFUNC_GETTER,
-        0,
-    );
-    let atom = sys::JS_NewAtom(ctx, name_c.as_ptr());
-    sys::JS_DefinePropertyGetSet(
-        ctx,
-        proto,
-        atom,
-        f,
-        sys::js_undefined(),
-        sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE,
-    );
-    sys::JS_FreeAtom(ctx, atom);
-}
-
-unsafe fn define_method(
-    ctx: *mut sys::JSContext,
-    proto: sys::JSValue,
-    name: &str,
-    func: sys::JSCFunction,
-    length: c_int,
-) {
-    let name_c = CString::new(name).unwrap();
-    let f = sys::JS_NewCFunction2(ctx, func, name_c.as_ptr(), length, sys::JS_CFUNC_GENERIC, 0);
-    sys::JS_SetPropertyStr(ctx, proto, name_c.as_ptr(), f);
 }
 
 /// Every real navigated document's own opaque data pointer identifies a
@@ -242,7 +218,16 @@ pub(crate) unsafe fn rules_of(
     value: sys::JSValue,
 ) -> Option<Vec<String>> {
     let ptr = sheet_opaque(sys::JS_GetRuntime(ctx), value);
-    (!ptr.is_null()).then(|| (*ptr).clone())
+    (!ptr.is_null()).then(|| (*ptr).rules.clone())
+}
+
+/// `value`'s own mutation-version counter, or `None` if it isn't a real
+/// `CSSStyleSheet` instance — the cheap (no rule text touched) half of
+/// [`rules_of`], used by [`crate::Context::adopted_stylesheet_version`] as
+/// a per-sheet cache key that doesn't require rebuilding any text.
+pub(crate) unsafe fn sheet_version(ctx: *mut sys::JSContext, value: sys::JSValue) -> Option<u64> {
+    let ptr = sheet_opaque(sys::JS_GetRuntime(ctx), value);
+    (!ptr.is_null()).then(|| (*ptr).version)
 }
 
 pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {

@@ -32,6 +32,8 @@ use std::thread;
 
 use quickjs_sys as sys;
 
+use crate::js_helpers::define_method;
+
 struct PendingFetch {
     resolve: sys::JSValue,
     reject: sys::JSValue,
@@ -514,18 +516,6 @@ unsafe extern "C" fn xhr_send(
         })
     });
     sys::js_undefined()
-}
-
-unsafe fn define_method(
-    ctx: *mut sys::JSContext,
-    proto: sys::JSValue,
-    name: &str,
-    func: sys::JSCFunction,
-    length: c_int,
-) {
-    let name_c = CString::new(name).unwrap();
-    let f = sys::JS_NewCFunction2(ctx, func, name_c.as_ptr(), length, sys::JS_CFUNC_GENERIC, 0);
-    sys::JS_SetPropertyStr(ctx, proto, name_c.as_ptr(), f);
 }
 
 /// Registers `fetch` and the `XMLHttpRequest` constructor as globals.

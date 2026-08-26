@@ -34,6 +34,8 @@ use std::os::raw::c_int;
 
 use quickjs_sys as sys;
 
+use crate::js_helpers::{Getter, Setter};
+
 const MAX_STYLE_LENGTH: usize = 4096;
 
 /// Every inline-style property this module gives a named camelCase
@@ -89,14 +91,8 @@ thread_local! {
 /// `dom_bindings::cleanup`, must run before `JS_FreeContext` same as every
 /// other per-context registry in this crate.
 pub(crate) unsafe fn cleanup(ctx: *mut sys::JSContext) {
-    if let Some(objects) = STYLE_OBJECTS.with(|reg| reg.borrow_mut().remove(&(ctx as usize))) {
-        for (_, object) in objects {
-            sys::JS_FreeValue(ctx, object);
-        }
-    }
-    STYLE_LENGTHS.with(|reg| {
-        reg.borrow_mut().remove(&(ctx as usize));
-    });
+    crate::js_helpers::cleanup_object_cache(&STYLE_OBJECTS, ctx);
+    crate::js_helpers::cleanup_aux_map(&STYLE_LENGTHS, ctx);
 }
 
 unsafe fn new_string(ctx: *mut sys::JSContext, s: &str) -> sys::JSValue {
@@ -351,8 +347,6 @@ unsafe extern "C" fn remove_property(
     new_string(ctx, &old)
 }
 
-type Getter = unsafe extern "C" fn(*mut sys::JSContext, sys::JSValue) -> sys::JSValue;
-type Setter = unsafe extern "C" fn(*mut sys::JSContext, sys::JSValue, sys::JSValue) -> sys::JSValue;
 type GetterMagic = unsafe extern "C" fn(*mut sys::JSContext, sys::JSValue, c_int) -> sys::JSValue;
 type SetterMagic =
     unsafe extern "C" fn(*mut sys::JSContext, sys::JSValue, sys::JSValue, c_int) -> sys::JSValue;

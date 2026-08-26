@@ -21,6 +21,8 @@ use std::os::raw::{c_int, c_void};
 
 use quickjs_sys as sys;
 
+use crate::js_helpers::Getter;
+
 /// See `crate::class_registry` - one registry entry per `JSRuntime`.
 const NOTIFICATION_CLASS_KIND: &str = "Notification";
 
@@ -206,9 +208,6 @@ unsafe extern "C" fn permission_get(
 ) -> sys::JSValue {
     new_js_string(ctx, permission_for(ctx))
 }
-
-type Getter =
-    unsafe extern "C" fn(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue;
 
 unsafe fn define_static_getter(
     ctx: *mut sys::JSContext,

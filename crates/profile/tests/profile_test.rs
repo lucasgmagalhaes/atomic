@@ -165,6 +165,49 @@ fn serve_routes_with_headers(routes: Vec<RouteWithHeaders>) -> std::net::SocketA
     addr
 }
 
+/// Like [`serve_routes`], but also increments a per-path hit counter for
+/// every real request received — needed to assert a resource referenced
+/// twice by one page load (e.g. the same stylesheet `href`ed by two
+/// `<link>` tags) is only actually fetched once, proving the worker's
+/// per-page-load `ResourceCache` (see `crate::network::ResourceCache` in
+/// `profile-worker`) is really deduping, not just present in source.
+fn serve_routes_counted(
+    routes: Vec<(&'static str, String)>,
+    counts: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, usize>>>,
+) -> std::net::SocketAddr {
+    let listener =
+        std::net::TcpListener::bind("127.0.0.1:0").expect("failed to bind a loopback test server");
+    let addr = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut buf = [0u8; 4096];
+            let n = stream.read(&mut buf).unwrap_or(0);
+            let request = String::from_utf8_lossy(&buf[..n]);
+            let path = request
+                .lines()
+                .next()
+                .and_then(|line| line.split_whitespace().nth(1))
+                .unwrap_or("/")
+                .to_string();
+            *counts.lock().unwrap().entry(path.clone()).or_insert(0) += 1;
+            let body = routes
+                .iter()
+                .find(|(route, _)| *route == path)
+                .map(|(_, body)| body.clone())
+                .unwrap_or_default();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(response.as_bytes());
+            let _ = stream.flush();
+        }
+    });
+    addr
+}
+
 fn unique_shmem_name(tag: &str) -> String {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1847,6 +1890,49 @@ fn console_is_empty_for_a_page_that_never_logs() {
             .expect("protocol should not fail")
             .is_empty(),
         "a fresh worker with a silent page has nothing to report"
+    );
+
+    profile.quit();
+}
+
+#[test]
+fn a_stylesheet_referenced_twice_in_one_page_load_is_only_fetched_once() {
+    // Two <link>s pointing at the exact same href - a real page load's
+    // own ResourceCache (see crate::network::ResourceCache in
+    // profile-worker) should dedup this to one real GET, not two.
+    let html = r#"<div id="box">hi</div>
+<link rel="stylesheet" href="shared.css">
+<link rel="stylesheet" href="shared.css">"#;
+    let css = "#box { background-color: #00ff00; width: 300px; height: 150px; }".to_string();
+    let counts = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+    let addr = serve_routes_counted(
+        vec![("/", html.to_string()), ("/shared.css", css)],
+        counts.clone(),
+    );
+    let page_url = format!("http://{addr}/");
+
+    let name = unique_shmem_name("dedup-shared-css");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let result = profile
+        .navigate(&page_url)
+        .expect("protocol should not fail");
+    assert!(result.is_ok(), "navigate should succeed: {result:?}");
+
+    // The stylesheet still applied (proves the cached response was
+    // actually used, not silently dropped).
+    let pixels = profile.latest_frame().unwrap();
+    assert_eq!(
+        &pixels[0..4],
+        &[0, 255, 0, 255],
+        "the shared stylesheet, fetched via the cache on its second reference, should still apply"
+    );
+
+    let hits = *counts.lock().unwrap().get("/shared.css").unwrap_or(&0);
+    assert_eq!(
+        hits, 1,
+        "two <link>s sharing one href should only cause one real GET, got {hits}"
     );
 
     profile.quit();

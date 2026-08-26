@@ -21,6 +21,7 @@ use render::{
 
 use crate::document_load::LoadedDocument;
 use crate::layout_snapshot::{collect_computed_styles, collect_layout_rects};
+use crate::network::ResourceCache;
 use crate::page_source::{
     build_stylesheet, collect_meta_csp_policies, collect_script_sources, load_images,
 };
@@ -121,6 +122,10 @@ impl<'rt> Page<'rt> {
     ) -> Self {
         let html = &doc.html;
         let (dom, html_el) = html::parse_to_html_element(html);
+        // One cache for every resource this single load fetches (stylesheets,
+        // their `@import`s, and images) - see `ResourceCache`'s own doc for
+        // why it's scoped to just this call rather than living longer.
+        let mut cache = ResourceCache::new();
         let sheet = build_stylesheet(
             &dom,
             html_el,
@@ -129,8 +134,17 @@ impl<'rt> Page<'rt> {
             storage_root,
             proxy,
             dns_server,
+            &mut cache,
         );
-        let images = load_images(&dom, html_el, base_url, storage_root, proxy, dns_server);
+        let images = load_images(
+            &dom,
+            html_el,
+            base_url,
+            storage_root,
+            proxy,
+            dns_server,
+            &mut cache,
+        );
         let mut scripts = Vec::new();
         collect_script_sources(&dom, html_el, &mut scripts);
 

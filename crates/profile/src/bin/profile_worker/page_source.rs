@@ -11,7 +11,7 @@ use css::{parse_stylesheet, Stylesheet};
 use dom::{Dom, NodeData, NodeId};
 use image_decode::DecodedImage;
 
-use crate::network::fetch_with_cookies;
+use crate::network::ResourceCache;
 
 /// Applied to every page before anything the page's own `<style>`/
 /// `<link>` sources contribute (lowest cascade priority - see
@@ -162,6 +162,7 @@ pub(crate) fn load_images(
     storage_root: &std::path::Path,
     proxy: Option<&net::ProxyConfig>,
     dns_server: Option<std::net::SocketAddr>,
+    cache: &mut ResourceCache,
 ) -> HashMap<NodeId, Rc<DecodedImage>> {
     let mut sources = Vec::new();
     collect_image_sources(dom, root, &mut sources);
@@ -171,7 +172,7 @@ pub(crate) fn load_images(
         let Some(url) = resolve_url(base_url, &src) else {
             continue;
         };
-        let Ok(response) = fetch_with_cookies(&url, storage_root, proxy, dns_server) else {
+        let Ok(response) = cache.fetch_cached(&url, storage_root, proxy, dns_server) else {
             continue;
         };
         let Some(decoded) = image_decode::decode(&response.body) else {
@@ -225,6 +226,7 @@ fn merge_stylesheet_text(
     storage_root: &std::path::Path,
     proxy: Option<&net::ProxyConfig>,
     dns_server: Option<std::net::SocketAddr>,
+    cache: &mut ResourceCache,
 ) {
     let parsed = parse_stylesheet(css_text);
     for import in &parsed.imports {
@@ -237,7 +239,7 @@ fn merge_stylesheet_text(
             continue;
         }
         if let Some(resolved) = resolve_url(base_url, &import.url) {
-            if let Ok(response) = fetch_with_cookies(&resolved, storage_root, proxy, dns_server) {
+            if let Ok(response) = cache.fetch_cached(&resolved, storage_root, proxy, dns_server) {
                 let imported_text = String::from_utf8_lossy(&response.body).into_owned();
                 sheet.rules.extend(parse_stylesheet(&imported_text).rules);
             }
@@ -262,6 +264,7 @@ pub(crate) fn build_stylesheet(
     storage_root: &std::path::Path,
     proxy: Option<&net::ProxyConfig>,
     dns_server: Option<std::net::SocketAddr>,
+    cache: &mut ResourceCache,
 ) -> Stylesheet {
     let mut sources = Vec::new();
     collect_css_sources(dom, root, &mut sources);
@@ -271,7 +274,11 @@ pub(crate) fn build_stylesheet(
         let css_text = match source {
             CssSource::Inline(text) => Some(text),
             CssSource::Link(href) => resolve_url(base_url, &href)
-                .and_then(|url| fetch_with_cookies(&url, storage_root, proxy, dns_server).ok())
+                .and_then(|url| {
+                    cache
+                        .fetch_cached(&url, storage_root, proxy, dns_server)
+                        .ok()
+                })
                 .map(|response| String::from_utf8_lossy(&response.body).into_owned()),
         };
         if let Some(css_text) = css_text {
@@ -283,6 +290,7 @@ pub(crate) fn build_stylesheet(
                 storage_root,
                 proxy,
                 dns_server,
+                cache,
             );
         }
     }

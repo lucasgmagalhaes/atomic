@@ -1,6 +1,9 @@
 //! Network entry points every page-load path in this worker funnels through:
-//! a real cookie-aware fetch, and this process's own optional-CLI-argument
-//! proxy/DNS parsing.
+//! a real cookie-aware fetch, a per-page-load resource cache built on top
+//! of it, and this process's own optional-CLI-argument proxy/DNS parsing.
+
+use std::collections::HashMap;
+use std::rc::Rc;
 
 /// Fetches `url` with a `Cookie` header built from the jar at
 /// `storage_root/<host>/cookies.txt` (the same file
@@ -73,6 +76,56 @@ pub(crate) fn fetch_with_cookies(
     }
 
     Ok(response)
+}
+
+/// A same-page-load resource cache — the "Cache" step of the shared
+/// Resource Loader pipeline (`spec/architecture/primitives.md` §10:
+/// URL resolution → security → CSP → mixed content → cache → network →
+/// decode), sitting directly in front of [`fetch_with_cookies`]. Without
+/// it, a page whose `<style>`/`<link>` sources `@import` the same
+/// stylesheet twice (or reference an `<img src>` that also happens to be
+/// `@import`ed as CSS, or any other URL reused across a single load)
+/// issued one real GET per reference — wasted round-trips for bytes this
+/// same page load already has. Scoped to exactly one [`Page::load`] call
+/// ([`crate::page_source::load_source`] builds a fresh one per navigation/
+/// reload, same lifetime as `Page`'s own `images`/`sheet` fields) — this
+/// is not a cross-navigation HTTP cache (no freshness/expiry handling,
+/// nothing persists across a `RELOAD`), just dedup within one document's
+/// own resource fetches. Only successful fetches are cached; a failed
+/// fetch is retried on every reference rather than caching the failure,
+/// matching this file's "best-effort, never let one bad resource poison
+/// more than its own reference" stance elsewhere.
+#[derive(Default)]
+pub(crate) struct ResourceCache {
+    entries: HashMap<String, Rc<net::Response>>,
+}
+
+impl ResourceCache {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    /// Same signature/behavior as [`fetch_with_cookies`], except a second
+    /// call with the same exact `url` string returns the first call's
+    /// response without touching the network (or the cookie jar) again.
+    /// URLs are matched verbatim, not re-normalized — two different
+    /// spellings of the same resource (e.g. differing only in a trailing
+    /// slash) miss the cache and fetch twice, same imprecision
+    /// `resolve_url`'s own string-based callers already accept.
+    pub(crate) fn fetch_cached(
+        &mut self,
+        url: &str,
+        storage_root: &std::path::Path,
+        proxy: Option<&net::ProxyConfig>,
+        dns_server: Option<std::net::SocketAddr>,
+    ) -> Result<Rc<net::Response>, net::Error> {
+        if let Some(cached) = self.entries.get(url) {
+            return Ok(Rc::clone(cached));
+        }
+        let response = Rc::new(fetch_with_cookies(url, storage_root, proxy, dns_server)?);
+        self.entries.insert(url.to_string(), Rc::clone(&response));
+        Ok(response)
+    }
 }
 
 /// Parses this worker's optional 5th CLI argument into a

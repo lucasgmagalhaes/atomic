@@ -2,7 +2,7 @@
 Verify and commit the already-written changes below. The code changes already exist in the working tree (uncommitted) - do NOT re-implement anything, just build, test, and commit what is already there.
 
 ## Files
-JS_ENGINE_CAPABILITY_MATRIX.md
+FULL_SPEC.md
 Makefile
 crates/js-runtime/src/event_subclasses.rs
 crates/js-runtime/tests/event_subclasses_test.rs

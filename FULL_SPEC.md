@@ -1,4 +1,10 @@
-# JavaScript engine — capability matrix
+# Nimble — Full Engineering Spec
+
+> Merged from `JS_ENGINE_CAPABILITY_MATRIX.md` (per-feature done/needed capability tracking for the JS engine) and `opt.md` (architecture principles, shared-infrastructure rules, and implementation priority roadmap). Keep both halves in sync as work lands: check off matrix items in Part A, and treat Part B's rules as constraints on *how* new work in Part A should be built.
+
+---
+
+# Part A — JS Engine Capability Matrix
 
 Last reviewed: 2026-08-25. This is an implementation roadmap for Nimble's embedded web engine, not a claim of full browser compatibility. Percentages are weighted estimates of useful, interoperable behaviour in each area; a checked item is implemented and covered by code or integration tests.
 
@@ -162,3 +168,2135 @@ Update — ~~permissions policy~~ is now implemented for the capability surfaces
 9. `ChildNode`/`ParentNode` mixin methods — `prepend`/`append`/`before`/`after`/`replaceWith` — done (2026-08-26): all five are variadic (`Node.prototype`, `crates/js-runtime/src/dom_bindings.rs`), each argument either a real string primitive (checked via `arg.tag == JS_TAG_STRING` *before* any coercion — `read_js_string` itself would happily stringify a `Node` object through its own `toString`, which is not what a `Node` argument means here) turned into a fresh Text node, or an existing `Node` reused by id; bounded by a new `MAX_CHILD_NODE_ARGS` (256) alongside the pre-existing `MAX_TEXT_NODE_LENGTH`, same "cap the untrusted input" convention every other entry point in this file already follows. `prepend`/`append` insert at this node's leading/trailing edge; `before`/`after` insert relative to this node in its parent (a no-op if this node has no parent, matching the real spec's own "if parent is null, then return"); `replaceWith` removes this node and inserts the arguments at the position it occupied, freeing this node's own subtree exactly like `removeChild`/`remove` already do (documented simplification: a real DOM keeps a removed node alive and reattachable, this one destroys it — same deviation `replaceChild` already has). All five reuse the existing `is_ancestor`/`insert_before`/`append_child` primitives directly — no new `dom::Dom` methods were needed, since none of these operations is more than a sequence of the tree-mutation primitives that already existed. Tested (`crates/js-runtime/tests/js_runtime_test.rs`): mixed Node/string arguments landing in argument order for `prepend`/`append`, `before`/`after` relative to a reference node (plus a detached-node no-op), `replaceWith` swapping position and freeing the old node (`document.getElementById` on it afterward returns `null`), and both a hierarchy-cycle argument and a wrong-type (number) argument being rejected with a thrown `TypeError` while leaving the tree untouched.
 10. `Element.insertAdjacentHTML(position, html)` — done (2026-08-26): reuses the exact `html::parse_fragment` + `Dom::adopt` pipeline `innerHTML`/`outerHTML` already established, inserting the parsed roots at one of the four real positions (`beforebegin`/`afterbegin`/`beforeend`/`afterend`) via the same `insert_before`/`append_child` primitives `before`/`after`/`prepend`/`append` (item 9 above) already reuse — `afterbegin`/`beforeend` share `prepend`/`append`'s "first child or append" / plain-append logic, `beforebegin`/`afterend` share `before`/`after`'s "insert before this / before the captured next sibling" logic, just against parsed-and-adopted nodes instead of JS-supplied ones. `beforebegin`/`afterend` throw (this file's usual plain `TypeError`, not a distinct `NoModificationAllowedError` type — no DOMException hierarchy exists anywhere in this crate) when this node has no parent, matching the real spec. Goes through the same `trusted_types::sink_html_string` gate `innerHTML`/`outerHTML` already use — this engine's three real HTML injection sinks now share identical Trusted Types enforcement. Tested (`crates/js-runtime/tests/js_runtime_test.rs`): all four positions landing in the right place relative to both the target node and its existing children, an invalid position string rejected, and a parent-less node rejected for `beforebegin` while still accepting `afterbegin` (no parent required).
 11. `MouseEvent`/`FocusEvent` (section 3's Event-subclasses roadmap line) — done (2026-08-25, see item 4 above for the full writeup). `InputEvent` — done (2026-08-25, `crates/js-runtime/src/event_subclasses.rs`): `data`/`inputType`/`isComposing` as plain own data properties, same constructor-registration pattern as every other subclass in this file; `data` defaults to `null` (via `read_value_option`, no coercion) rather than an empty string, matching the real API's "no text for this input type" case. Tested (`crates/js-runtime/tests/event_subclasses_test.rs`): field round-trip plus `instanceof Event`, and the no-options-given default (`data === null`, `inputType === ""`, `isComposing === false`). ~~`WheelEvent`~~ — done (2026-08-25, `crates/js-runtime/src/event_subclasses.rs`): `deltaX`/`deltaY`/`deltaZ`/`deltaMode`/`clientX`/`clientY` as plain own data properties, same `register_subclass` pattern as every other subclass in this file; `deltaMode` defaults to `0` (`DOM_DELTA_PIXEL`, the real spec's own default). Tested (`crates/js-runtime/tests/event_subclasses_test.rs`): field round-trip plus `instanceof Event`/`instanceof WheelEvent`, and the no-options-given all-zero default. Closes the JS-constructible-class half only — no native wheel dispatch pathway exists yet to construct one from an actual scroll input (`SubmitEvent`/`TouchEvent`/`DragEvent` have the same gap).
+
+---
+
+# Part B — Architecture and Implementation Optimization Plan
+
+> This document complements the existing Nimble implementation roadmap. Its purpose is to define architectural principles, implementation priorities, performance rules, and shared infrastructure that should guide future development.
+>
+> The goal is not only to implement more Web APIs, but to ensure that every new feature improves the engine without causing uncontrolled complexity, duplicated logic, excessive allocations, global invalidation, or future rewrites.
+
+---
+
+## 1. Goals
+
+Nimble already contains a significant amount of functionality across:
+
+- JavaScript execution;
+- DOM;
+- events;
+- CSS;
+- layout;
+- rendering;
+- navigation;
+- timers;
+- networking;
+- storage;
+- Rust ↔ JavaScript bindings.
+
+The primary risk going forward is no longer simply missing APIs.
+
+The larger risk is architectural fragmentation:
+
+```text
+New API
+   ↓
+New binding-specific implementation
+   ↓
+New state
+   ↓
+New cache
+   ↓
+New invalidation logic
+   ↓
+More coupling
+   ↓
+Harder future implementations
+````
+
+Future work should prioritize:
+
+1. Shared infrastructure over API-specific implementations.
+2. Centralized mutation and invalidation.
+3. Lazy recomputation where possible.
+4. Typed and allocation-efficient hot paths.
+5. Explicit ownership and object lifetime.
+6. Measurable performance improvements.
+7. Compatibility testing alongside implementation.
+8. Infrastructure that can support multiple future Web APIs.
+
+---
+
+## 2. Architecture Before APIs
+
+Before implementing a new Web API, first answer:
+
+> Can this functionality reuse an existing shared internal primitive?
+
+Do not prefer this architecture:
+
+```text
+API A
+└── Custom state
+    └── Custom scheduler
+        └── Custom resource loader
+
+API B
+└── Custom state
+    └── Custom scheduler
+        └── Custom resource loader
+```
+
+Prefer:
+
+```text
+                    ┌─────────────────────┐
+                    │ Shared Infrastructure│
+                    ├─────────────────────┤
+                    │ DOM Core            │
+                    │ Mutation Pipeline   │
+                    │ Task Scheduler      │
+                    │ Resource Loader     │
+                    │ Security Pipeline   │
+                    │ Structured Clone    │
+                    │ Style System        │
+                    │ Layout System       │
+                    └──────────┬──────────┘
+                               │
+             ┌─────────────────┼─────────────────┐
+             │                 │                 │
+             ▼                 ▼                 ▼
+           fetch()            XHR             Workers
+           Modules          Scripts        MessageChannel
+```
+
+### Mandatory rule
+
+> Before creating API-specific infrastructure, inspect whether the behavior belongs to an existing or reusable subsystem.
+
+Examples:
+
+| New API          | Prefer Reusing                    |
+| ---------------- | --------------------------------- |
+| `fetch()`        | Resource Loader                   |
+| XHR              | Fetch Core                        |
+| ES Modules       | Resource Loader + Module Cache    |
+| Workers          | Task Scheduler + Structured Clone |
+| MessageChannel   | Structured Clone + Task Scheduler |
+| History state    | Structured Clone                  |
+| CSS updates      | Mutation Pipeline                 |
+| Live collections | DOM versioning                    |
+| Image loading    | Resource Loader                   |
+| Script loading   | Resource Loader + Task Scheduler  |
+
+---
+
+## 3. Core Architectural Primitives
+
+The following primitives should be considered foundational infrastructure.
+
+---
+
+### 3.1 DOM Mutation Pipeline
+
+All DOM mutations should pass through centralized DOM mutation primitives.
+
+The intended flow is:
+
+```text
+JavaScript API
+      │
+      ▼
+DOM Mutation
+      │
+      ▼
+Mutation Classification
+      │
+      ├── Collection invalidation
+      ├── Selector invalidation
+      ├── Style invalidation
+      ├── Layout invalidation
+      ├── Paint invalidation
+      └── Accessibility invalidation
+```
+
+Avoid scattered code like:
+
+```rust
+element.set_attribute(...);
+
+invalidate_layout();
+invalidate_style();
+clear_collection_cache();
+clear_selector_cache();
+```
+
+inside multiple JavaScript bindings.
+
+Prefer:
+
+```rust
+dom.set_attribute(node, name, value);
+```
+
+with centralized mutation processing.
+
+---
+
+### 3.2 Mutation Classification
+
+Not every mutation requires a complete render pipeline invalidation.
+
+Introduce explicit mutation metadata or derived dirty flags.
+
+Example:
+
+```rust
+bitflags! {
+    struct DirtyFlags: u32 {
+        const DOM        = 1 << 0;
+        const COLLECTION = 1 << 1;
+        const SELECTORS  = 1 << 2;
+        const STYLE      = 1 << 3;
+        const LAYOUT     = 1 << 4;
+        const PAINT      = 1 << 5;
+        const A11Y       = 1 << 6;
+    }
+}
+```
+
+A mutation can then derive:
+
+```text
+setAttribute("class")
+    ↓
+DOM
+COLLECTION
+SELECTORS
+STYLE
+LAYOUT
+PAINT
+```
+
+While:
+
+```text
+scrollTop change
+    ↓
+PAINT
+```
+
+And:
+
+```text
+text node update
+    ↓
+DOM
+LAYOUT
+PAINT
+```
+
+The system should avoid invalidating unrelated subsystems.
+
+---
+
+### 3.3 Lazy Invalidation
+
+Prefer:
+
+```text
+Mutation
+   ↓
+Increment version / mark dirty
+   ↓
+Continue execution
+   ↓
+Recompute only when required
+```
+
+Over:
+
+```text
+Mutation
+   ↓
+Immediately rebuild
+   ├── Collections
+   ├── Selectors
+   ├── Styles
+   ├── Layout
+   └── Paint
+```
+
+Example:
+
+```rust
+struct VersionedCache<T> {
+    version: u64,
+    value: T,
+}
+```
+
+A cache should be recomputed when:
+
+```rust
+if cache.version != current_version {
+    cache.recompute();
+}
+```
+
+---
+
+## 4. DOM Node Lifetime and Identity
+
+### 4.1 Non-destructive Node Removal
+
+Removing a node from the DOM should not immediately destroy the node.
+
+A node can exist in different states:
+
+```text
+Alive + Connected
+Alive + Detached
+Destroyed
+```
+
+For example:
+
+```rust
+enum NodeState {
+    Connected,
+    Detached,
+    Destroyed,
+}
+```
+
+Expected behavior:
+
+```javascript
+const node = parent.removeChild(child);
+
+// node must remain usable
+
+otherParent.appendChild(node);
+```
+
+Desired implementation:
+
+```text
+removeChild()
+     │
+     ▼
+Remove parent relationship
+     │
+     ▼
+Mark node as detached
+     │
+     ▼
+Preserve Node identity
+     │
+     ▼
+Existing JavaScript references remain valid
+```
+
+Do not destroy a node merely because it is removed from the document tree.
+
+---
+
+### 4.2 Why Detached Nodes Matter
+
+Correct detached-node behavior is foundational for:
+
+* `removeChild`;
+* `appendChild`;
+* `insertBefore`;
+* `replaceChild`;
+* `replaceWith`;
+* `DocumentFragment`;
+* `cloneNode`;
+* `adoptNode`;
+* future Shadow DOM;
+* future Range APIs;
+* Selection APIs;
+* drag-and-drop;
+* template content;
+* MutationObserver.
+
+Implementing these features around destructive removal creates increasing complexity and future rewrites.
+
+---
+
+## 5. Node Identity Safety
+
+If the DOM uses arena allocation and numeric `NodeId`s, avoid stale JavaScript wrappers becoming valid for a newly allocated node.
+
+Instead of:
+
+```text
+NodeId = 42
+```
+
+prefer a generation-aware identity:
+
+```rust
+struct NodeHandle {
+    id: NodeId,
+    generation: u32,
+}
+```
+
+Example:
+
+```text
+Node #42, generation 1
+        │
+        ▼
+Node removed
+        │
+        ▼
+Arena slot reused
+        │
+        ▼
+Node #42, generation 2
+```
+
+An old JavaScript wrapper containing:
+
+```text
+(42, generation 1)
+```
+
+must not access:
+
+```text
+(42, generation 2)
+```
+
+This prevents stale object identity bugs.
+
+---
+
+## 6. JavaScript Native Object Lifetime
+
+Avoid relying exclusively on manually clearing multiple caches such as:
+
+```text
+NODE_OBJECTS
+CLASS_LIST_OBJECTS
+DATASET_OBJECTS
+ATTRIBUTES_OBJECTS
+EVENT_LISTENERS
+```
+
+Instead, define a consistent native object lifecycle model.
+
+Recommended direction:
+
+```text
+JS Object
+    │
+    ▼
+Native Handle
+    │
+    ├── NodeHandle
+    ├── DocumentHandle
+    ├── CollectionHandle
+    └── Host Object Handle
+```
+
+Native handles should validate:
+
+1. object type;
+2. context ownership;
+3. node generation;
+4. lifetime validity.
+
+This reduces the amount of manual cache invalidation required by DOM operations.
+
+---
+
+## 7. Live DOM Collections
+
+Do not implement live collections by eagerly rebuilding every collection after every DOM mutation.
+
+Avoid:
+
+```text
+DOM mutation
+    │
+    ├── Update HTMLCollection A
+    ├── Update HTMLCollection B
+    ├── Update NodeList C
+    └── Update NodeList D
+```
+
+Prefer lazy versioned collections.
+
+Example:
+
+```rust
+struct LiveCollection {
+    root: NodeId,
+    query: CollectionQuery,
+    last_dom_version: u64,
+    cached_nodes: Vec<NodeHandle>,
+}
+```
+
+On access:
+
+```rust
+if collection.last_dom_version != dom.version() {
+    collection.recompute(dom);
+}
+```
+
+This provides:
+
+* live behavior;
+* stable collection identity;
+* lazy recomputation;
+* reduced mutation cost.
+
+---
+
+### 7.1 Future Optimization: Subtree Versions
+
+A global DOM version is a useful first step.
+
+Later, optimize with subtree versions:
+
+```text
+Document
+ ├── Header subtree version: 10
+ ├── Main subtree version: 42
+ └── Footer subtree version: 7
+```
+
+A collection rooted in:
+
+```text
+Main
+```
+
+does not need invalidation when:
+
+```text
+Footer
+```
+
+changes.
+
+---
+
+## 8. DOM Mutation Batching
+
+A JavaScript loop such as:
+
+```javascript
+for (let i = 0; i < 10000; i++) {
+    parent.appendChild(createElement("div"));
+}
+```
+
+must not cause:
+
+```text
+10,000 style calculations
+10,000 layouts
+10,000 paints
+```
+
+Instead:
+
+```text
+JavaScript execution
+        │
+        ▼
+DOM mutations accumulate
+        │
+        ▼
+Microtask checkpoint
+        │
+        ▼
+Style update
+        │
+        ▼
+Layout
+        │
+        ▼
+Paint
+```
+
+Conceptually:
+
+```rust
+begin_mutation_batch();
+
+run_script();
+
+end_mutation_batch();
+```
+
+This batching should ideally be automatic from page JavaScript's perspective.
+
+---
+
+## 9. Task Scheduler
+
+Before implementing complex asynchronous APIs, establish a central task scheduler.
+
+Suggested queues:
+
+```text
+Task Scheduler
+├── Macrotasks
+├── Microtasks
+├── Timers
+├── Network completions
+├── Animation frames
+├── Rendering tasks
+└── Lifecycle tasks
+```
+
+Possible representation:
+
+```rust
+enum Task {
+    Script(...),
+    Timer(...),
+    Network(...),
+    AnimationFrame(...),
+    Lifecycle(...),
+}
+```
+
+Suggested execution flow:
+
+```text
+Select task
+    │
+    ▼
+Execute task
+    │
+    ▼
+Run JavaScript
+    │
+    ▼
+Drain microtasks
+    │
+    ▼
+Apply pending DOM work
+    │
+    ▼
+Determine render opportunity
+    │
+    ▼
+Run requestAnimationFrame
+    │
+    ▼
+Style / Layout / Paint
+```
+
+This should become the basis for:
+
+* Promises;
+* timers;
+* fetch;
+* modules;
+* async scripts;
+* Workers;
+* MessageChannel;
+* lifecycle events.
+
+---
+
+## 10. Resource Loader
+
+All resource loading should converge on a shared pipeline.
+
+```text
+Resource Request
+       │
+       ▼
+URL Resolution
+       │
+       ▼
+Security Policy
+       │
+       ▼
+CSP
+       │
+       ▼
+Mixed Content
+       │
+       ▼
+Referrer Policy
+       │
+       ▼
+Cache
+       │
+       ▼
+Network
+       │
+       ▼
+Decode
+```
+
+Suggested abstraction:
+
+```rust
+struct ResourceRequest {
+    url: Url,
+    initiator: Initiator,
+    destination: Destination,
+    priority: Priority,
+    cors_mode: CorsMode,
+    referrer_policy: ReferrerPolicy,
+}
+```
+
+This pipeline should be reusable by:
+
+* HTML;
+* CSS;
+* JavaScript scripts;
+* ES modules;
+* images;
+* `fetch()`;
+* XHR;
+* future media APIs.
+
+---
+
+## 11. Fetch Architecture
+
+Do not independently implement networking logic for:
+
+* `fetch`;
+* XHR;
+* modules;
+* future APIs.
+
+Create a shared Fetch Core:
+
+```text
+Fetch Core
+├── Request
+├── Response
+├── Headers
+├── Body
+└── Stream
+```
+
+Then expose adapters:
+
+```text
+Fetch Core
+   │
+   ├── fetch()
+   ├── XMLHttpRequest
+   ├── Module Loader
+   └── Future APIs
+```
+
+This prevents duplicated implementations of:
+
+* URL handling;
+* headers;
+* redirects;
+* cancellation;
+* body consumption;
+* CORS;
+* errors.
+
+---
+
+## 12. Structured Clone Before Workers
+
+Do not implement Workers first.
+
+Implement:
+
+```text
+1. Structured Clone
+2. Transferable abstraction
+3. MessagePort
+4. MessageChannel
+5. Worker
+```
+
+Structured Clone should be reusable for:
+
+* `postMessage`;
+* `MessageChannel`;
+* Workers;
+* `history.pushState`;
+* `history.replaceState`;
+* storage events;
+* future cross-context messaging.
+
+Avoid storing history state merely as a direct JavaScript object reference when the engine can instead use the shared clone mechanism.
+
+---
+
+## 13. Host State Modularization
+
+Avoid allowing `HostState` to become a large container for unrelated features.
+
+Do not converge toward:
+
+```rust
+struct HostState {
+    // URL
+    // history
+    // CSP
+    // permissions
+    // layout
+    // styles
+    // navigation
+    // trusted types
+    // storage
+    // ...
+}
+```
+
+Prefer subsystem composition:
+
+```rust
+struct PageState {
+    navigation: NavigationState,
+    security: SecurityState,
+    lifecycle: LifecycleState,
+    layout: LayoutState,
+    storage: StorageState,
+}
+```
+
+Each subsystem should expose focused APIs:
+
+```rust
+page.navigation.navigate(...);
+page.security.check_request(...);
+page.lifecycle.transition(...);
+page.layout.get_rect(...);
+```
+
+Benefits:
+
+* reduced coupling;
+* clearer ownership;
+* easier testing;
+* easier profiling;
+* simpler future replacement.
+
+---
+
+## 14. CSS and Style Optimization
+
+Before implementing extremely complex incremental layout, prioritize style caching.
+
+Recommended stages:
+
+```text
+Stage 1
+    Selector matching cache
+
+Stage 2
+    Computed style cache
+
+Stage 3
+    Dirty style propagation
+
+Stage 4
+    Layout invalidation optimization
+
+Stage 5
+    Incremental layout
+
+Stage 6
+    Paint damage tracking
+```
+
+---
+
+### 14.1 Selector Matching Cache
+
+Conceptually:
+
+```text
+(element, stylesheet_version)
+        │
+        ▼
+Matched CSS Rules
+```
+
+Avoid repeatedly evaluating every selector when:
+
+```text
+nothing relevant changed
+```
+
+---
+
+### 14.2 Computed Style Cache
+
+Conceptually:
+
+```text
+(
+    node,
+    stylesheet_version,
+    parent_style_version
+)
+        │
+        ▼
+ComputedStyle
+```
+
+---
+
+### 14.3 Dirty Style Propagation
+
+Example:
+
+```text
+Class changes
+    │
+    ▼
+Target style dirty
+```
+
+Then determine whether descendants require invalidation.
+
+If an inherited property changes:
+
+```text
+Target
+ └── descendants may require recomputation
+```
+
+If a non-inherited property changes:
+
+```text
+Only target may need style recomputation
+```
+
+Avoid:
+
+```text
+Any style mutation
+    ↓
+Recompute entire document
+```
+
+when possible.
+
+---
+
+## 15. Typed CSS Properties
+
+Avoid string-based CSS representations in layout hot paths.
+
+Avoid:
+
+```rust
+HashMap<String, String>
+```
+
+during:
+
+* layout;
+* rendering;
+* selector matching;
+* style calculation.
+
+Prefer:
+
+```rust
+enum PropertyId {
+    Display,
+    Width,
+    Height,
+    MarginTop,
+    MarginRight,
+    Color,
+    Position,
+    // ...
+}
+```
+
+And typed values:
+
+```rust
+struct ComputedStyle {
+    display: Display,
+    width: Length,
+    height: Length,
+    position: Position,
+    // ...
+}
+```
+
+The pipeline should be:
+
+```text
+CSS text
+    │
+    ▼
+Parser
+    │
+    ▼
+Property IDs
+    │
+    ▼
+Typed ComputedStyle
+    │
+    ▼
+Layout
+    │
+    ▼
+Paint
+```
+
+Not:
+
+```text
+Layout
+    │
+    ▼
+HashMap<String, String>
+```
+
+---
+
+## 16. String Interning and Atoms
+
+Browser engines repeatedly process the same strings:
+
+```text
+div
+span
+input
+class
+id
+style
+href
+display
+position
+```
+
+Avoid repeated:
+
+* heap allocations;
+* string comparisons;
+* hashing.
+
+Introduce atoms or interned identifiers.
+
+Example:
+
+```rust
+struct Atom(u32);
+```
+
+Possible internal usage:
+
+```text
+TagName
+AttributeName
+CSSProperty
+ClassToken
+```
+
+The parser handles:
+
+```text
+String
+```
+
+and converts to:
+
+```text
+Atom / Enum / ID
+```
+
+The hot path should primarily use compact identifiers.
+
+Benefits:
+
+* faster comparisons;
+* reduced allocations;
+* reduced memory use;
+* faster selector matching;
+* faster DOM lookups.
+
+---
+
+## 17. Rendering Invalidation
+
+The rendering pipeline should distinguish:
+
+```text
+Style dirty
+Layout dirty
+Paint dirty
+Composite dirty
+```
+
+Example:
+
+```text
+Opacity animation
+    ↓
+Composite only
+
+Color change
+    ↓
+Paint
+
+Width change
+    ↓
+Layout + Paint
+
+Display change
+    ↓
+Style + Layout + Paint
+```
+
+Do not treat all changes as equivalent.
+
+Future architecture:
+
+```text
+Mutation
+   │
+   ▼
+Style invalidation
+   │
+   ▼
+Layout invalidation
+   │
+   ▼
+Damage region generation
+   │
+   ▼
+Paint only affected regions
+   │
+   ▼
+Composite
+```
+
+---
+
+## 18. Damage Tracking
+
+Once paint invalidation exists, track affected regions.
+
+Conceptually:
+
+```rust
+struct DamageRegion {
+    rects: Vec<Rect>,
+}
+```
+
+Or a more optimized representation later.
+
+Example:
+
+```text
+Small button changes
+    ↓
+Invalidate button bounds
+    ↓
+Repaint affected region
+```
+
+Avoid:
+
+```text
+Small DOM update
+    ↓
+Repaint entire viewport
+```
+
+unless required.
+
+---
+
+## 19. JavaScript ↔ Rust Boundary Optimization
+
+The JS/native boundary is likely to become a major performance hotspot.
+
+Avoid repeated:
+
+```text
+JS value
+    ↓
+String conversion
+    ↓
+Rust String allocation
+    ↓
+DOM lookup
+    ↓
+Rust String allocation
+    ↓
+JS value
+```
+
+Optimize common paths.
+
+Potential improvements:
+
+* avoid temporary strings;
+* use atoms;
+* cache native handles;
+* use typed conversions;
+* avoid repeated prototype lookups;
+* minimize FFI/native boundary crossings;
+* batch operations where possible.
+
+Benchmark separately:
+
+```text
+100k property reads
+100k property writes
+100k native function calls
+100k event dispatches
+```
+
+---
+
+## 20. Compatibility vs Performance
+
+Maintain two separate development pipelines.
+
+### Compatibility Pipeline
+
+```text
+Web API
+   │
+   ▼
+Specification / behavior definition
+   │
+   ▼
+Targeted WPT
+   │
+   ▼
+Implementation
+   │
+   ▼
+Regression tests
+```
+
+### Performance Pipeline
+
+```text
+Benchmark
+   │
+   ▼
+Profile
+   │
+   ▼
+Identify hotspot
+   │
+   ▼
+Optimize
+   │
+   ▼
+Measure before/after
+   │
+   ▼
+Regression benchmark
+```
+
+Never accept an optimization solely because it:
+
+> "looks faster"
+
+Require measurable evidence.
+
+---
+
+## 21. Benchmark Suite
+
+Maintain a dedicated benchmark suite.
+
+---
+
+### 21.1 DOM Benchmarks
+
+```text
+Create 1,000 nodes
+Create 10,000 nodes
+Append 10,000 nodes
+Remove subtree
+Move detached subtree
+Clone subtree
+querySelector
+querySelectorAll
+getElementsByClassName
+innerHTML large tree
+outerHTML replacement
+```
+
+---
+
+### 21.2 JS ↔ Native Benchmarks
+
+```text
+100,000 DOM property reads
+100,000 DOM property writes
+100,000 native calls
+100,000 event dispatches
+classList mutations
+dataset access
+attribute access
+```
+
+---
+
+### 21.3 CSS Benchmarks
+
+```text
+1,000 nodes / 100 rules
+10,000 nodes / 500 rules
+Deep selectors
+Class mutations
+Style mutations
+Inherited property changes
+```
+
+---
+
+### 21.4 Layout Benchmarks
+
+```text
+Static page
+Single text mutation
+Single class mutation
+Viewport resize
+Flex-heavy layout
+Deep nested layout
+Large list layout
+```
+
+---
+
+### 21.5 Idle Game Benchmark
+
+Because Nimble is optimized for lightweight and idle-game workloads, maintain a workload specifically representing the target use case.
+
+Example:
+
+```text
+1,000 counters
+Updates every 50ms
+Frequent text mutations
+Periodic class changes
+Timers
+Animation loop
+Moderate DOM size
+Long-running session
+```
+
+Measure:
+
+```text
+CPU usage
+Frame time
+Frame variance
+Memory usage
+Allocation rate
+GC pressure
+DOM update throughput
+```
+
+This benchmark should be considered more representative than generic browser benchmarks alone.
+
+---
+
+## 22. Profiling Requirements
+
+Every significant optimization should be profiled.
+
+Recommended workflow:
+
+```text
+Baseline benchmark
+      │
+      ▼
+CPU profile
+      │
+      ▼
+Memory profile
+      │
+      ▼
+Flamegraph
+      │
+      ▼
+Identify hot path
+      │
+      ▼
+Optimize
+      │
+      ▼
+Run same benchmark
+      │
+      ▼
+Compare results
+```
+
+Record:
+
+```text
+Before
+After
+Percentage change
+Regression risk
+Affected workloads
+```
+
+Do not optimize based only on assumptions.
+
+---
+
+## 23. Script Loading Architecture
+
+Do not implement:
+
+* parser-blocking scripts;
+* `defer`;
+* `async`;
+* modules;
+
+as completely separate systems.
+
+Use:
+
+```text
+HTML Parser
+     │
+     ▼
+Script Discovery
+     │
+     ▼
+Resource Loader
+     │
+     ▼
+Script Scheduler
+     │
+     ├── Blocking
+     ├── Async
+     ├── Defer
+     └── Module
+```
+
+The scheduler should determine execution order.
+
+---
+
+## 24. ES Module Architecture
+
+Implement a reusable module system:
+
+```text
+Module URL
+    │
+    ▼
+Resolver
+    │
+    ▼
+Import Map
+    │
+    ▼
+Resource Loader
+    │
+    ▼
+Module Cache
+    │
+    ▼
+Instantiation
+    │
+    ▼
+Evaluation
+```
+
+The cache should be keyed by resolved module identity.
+
+Avoid:
+
+```text
+Every import
+    ↓
+Fetch again
+    ↓
+Parse again
+    ↓
+Evaluate again
+```
+
+---
+
+## 25. Security Pipeline
+
+Security should not be implemented separately for every API.
+
+Centralize checks.
+
+```text
+Operation
+    │
+    ▼
+Origin Check
+    │
+    ▼
+CORS
+    │
+    ▼
+CSP
+    │
+    ▼
+Permissions Policy
+    │
+    ▼
+Secure Context
+    │
+    ▼
+Operation
+```
+
+Examples:
+
+```text
+fetch()
+Image loading
+Module loading
+Script loading
+Clipboard
+Notifications
+Future APIs
+```
+
+should reuse centralized policy evaluation.
+
+---
+
+## 26. Avoid Permanent Fake APIs
+
+Do not add silent no-op APIs merely to avoid exceptions.
+
+Example:
+
+```javascript
+element.scrollIntoView();
+```
+
+A no-op implementation can cause application bugs that are difficult to diagnose.
+
+If a compatibility stub is necessary:
+
+1. explicitly classify it as a stub;
+2. document it;
+3. test it;
+4. track it as incomplete;
+5. avoid claiming the feature is implemented.
+
+Feature states should be:
+
+```text
+Implemented
+Partial
+Compatibility Stub
+Unsupported
+```
+
+Prefer semantically correct partial implementations over APIs that silently pretend to work.
+
+---
+
+## 27. Dataset and Exotic Property Behavior
+
+Do not permanently accept API limitations solely because a current Rust binding does not expose a convenient mechanism.
+
+Before declaring an API impossible or heavily simplified:
+
+1. inspect the underlying QuickJS API;
+2. determine whether the missing functionality exists upstream;
+3. check whether a minimal binding can be added;
+4. investigate property hooks or exotic objects;
+5. only then accept a documented limitation.
+
+This is especially relevant for:
+
+* `dataset`;
+* bracket access;
+* live property reflection;
+* DOM exotic objects;
+* named properties;
+* collection behavior.
+
+A small missing native binding may unlock multiple Web APIs.
+
+---
+
+## 28. Web Platform Tests
+
+WPT should begin before the engine reaches "platform readiness."
+
+Start immediately with targeted subsets.
+
+Recommended areas:
+
+```text
+DOM
+Events
+Selectors
+URL
+History
+Timers
+Fetch
+Forms
+Collections
+```
+
+Workflow:
+
+```text
+Implement feature
+      │
+      ▼
+Run targeted WPT subset
+      │
+      ▼
+Fix compatibility failures
+      │
+      ▼
+Add Nimble regression tests
+      │
+      ▼
+Track compatibility percentage
+```
+
+Do not wait until late development to discover that multiple APIs have incompatible semantics.
+
+---
+
+## 29. Automatic Capability Tracking
+
+Where practical, capability reporting should derive from:
+
+```text
+Tests
++
+Implementation status
+```
+
+rather than manual percentage estimates only.
+
+Example:
+
+```text
+Feature:
+    implemented: true
+    unit_tests: true
+    integration_tests: true
+    WPT_pass_rate: 82%
+    performance_benchmark: true
+```
+
+This makes roadmap progress measurable.
+
+---
+
+## 30. Recommended Implementation Priority
+
+The following order prioritizes architecture, performance, and future reuse.
+
+---
+
+### P0 — Architectural Foundations
+
+#### 1. Non-destructive detached DOM nodes
+
+Implement:
+
+```text
+Connected
+Detached
+Destroyed
+```
+
+without destroying nodes on ordinary removal.
+
+#### 2. Generation-safe Node handles
+
+Use:
+
+```text
+(NodeId, Generation)
+```
+
+or equivalent.
+
+#### 3. Central Mutation Pipeline
+
+All DOM changes must use centralized invalidation.
+
+#### 4. Dirty Flags
+
+Classify:
+
+```text
+DOM
+Collections
+Selectors
+Style
+Layout
+Paint
+Accessibility
+```
+
+#### 5. Task Scheduler
+
+Central event loop and task queues.
+
+#### 6. Resource Loader
+
+Shared loading pipeline.
+
+#### 7. Structured Clone
+
+Before Workers and MessageChannel.
+
+---
+
+## 31. P1 — Performance Infrastructure
+
+#### 8. String Interning / Atoms
+
+Intern:
+
+```text
+Tags
+Attributes
+CSS properties
+Common identifiers
+```
+
+#### 9. Selector Cache
+
+Cache selector matching.
+
+#### 10. Computed Style Cache
+
+Cache typed computed styles.
+
+#### 11. Dirty Style Propagation
+
+Avoid full document style recomputation.
+
+#### 12. DOM Mutation Batching
+
+Avoid layout after every mutation.
+
+#### 13. Paint Damage Tracking
+
+Track affected regions.
+
+#### 14. JS ↔ Rust Boundary Benchmarks
+
+Measure native binding costs.
+
+---
+
+## 32. P2 — High-Impact Compatibility
+
+#### 15. URL
+
+Implement:
+
+* `URL`;
+* `URLSearchParams`;
+* relative resolution;
+* base URL behavior.
+
+#### 16. Fetch Core
+
+Implement:
+
+* Request;
+* Response;
+* Headers;
+* Body;
+* cancellation.
+
+#### 17. AbortController
+
+Shared cancellation primitive.
+
+#### 18. Script Loading Modes
+
+Implement:
+
+* parser blocking;
+* defer;
+* async.
+
+#### 19. ES Modules
+
+Implement:
+
+* resolver;
+* import maps;
+* dynamic import;
+* module cache.
+
+#### 20. Default Actions
+
+Implement correct browser default behavior.
+
+#### 21. Form Semantics
+
+Expand real form behavior.
+
+---
+
+## 33. P3 — Rendering
+
+#### 22. Real Scrolling
+
+Implement:
+
+* scroll position;
+* scroll APIs;
+* scrollIntoView;
+* scroll offsets.
+
+#### 23. Viewport
+
+Implement real viewport state.
+
+#### 24. Stacking Contexts
+
+Implement stacking context behavior.
+
+#### 25. z-index
+
+Implement correct ordering.
+
+#### 26. Transforms
+
+Implement transform pipeline.
+
+#### 27. Incremental Layout
+
+After style invalidation infrastructure is stable.
+
+#### 28. Compositing Layers
+
+Where performance benefits justify it.
+
+---
+
+## 34. P4 — Parallelism
+
+#### 29. MessagePort
+
+#### 30. MessageChannel
+
+#### 31. Structured Clone Integration
+
+#### 32. Transferable Objects
+
+#### 33. Worker
+
+Implement only after the previous primitives exist.
+
+---
+
+## 35. P5 — Large Platform Features
+
+#### 34. CSS Grid
+
+#### 35. iframe
+
+#### 36. Multiple Browsing Contexts
+
+#### 37. Cross-window Messaging
+
+#### 38. Shadow DOM
+
+#### 39. Custom Elements
+
+#### 40. MutationObserver
+
+These features should be implemented on top of stable primitives rather than introducing parallel architecture.
+
+---
+
+## 36. Mandatory Implementation Rules
+
+### Architecture-First Rule
+
+Before implementing a new Web API:
+
+```text
+1. Identify existing shared primitives.
+2. Identify duplicated logic.
+3. Extend shared infrastructure when possible.
+4. Avoid API-specific state machines.
+```
+
+---
+
+### Hot-Path Rule
+
+Do not use:
+
+```text
+Heap-allocated strings
+Repeated parsing
+Repeated selector matching
+Repeated HashMap lookups
+```
+
+in hot paths when a:
+
+```text
+Atom
+Enum
+Interned ID
+Typed representation
+Cache
+```
+
+can be used.
+
+---
+
+### Mutation Rule
+
+All DOM mutations must use centralized DOM primitives.
+
+Do not manually invalidate unrelated caches from individual JavaScript bindings.
+
+---
+
+### Cache Rule
+
+Caches must use explicit:
+
+```text
+Versioning
+Dirty state
+Dependency information
+```
+
+Prefer:
+
+```text
+Mutation
+    ↓
+Mark dirty
+    ↓
+Lazy recomputation
+```
+
+over eager global synchronization.
+
+---
+
+### Node Lifetime Rule
+
+Removing a node from the document must not automatically destroy its identity.
+
+JavaScript references to detached nodes should remain valid.
+
+---
+
+### Rendering Rule
+
+Do not trigger style, layout, and paint after every individual DOM mutation.
+
+Batch mutations and render at scheduler-defined render opportunities.
+
+---
+
+### Resource Rule
+
+Resource-consuming APIs should converge on:
+
+```text
+URL resolution
+    ↓
+Security
+    ↓
+Policy checks
+    ↓
+Cache
+    ↓
+Network
+    ↓
+Decode
+```
+
+---
+
+### Performance Rule
+
+Every performance optimization must have:
+
+```text
+Baseline
+Benchmark
+Profile
+Before result
+After result
+Regression check
+```
+
+---
+
+### Testing Rule
+
+Every significant feature should include:
+
+1. unit tests;
+2. integration tests when crossing crates;
+3. compatibility/WPT tests where applicable;
+4. regression tests;
+5. performance tests for hot paths.
+
+---
+
+## 37. Definition of Done
+
+A feature should not be considered fully complete merely because:
+
+```text
+The API exists
+```
+
+A stronger definition is:
+
+```text
+API implemented
+    │
+    ├── Semantics defined
+    ├── Unit tested
+    ├── Integration tested
+    ├── Compatibility tested
+    ├── Lifetime behavior verified
+    ├── Invalidations verified
+    ├── Error behavior verified
+    ├── Performance measured if hot
+    └── Regression tests added
+```
+
+---
+
+## 38. Final Engineering Principle
+
+The goal of Nimble should not be:
+
+> Implement as many browser APIs as possible.
+
+The goal should be:
+
+> Build a small number of powerful, reusable, well-profiled browser-engine primitives from which many Web APIs can be implemented cheaply and correctly.
+
+The preferred development model is:
+
+```text
+Shared Primitive
+      │
+      ▼
+Multiple APIs
+      │
+      ▼
+Compatibility Tests
+      │
+      ▼
+Benchmarks
+      │
+      ▼
+Profiling
+      │
+      ▼
+Optimization
+      │
+      ▼
+Regression Protection
+```
+
+A good implementation should make the next implementation easier.
+
+If a new feature requires:
+
+* another global cache;
+* another invalidation mechanism;
+* another scheduler;
+* another network pipeline;
+* another object lifetime model;
+
+then first investigate whether the existing architecture should be generalized instead.
+
+---
+
+## Final Priority Summary
+
+```text
+P0 — Architecture
+    ├── Detached node lifetime
+    ├── Generation-safe handles
+    ├── Mutation pipeline
+    ├── Dirty flags
+    ├── Task scheduler
+    ├── Resource loader
+    └── Structured clone
+
+P1 — Performance
+    ├── Atoms
+    ├── Selector cache
+    ├── Computed style cache
+    ├── Dirty propagation
+    ├── Mutation batching
+    ├── Damage tracking
+    └── JS/native profiling
+
+P2 — Compatibility
+    ├── URL
+    ├── Fetch core
+    ├── AbortController
+    ├── Script modes
+    ├── Modules
+    ├── Default actions
+    └── Forms
+
+P3 — Rendering
+    ├── Scrolling
+    ├── Viewport
+    ├── Stacking contexts
+    ├── z-index
+    ├── Transforms
+    ├── Incremental layout
+    └── Compositing
+
+P4 — Parallelism
+    ├── MessagePort
+    ├── MessageChannel
+    ├── Transferables
+    └── Workers
+
+P5 — Large Platform Features
+    ├── Grid
+    ├── iframe
+    ├── Multiple browsing contexts
+    ├── Shadow DOM
+    ├── Custom Elements
+    └── MutationObserver
+```
+
+> **Core principle: every implementation should either improve a shared primitive or reuse one. New APIs should not continuously create new architecture.**

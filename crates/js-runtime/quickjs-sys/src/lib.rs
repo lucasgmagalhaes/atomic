@@ -145,6 +145,13 @@ extern "C" {
     eval_flags: c_int,
   ) -> JSValue;
 
+  pub fn JS_ParseJSON(
+    ctx: *mut JSContext,
+    buf: *const c_char,
+    buf_len: usize,
+    filename: *const c_char,
+  ) -> JSValue;
+
   pub fn JS_FreeValue(ctx: *mut JSContext, v: JSValue);
 
   pub fn JS_ToCStringLen2(

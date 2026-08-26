@@ -4,7 +4,20 @@
 //! becomes a real `storage::value::Value` tree (walking arrays via
 //! `JS_GetLength`/`JS_GetPropertyUint32`, plain objects via
 //! `JS_GetOwnPropertyNames`), not a `JSON.stringify` round trip — and
-//! `get()`'s result is rebuilt as a real JS object/array on the way back.
+//! `get()`'s result is rebuilt as a live JS object/array on the way back.
+//!
+//! Also the engine's one real Structured Clone primitive (`ROADMAP.md` P0
+//! item 7 / `primitives.md` §12 — the exact "build once, reuse for
+//! `postMessage`/`MessageChannel`/Workers/`history.pushState`" case its
+//! own YAGNI carve-out names): `js_to_storage_value` then
+//! `storage_value_to_js` is a real independent deep copy through an
+//! intermediate representation that owns no `JSValue`s, not a `JS_DupValue`
+//! reference bump — mutating the source afterward can't be observed
+//! through the clone, or vice versa. Exposed to script directly as the
+//! global `structuredClone(value)` ([`register`]), and reused natively by
+//! [`crate::history`]'s `pushState`/`replaceState` for `state` (closing
+//! that module's own previously-documented "kept by reference, not
+//! cloned" deviation).
 //!
 //! Deviations from a true structured clone: no `Date`/`Map`/`Set`/typed
 //! arrays/`RegExp` (functions, symbols, and anything else outside
@@ -12,8 +25,11 @@
 //! `Value::Null` — matches `storage::value::Value`'s own scope, this
 //! module doesn't invent variants that type can't hold), and no cycle
 //! detection (a JS object referencing itself would recurse forever here;
-//! real structured clone handles cycles, this doesn't).
+//! real structured clone handles cycles, this doesn't — same scope cut
+//! this module already carried before `structuredClone` existed as a
+//! global, not a new one introduced for it).
 use std::ffi::CString;
+use std::os::raw::c_int;
 
 use quickjs_sys as sys;
 use storage::value::Value;
@@ -104,6 +120,46 @@ pub(crate) unsafe fn js_to_storage_value(ctx: *mut sys::JSContext, val: sys::JSV
         }
         _ => Value::Null,
     }
+}
+
+/// Real deep clone of `val` — the actual Structured Clone primitive (see
+/// this module's own doc). A plain round trip through
+/// `storage::value::Value`: `val` is fully read into an owned tree that
+/// borrows no `JSValue` at all, so the rebuilt result shares nothing with
+/// `val` — every nested object/array is a fresh `JS_NewObject`/`JS_NewArray`,
+/// not a duped reference. Borrows `val`, doesn't free it, same as
+/// [`js_to_storage_value`]. Returns an owned reference the caller must
+/// eventually free, same as every other `JS_New*`-shaped result here.
+pub(crate) unsafe fn deep_clone(ctx: *mut sys::JSContext, val: sys::JSValue) -> sys::JSValue {
+    storage_value_to_js(ctx, &js_to_storage_value(ctx, val))
+}
+
+unsafe extern "C" fn structured_clone(
+    ctx: *mut sys::JSContext,
+    _this: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 1 {
+        return sys::js_undefined();
+    }
+    deep_clone(ctx, *argv)
+}
+
+/// Registers the global `structuredClone(value)` function on `ctx`.
+pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
+    let global = sys::JS_GetGlobalObject(ctx);
+    let fn_name = CString::new("structuredClone").unwrap();
+    let func = sys::JS_NewCFunction2(
+        ctx,
+        structured_clone,
+        fn_name.as_ptr(),
+        1,
+        sys::JS_CFUNC_GENERIC,
+        0,
+    );
+    sys::JS_SetPropertyStr(ctx, global, fn_name.as_ptr(), func);
+    sys::JS_FreeValue(ctx, global);
 }
 
 /// Rebuilds a `storage::value::Value` as a live `JSValue` - the "out of

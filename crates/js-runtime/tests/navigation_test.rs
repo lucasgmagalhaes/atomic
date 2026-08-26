@@ -135,6 +135,57 @@ fn history_replace_state_does_not_grow_the_stack() {
 }
 
 #[test]
+fn history_state_is_a_real_snapshot_not_a_live_reference() {
+    // Mutating the object passed to pushState afterward must not be
+    // visible through history.state - proves `state` is really structured
+    // cloned (crate::value_bridge::deep_clone), not JS_DupValue'd.
+    let d = dom::Dom::new();
+    let _ = d.root();
+    let rt = Runtime::new();
+    let mut ctx = Context::with_dom(&rt, d);
+    ctx.set_url("https://example.com/start");
+
+    let result = ctx
+        .eval(
+            "(() => { \
+                const obj = {page: 1}; \
+                history.pushState(obj, '', '/next'); \
+                obj.page = 999; \
+                obj.extra = 'added-after'; \
+                return JSON.stringify(history.state); \
+            })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "{\"page\":1}");
+}
+
+#[test]
+fn structured_clone_produces_an_independent_deep_copy() {
+    let d = dom::Dom::new();
+    let _ = d.root();
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+
+    let result = ctx
+        .eval(
+            "(() => { \
+                const original = {a: 1, nested: {b: [1, 2, 3]}}; \
+                const clone = structuredClone(original); \
+                clone.a = 999; \
+                clone.nested.b.push(4); \
+                return JSON.stringify({original, clone}); \
+            })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(
+        result,
+        "{\"original\":{\"a\":1,\"nested\":{\"b\":[1,2,3]}},\"clone\":{\"a\":999,\"nested\":{\"b\":[1,2,3,4]}}}"
+    );
+}
+
+#[test]
 fn history_back_forward_move_the_stack_and_fire_popstate() {
     let d = dom::Dom::new();
     let _ = d.root();

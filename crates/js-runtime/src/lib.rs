@@ -166,6 +166,7 @@ impl<'rt> Context<'rt> {
             location::register(ptr);
             history::register(ptr);
             screen::register(ptr);
+            value_bridge::register(ptr);
         };
         Context {
             ptr,

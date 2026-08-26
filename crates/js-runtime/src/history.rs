@@ -6,14 +6,12 @@
 //! values on the object" convention `events.rs`'s listener records use,
 //! rather than a separate native side table.
 //!
-//! Real deviation from spec: `state` is kept by direct reference (a duped
-//! `JSValue`), not structured-cloned — mutating an object after
-//! `pushState(obj, ...)` is visible through `history.state`/a later
-//! `popstate` too, unlike a real browser's independent snapshot. Every
-//! other JS-facing structured-clone-shaped API in this crate
-//! (`postMessage`-less `workers`, `structuredClone`) has the same kind of
-//! scope cut where a real deep clone would need more plumbing than the
-//! feature is worth yet.
+//! `state` is real structured-cloned (via [`crate::value_bridge::deep_clone`])
+//! before being stored — mutating the object passed to `pushState`/
+//! `replaceState` afterward is not visible through `history.state`/a later
+//! `popstate`, matching a real browser's independent snapshot. Same scope
+//! cut `value_bridge`'s own doc carries (no `Date`/`Map`/`Set`/typed
+//! arrays/`RegExp`, no cycle detection) — not a new one introduced here.
 //!
 //! `back`/`forward`/`go` only ever move within *this context's own*
 //! `pushState`/`replaceState` stack — real browser history that predates
@@ -135,7 +133,7 @@ unsafe fn read_state_args(
     argv: *mut sys::JSValue,
 ) -> (sys::JSValue, Option<String>) {
     let state_arg = if argc >= 1 {
-        sys::JS_DupValue(ctx, *argv)
+        crate::value_bridge::deep_clone(ctx, *argv)
     } else {
         sys::js_null()
     };

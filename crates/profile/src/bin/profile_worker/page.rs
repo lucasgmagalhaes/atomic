@@ -77,7 +77,7 @@ pub(crate) struct Page<'rt> {
     /// the exact inputs it was computed from. `layout()` reuses it
     /// (a clone — far cheaper than re-running `build_box_tree_with_viewport`
     /// + text shaping/flex resolution + `layout_block` from scratch) when
-    /// none of `width`/`dom.mutation_count()`/`adopted_stylesheet_version()`
+    /// none of `width`/`dom.layout_version()`/`adopted_stylesheet_version()`
     /// have changed since. `RefCell` because `layout()` is called from
     /// both `&self` methods (`content_height`, `hit_test_at`) and `&mut
     /// self` ones (`render`) — a shared cache needs interior mutability
@@ -87,7 +87,7 @@ pub(crate) struct Page<'rt> {
 
 struct LayoutCache {
     width: u32,
-    dom_mutations: u64,
+    layout_ver: u64,
     adopted_version: u64,
     tree: LayoutBox,
 }
@@ -210,7 +210,12 @@ impl<'rt> Page<'rt> {
     /// box-tree-construction step itself fails.
     fn layout(&self, width: u32) -> Option<LayoutBox> {
         let dom = self.ctx.dom()?;
-        let dom_mutations = dom.mutation_count();
+        // `layout_version` bumps only when a layout-relevant mutation
+        // occurs (LAYOUT dirty flag set), so it's the precise cache key
+        // for "has layout been dirtied since last rebuild?" — cheaper and
+        // more precise than `mutation_count()`, which bumps on every
+        // mutation including attribute-only changes that don't affect layout.
+        let layout_ver = dom.layout_version();
         // Real `document.adoptedStyleSheets` mutation support (see
         // `js_runtime::cssom_stylesheet`): a script's `insertRule`/
         // `deleteRule` doesn't bump `dom.mutation_count()` (it touches a
@@ -220,7 +225,7 @@ impl<'rt> Page<'rt> {
 
         if let Some(cached) = self.layout_cache.borrow().as_ref() {
             if cached.width == width
-                && cached.dom_mutations == dom_mutations
+                && cached.layout_ver == layout_ver
                 && cached.adopted_version == adopted_version
             {
                 return Some(cached.tree.clone());
@@ -246,7 +251,7 @@ impl<'rt> Page<'rt> {
 
         *self.layout_cache.borrow_mut() = Some(LayoutCache {
             width,
-            dom_mutations,
+            layout_ver,
             adopted_version,
             tree: tree.clone(),
         });

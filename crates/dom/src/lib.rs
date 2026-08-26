@@ -24,6 +24,60 @@ mod mutation;
 mod query;
 mod serialize;
 
+/// Classifies which subsystems need recomputation after a DOM mutation.
+/// Each flag corresponds to a downstream consumer that can skip work when
+/// its flag is clear — the core mechanism behind lazy invalidation
+/// (see `spec/architecture/primitives.md` §3.2–3.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DirtyFlags(u8);
+
+impl DirtyFlags {
+    pub const EMPTY: Self = Self(0);
+    /// DOM tree structure changed (nodes added/removed/reordered).
+    pub const DOM: Self = Self(1 << 0);
+    /// Live collections (HTMLCollection, NodeList) need recomputation.
+    pub const COLLECTION: Self = Self(1 << 1);
+    /// Selector matching needs recomputation.
+    pub const SELECTORS: Self = Self(1 << 2);
+    /// Style cascade needs recomputation.
+    pub const STYLE: Self = Self(1 << 3);
+    /// Layout needs recomputation.
+    pub const LAYOUT: Self = Self(1 << 4);
+    /// Paint / display list needs recomputation.
+    pub const PAINT: Self = Self(1 << 5);
+    /// Accessibility tree needs recomputation.
+    pub const A11Y: Self = Self(1 << 6);
+
+    pub fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    pub fn contains(self, other: Self) -> bool {
+        (self.0 & other.0) == other.0
+    }
+
+    pub fn insert(&mut self, other: Self) {
+        self.0 |= other.0;
+    }
+
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+}
+
+impl std::ops::BitOr for DirtyFlags {
+    type Output = Self;
+    fn bitor(self, rhs: Self) -> Self {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl std::ops::BitOrAssign for DirtyFlags {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NodeId {
     index: usize,
@@ -81,20 +135,22 @@ pub struct Dom {
     /// fires on commit — blur after the value actually moved — not on
     /// every keystroke, unlike `input`).
     focused_value_snapshot: Option<String>,
-    /// Bumped by every structural/content mutation (`append_child`,
-    /// `insert_before`, `remove_from_parent`, `remove`, `set_attribute`,
-    /// `remove_attribute`, `append_text`, `set_text_content`, `set_value`)
-    /// — deliberately *not* by `focus`/`blur`/`clear_focus`, which don't
-    /// affect anything `layout-engine` computes (no focus-ring rendering
-    /// exists). Lets a caller (`profile-worker`'s `Page::layout`) detect
-    /// "has anything relevant to layout changed since I last laid this
-    /// page out" with one cheap integer comparison instead of diffing the
-    /// whole tree — the real backing signal for incremental layout
-    /// invalidation. Wrapping add is fine: a `u64` wrapping around during
-    /// one process's lifetime is not a real scenario, and even a wrapped
-    /// value still changes on every mutation, which is all a caller
-    /// actually checks (equality, not ordering).
+    /// Backward-compatible monotonic mutation counter — bumped by every
+    /// structural/content mutation, same as before. Kept for callers that
+    /// still use `mutation_count()` (e.g. `profile-worker`'s layout cache).
     mutations: u64,
+    /// Classified dirty flags — set by each mutation, drained by
+    /// consumers via [`Dom::drain_dirty`]. Lets each subsystem
+    /// (collections, selectors, style, layout, paint, a11y) skip work
+    /// when its flag is clear, rather than invalidating everything.
+    dirty: DirtyFlags,
+    /// Monotonically increasing counter bumped only when the LAYOUT
+    /// flag is set by [`Dom::mark_dirty`]. Lets callers that only need
+    /// "did layout change?" (e.g. `profile-worker`'s layout cache) do
+    /// a cheap integer comparison without touching the full dirty-flags
+    /// drain API — which requires `&mut self` and isn't available from
+    /// an immutable borrow of `Dom`.
+    layout_version: u64,
 }
 
 impl Default for Dom {
@@ -125,6 +181,19 @@ impl Dom {
             focused: None,
             focused_value_snapshot: None,
             mutations: 0,
+            dirty: DirtyFlags::EMPTY,
+            layout_version: 0,
         }
+    }
+
+    /// Accumulate dirty flags — called by every mutation method.
+    /// Also bumps the backward-compatible `mutations` counter and
+    /// `layout_version` when the LAYOUT flag is set.
+    fn mark_dirty(&mut self, flags: DirtyFlags) {
+        self.mutations = self.mutations.wrapping_add(1);
+        if flags.contains(DirtyFlags::LAYOUT) {
+            self.layout_version = self.layout_version.wrapping_add(1);
+        }
+        self.dirty |= flags;
     }
 }

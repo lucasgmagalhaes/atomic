@@ -1,4 +1,15 @@
-use crate::{Dom, Node, NodeData, NodeId, Slot};
+use crate::{DirtyFlags, Dom, Node, NodeData, NodeId, Slot};
+
+/// All dirty flags — set when the DOM tree shape changes (nodes
+/// added/removed/reordered), since every downstream subsystem may need
+/// recomputation.
+const STRUCTURAL: DirtyFlags = DirtyFlags::DOM
+    .union(DirtyFlags::COLLECTION)
+    .union(DirtyFlags::SELECTORS)
+    .union(DirtyFlags::STYLE)
+    .union(DirtyFlags::LAYOUT)
+    .union(DirtyFlags::PAINT)
+    .union(DirtyFlags::A11Y);
 
 impl Dom {
     pub(crate) fn insert(&mut self, data: NodeData) -> NodeId {
@@ -52,7 +63,7 @@ impl Dom {
     }
 
     pub fn append_child(&mut self, parent: NodeId, child: NodeId) {
-        self.mutations = self.mutations.wrapping_add(1);
+        self.mark_dirty(STRUCTURAL);
         self.detach(child);
         if let Some(node) = self.get_mut(child) {
             node.parent = Some(parent);
@@ -68,7 +79,7 @@ impl Dom {
     /// `TreeSink::append_before_sibling`, which never calls this on a
     /// node without one.
     pub fn insert_before(&mut self, sibling: NodeId, new_node: NodeId) {
-        self.mutations = self.mutations.wrapping_add(1);
+        self.mark_dirty(STRUCTURAL);
         let parent = self
             .get(sibling)
             .and_then(|n| n.parent)
@@ -92,7 +103,7 @@ impl Dom {
     /// reattached elsewhere. Use [`Dom::remove`] to actually delete a
     /// subtree instead.
     pub fn remove_from_parent(&mut self, child: NodeId) {
-        self.mutations = self.mutations.wrapping_add(1);
+        self.mark_dirty(STRUCTURAL);
         self.detach(child);
     }
 
@@ -110,7 +121,7 @@ impl Dom {
 
     /// Removes a node and its whole subtree, freeing slots for reuse (generation bumped).
     pub fn remove(&mut self, id: NodeId) {
-        self.mutations = self.mutations.wrapping_add(1);
+        self.mark_dirty(STRUCTURAL);
         let children = self.get(id).map(|n| n.children.clone()).unwrap_or_default();
         for child in children {
             self.remove(child);
@@ -155,7 +166,7 @@ impl Dom {
         else {
             return false;
         };
-        self.mutations = self.mutations.wrapping_add(1);
+        self.mark_dirty(STRUCTURAL);
         self.detach(new_child);
         self.detach(old_child);
         if let Some(node) = self.get_mut(parent) {

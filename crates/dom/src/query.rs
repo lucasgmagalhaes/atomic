@@ -1,4 +1,4 @@
-use crate::{Dom, Node, NodeId};
+use crate::{DirtyFlags, Dom, Node, NodeId};
 
 impl Dom {
     /// See the `mutations` field's own doc — a caller compares two
@@ -6,6 +6,29 @@ impl Dom {
     /// relevant changed in between, without diffing the tree itself.
     pub fn mutation_count(&self) -> u64 {
         self.mutations
+    }
+
+    /// Returns the accumulated [`DirtyFlags`] since the last drain and
+    /// resets them to empty. Consumers should call this once per frame
+    /// (or once per script-turn) to see what changed, then skip work
+    /// for subsystems whose flag is clear.
+    pub fn drain_dirty(&mut self) -> DirtyFlags {
+        let flags = self.dirty;
+        self.dirty = DirtyFlags::EMPTY;
+        flags
+    }
+
+    /// Peek at the current dirty flags without resetting them.
+    pub fn dirty_flags(&self) -> DirtyFlags {
+        self.dirty
+    }
+
+    /// Version counter that increments only when layout-relevant
+    /// mutations occur (the LAYOUT dirty flag is set). Cheaper than
+    /// comparing `mutation_count()` for callers that only need to know
+    /// "did layout change?" — e.g. `profile-worker`'s layout cache.
+    pub fn layout_version(&self) -> u64 {
+        self.layout_version
     }
 
     pub fn get(&self, id: NodeId) -> Option<&Node> {

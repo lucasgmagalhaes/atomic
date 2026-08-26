@@ -1,8 +1,18 @@
-use crate::{Dom, Node, NodeData, NodeId};
+use crate::{DirtyFlags, Dom, Node, NodeData, NodeId};
+
+/// Attribute mutations affect selector matching, style cascade, and
+/// visual appearance. At the DOM layer we can't know which specific
+/// attributes affect layout (e.g. `class` vs `data-*`), so LAYOUT is
+/// included conservatively — a higher layer (layout engine) can refine
+/// this if needed.
+const ATTR_DIRTY: DirtyFlags = DirtyFlags::SELECTORS
+    .union(DirtyFlags::STYLE)
+    .union(DirtyFlags::LAYOUT)
+    .union(DirtyFlags::PAINT);
 
 impl Dom {
     pub fn set_attribute(&mut self, id: NodeId, name: &str, value: &str) {
-        self.mutations = self.mutations.wrapping_add(1);
+        self.mark_dirty(ATTR_DIRTY);
         if let Some(Node {
             data:
                 NodeData::Element {
@@ -39,7 +49,7 @@ impl Dom {
     /// its independent form value, so clearing that attribute clears the
     /// mirror as well.
     pub fn remove_attribute(&mut self, id: NodeId, name: &str) -> bool {
-        self.mutations = self.mutations.wrapping_add(1);
+        self.mark_dirty(ATTR_DIRTY);
         if let Some(Node {
             data:
                 NodeData::Element {
@@ -64,7 +74,7 @@ impl Dom {
     /// character tokens land in the same DOM text node rather than each
     /// getting their own. No-op if `id` isn't a `Text` node.
     pub fn append_text(&mut self, id: NodeId, more: &str) {
-        self.mutations = self.mutations.wrapping_add(1);
+        self.mark_dirty(DirtyFlags::DOM | DirtyFlags::LAYOUT | DirtyFlags::PAINT);
         if let Some(Node {
             data: NodeData::Text(text),
             ..
@@ -146,7 +156,7 @@ impl Dom {
     /// unlike the pre-existing `set_text_content`. No-op on a non-`Element`
     /// node.
     pub fn set_value(&mut self, id: NodeId, value: &str) {
-        self.mutations = self.mutations.wrapping_add(1);
+        self.mark_dirty(DirtyFlags::DOM);
         if let Some(Node {
             data: NodeData::Element {
                 value: value_field, ..
@@ -171,7 +181,7 @@ impl Dom {
     /// Per-spec `Node.nodeValue` setter — updates text data for Text/Comment
     /// nodes, no-op for everything else.
     pub fn set_node_value(&mut self, id: NodeId, value: &str) {
-        self.mutations = self.mutations.wrapping_add(1);
+        self.mark_dirty(DirtyFlags::DOM | DirtyFlags::LAYOUT | DirtyFlags::PAINT);
         if let Some(Node { data, .. }) = self.get_mut(id) {
             match data {
                 NodeData::Text(t) => *t = value.to_string(),

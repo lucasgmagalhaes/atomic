@@ -517,7 +517,7 @@ fn scroll_by_a_negative_delta_clamps_back_to_the_top() {
 #[test]
 fn reload_resets_scroll_to_the_top() {
     let html = r#"<style>#a { background-color: #ff0000; width: 100px; height: 150px; } #b { background-color: #0000ff; width: 100px; height: 150px; }</style><div id="a"></div><div id="b"></div>"#;
-    let addr = serve_html_once(html);
+    let addr = serve_routes(vec![("/", html.to_string())]);
     let page_url = format!("http://{addr}/");
 
     let name = unique_shmem_name("scroll-reload-reset");

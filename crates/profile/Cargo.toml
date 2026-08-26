@@ -22,4 +22,4 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 
 [[bin]]
 name = "profile-worker"
-path = "src/bin/profile_worker.rs"
+path = "src/bin/profile_worker/main.rs"

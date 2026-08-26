@@ -86,7 +86,10 @@ unsafe fn read_js_number(val: sys::JSValue) -> Option<f64> {
   }
 }
 
-unsafe fn blob_opaque(rt: *mut sys::JSRuntime, this_val: sys::JSValue) -> *mut BlobInner {
+pub(crate) unsafe fn blob_opaque(
+  rt: *mut sys::JSRuntime,
+  this_val: sys::JSValue,
+) -> *mut BlobInner {
   let class_id = crate::class_registry::class_id_for(rt, BLOB_CLASS_KIND);
   sys::JS_GetOpaque(this_val, class_id) as *mut BlobInner
 }

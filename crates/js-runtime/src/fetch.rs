@@ -29,55 +29,24 @@ unsafe fn read_js_string(ctx: *mut sys::JSContext, val: sys::JSValue) -> Option<
   Some(s)
 }
 
-unsafe fn new_js_string(ctx: *mut sys::JSContext, s: &str) -> sys::JSValue {
-  sys::JS_NewStringLen(ctx, s.as_ptr() as *const std::os::raw::c_char, s.len())
-}
-
-unsafe fn set_str(ctx: *mut sys::JSContext, obj: sys::JSValue, key: &str, val: &str) {
-  let name = CString::new(key).unwrap();
-  let js_val = new_js_string(ctx, val);
-  sys::JS_SetPropertyStr(ctx, obj, name.as_ptr(), js_val);
-}
-
-unsafe fn set_num(ctx: *mut sys::JSContext, obj: sys::JSValue, key: &str, val: f64) {
-  let name = CString::new(key).unwrap();
-  sys::JS_SetPropertyStr(ctx, obj, name.as_ptr(), sys::js_float64(val));
-}
-
-unsafe fn set_bool(ctx: *mut sys::JSContext, obj: sys::JSValue, key: &str, val: bool) {
-  let name = CString::new(key).unwrap();
-  sys::JS_SetPropertyStr(ctx, obj, name.as_ptr(), sys::js_bool(val));
-}
-
 unsafe extern "C" fn fetch_sync(
   ctx: *mut sys::JSContext,
   _this_val: sys::JSValue,
   argc: c_int,
   argv: *mut sys::JSValue,
 ) -> sys::JSValue {
-  let result = sys::JS_NewObject(ctx);
-
   if argc < 1 {
-    set_bool(ctx, result, "ok", false);
-    set_num(ctx, result, "status", 0.0);
-    set_str(ctx, result, "body", "");
-    return result;
+    return crate::request_response::create_response_object(ctx, 0, &[], Some(Vec::new()), "");
   }
 
   let Some(url) = read_js_string(ctx, *argv) else {
-    set_bool(ctx, result, "ok", false);
-    set_num(ctx, result, "status", 0.0);
-    set_str(ctx, result, "body", "");
-    return result;
+    return crate::request_response::create_response_object(ctx, 0, &[], Some(Vec::new()), "");
   };
 
   if crate::cors::is_mixed_content_blocked(crate::cors::page_origin(ctx).as_deref(), &url)
     || crate::csp::is_request_blocked(ctx, &url)
   {
-    set_bool(ctx, result, "ok", false);
-    set_num(ctx, result, "status", 0.0);
-    set_str(ctx, result, "body", "");
-    return result;
+    return crate::request_response::create_response_object(ctx, 0, &[], Some(Vec::new()), &url);
   }
 
   let mut spec = if argc >= 2 {
@@ -102,23 +71,18 @@ unsafe extern "C" fn fetch_sync(
     Ok(response)
       if crate::cors::is_response_allowed(page_origin.as_deref(), &url, &response.headers) =>
     {
-      let body = String::from_utf8_lossy(&response.body).into_owned();
-      set_bool(ctx, result, "ok", (200..300).contains(&response.status));
-      set_num(ctx, result, "status", response.status as f64);
-      set_str(ctx, result, "body", &body);
+      crate::request_response::create_response_object(
+        ctx,
+        response.status,
+        &response.headers,
+        Some(response.body),
+        &url,
+      )
     }
-    // A blocked cross-origin response (no matching Access-Control-
-    // Allow-Origin) surfaces the same as a network failure - real
-    // fetch() never lets script see a disallowed cross-origin
-    // response's body/status either, it just fails the whole request.
     Ok(_) | Err(_) => {
-      set_bool(ctx, result, "ok", false);
-      set_num(ctx, result, "status", 0.0);
-      set_str(ctx, result, "body", "");
+      crate::request_response::create_response_object(ctx, 0, &[], Some(Vec::new()), &url)
     }
   }
-
-  result
 }
 
 /// Registers `fetchSync` as a global on `ctx`.

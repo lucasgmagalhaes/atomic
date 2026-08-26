@@ -37,6 +37,7 @@ mod notifications;
 mod page_visibility;
 mod performance;
 mod permissions_policy;
+mod request_response;
 mod screen;
 mod script_limits;
 mod timers;
@@ -79,12 +80,13 @@ impl Default for Runtime {
 
 impl Drop for Runtime {
   fn drop(&mut self) {
-    // Must run before JS_FreeRuntime: once this runtime's memory can
-    // be reused for a new one, a stale class_registry entry at the
-    // same address would corrupt that new runtime's class
-    // registration (see class_registry's module docs).
-    class_registry::cleanup_runtime(self.ptr);
+    // JS_FreeRuntime must run first: it triggers finalizers for any
+    // surviving GC objects, and those finalizers look up opaque
+    // pointers via class_id_for in this runtime's registry.
+    // cleanup_runtime after — the registry is dead (Runtime is
+    // !Send/!Sync, so no cross-thread reuse is possible).
     unsafe { sys::JS_FreeRuntime(self.ptr) };
+    class_registry::cleanup_runtime(self.ptr);
   }
 }
 
@@ -118,6 +120,7 @@ impl<'rt> Context<'rt> {
       events::register(ptr);
       event_subclasses::register(ptr);
       page_visibility::register(ptr);
+      request_response::register(ptr);
       fetch::register(ptr);
       fetch_async::register(ptr);
       timers::register(ptr);

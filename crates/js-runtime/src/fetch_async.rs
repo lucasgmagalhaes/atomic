@@ -142,13 +142,15 @@ unsafe fn call_if_present(
 unsafe fn build_response_object(
   ctx: *mut sys::JSContext,
   response: &net::Response,
+  url: &str,
 ) -> sys::JSValue {
-  let body = String::from_utf8_lossy(&response.body).into_owned();
-  let obj = sys::JS_NewObject(ctx);
-  set_bool(ctx, obj, "ok", (200..300).contains(&response.status));
-  set_num(ctx, obj, "status", response.status as f64);
-  set_str(ctx, obj, "body", &body);
-  obj
+  crate::request_response::create_response_object(
+    ctx,
+    response.status,
+    &response.headers,
+    Some(response.body.clone()),
+    url,
+  )
 }
 
 /// Reads the per-spec `RequestInit` subset this engine supports:
@@ -602,7 +604,7 @@ pub(crate) unsafe fn pump(ctx: *mut sys::JSContext) -> usize {
     };
     match result {
       Ok(response) => {
-        let mut obj = build_response_object(ctx, &response);
+        let mut obj = build_response_object(ctx, &response, &pending.url);
         let r = sys::JS_Call(ctx, pending.resolve, sys::js_undefined(), 1, &mut obj);
         sys::JS_FreeValue(ctx, r);
         sys::JS_FreeValue(ctx, obj);

@@ -1,10 +1,11 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Starts opencode's server mode bound to all network interfaces, so other
-    devices on the same LAN/Wi-Fi can connect to it (e.g. from a phone or
-    another computer's browser, or from a remote opencode/TUI client
-    pointed at this machine's IP).
+    Starts opencode with its web interface (`opencode web`, not the headless
+    `opencode serve`) bound to all network interfaces, so other devices on
+    the same LAN/Wi-Fi can connect to it from a browser (e.g. a phone or
+    another computer) and actually see/select a project to start a session
+    with the agent. `serve` alone is API-only and has no project picker.
 
 .DESCRIPTION
     Requires opencode to be installed (https://opencode.ai). This script
@@ -88,7 +89,7 @@ function Get-LanIPAddress {
 $lanIp = Get-LanIPAddress
 
 Write-Host "Project root (opencode's working directory): $ProjectPath" -ForegroundColor Cyan
-Write-Host "Starting opencode server on 0.0.0.0:$Port ..."
+Write-Host "Starting opencode web interface on 0.0.0.0:$Port ..."
 if ($lanIp) {
     Write-Host "Reachable from other devices on this network at: http://${lanIp}:${Port}" -ForegroundColor Green
 } else {
@@ -98,4 +99,4 @@ if ($lanIp) {
 Write-Host "Press Ctrl+C to stop."
 Write-Host ""
 
-& opencode serve --hostname 0.0.0.0 --port $Port @ExtraArgs
+& opencode web --hostname 0.0.0.0 --port $Port @ExtraArgs

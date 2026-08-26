@@ -10,6 +10,8 @@ use std::os::raw::c_int;
 
 use quickjs_sys as sys;
 
+use crate::js_helpers::define_getter_setter;
+
 use super::node_registry::{dom_opaque, node_id};
 use super::util::{
     new_js_string, read_js_string, throw_type_error, Getter, Setter, MAX_ATTRIBUTE_VALUE_LENGTH,
@@ -23,14 +25,8 @@ thread_local! {
 /// Frees every cached `attributes` collection object for `ctx` — called
 /// from `node_registry::cleanup`.
 pub(super) unsafe fn cleanup(ctx: *mut sys::JSContext) {
-    if let Some(objects) = ATTRS_OBJECTS.with(|reg| reg.borrow_mut().remove(&(ctx as usize))) {
-        for (_, obj) in objects {
-            sys::JS_FreeValue(ctx, obj);
-        }
-    }
-    ATTRS_LENGTHS.with(|reg| {
-        reg.borrow_mut().remove(&(ctx as usize));
-    });
+    crate::js_helpers::cleanup_object_cache(&ATTRS_OBJECTS, ctx);
+    crate::js_helpers::cleanup_aux_map(&ATTRS_LENGTHS, ctx);
 }
 
 unsafe fn attribute_property_get(
@@ -272,36 +268,7 @@ pub(super) unsafe fn define_attribute_properties(ctx: *mut sys::JSContext, proto
             node_html_for_set as Setter,
         ),
     ] {
-        let name = CString::new(name).unwrap();
-        let getter = sys::JS_NewCFunction2(
-            ctx,
-            std::mem::transmute::<Getter, sys::JSCFunction>(getter),
-            name.as_ptr(),
-            0,
-            sys::JS_CFUNC_GETTER,
-            0,
-        );
-        let setter = sys::JS_NewCFunction2(
-            ctx,
-            std::mem::transmute::<Setter, sys::JSCFunction>(setter),
-            name.as_ptr(),
-            1,
-            sys::JS_CFUNC_SETTER,
-            0,
-        );
-        let atom = sys::JS_NewAtom(ctx, name.as_ptr());
-        sys::JS_DefinePropertyGetSet(
-            ctx,
-            proto,
-            atom,
-            getter,
-            setter,
-            sys::JS_PROP_HAS_GET
-                | sys::JS_PROP_HAS_SET
-                | sys::JS_PROP_CONFIGURABLE
-                | sys::JS_PROP_ENUMERABLE,
-        );
-        sys::JS_FreeAtom(ctx, atom);
+        define_getter_setter(ctx, proto, name, getter, setter);
     }
 }
 

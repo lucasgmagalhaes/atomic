@@ -123,24 +123,24 @@ fn is_never_rendered(tag: &str) -> bool {
     )
 }
 
-fn classes_of(attributes: &std::collections::HashMap<String, String>) -> Vec<String> {
+fn classes_of(attributes: &std::collections::HashMap<String, String>) -> Vec<&str> {
     attributes
         .get("class")
-        .map(|c| c.split_whitespace().map(str::to_string).collect())
+        .map(|c| c.split_whitespace().collect())
         .unwrap_or_default()
 }
 
 /// Resolves `node`'s own style (pushing/matching/popping `chain`) — shared
 /// by `build` (for a block-level element) and `collect_inline_spans` (for
 /// an inline one), since both need the exact same cascade step.
-fn resolve_element_style(
-    dom: &Dom,
+fn resolve_element_style<'a>(
+    dom: &'a Dom,
     node: NodeId,
     tag: &str,
     attributes: &std::collections::HashMap<String, String>,
     sheet: &Stylesheet,
     viewport_width: f64,
-    chain: &mut Vec<ElementSnapshot>,
+    chain: &mut Vec<ElementSnapshot<'a>>,
     parent_font_size: f64,
     parent_color: Color,
 ) -> ComputedStyle {
@@ -164,7 +164,7 @@ fn resolve_element_style(
 /// doc for how `selector_matches` consumes this. `node` with no parent
 /// (the document root) or that isn't itself an element gets an empty/
 /// default snapshot.
-fn build_element_snapshot(dom: &Dom, node: NodeId) -> ElementSnapshot {
+fn build_element_snapshot(dom: &Dom, node: NodeId) -> ElementSnapshot<'_> {
     let Some(n) = dom.get(node) else {
         return ElementSnapshot::default();
     };
@@ -176,12 +176,12 @@ fn build_element_snapshot(dom: &Dom, node: NodeId) -> ElementSnapshot {
     };
     let (preceding_siblings, has_following_sibling) = sibling_snapshots(dom, node);
     ElementSnapshot {
-        tag: tag.clone(),
-        id: attributes.get("id").cloned(),
+        tag,
+        id: attributes.get("id").map(String::as_str),
         classes: classes_of(attributes),
         attributes: attributes
             .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
+            .map(|(k, v)| (k.as_str(), v.as_str()))
             .collect(),
         preceding_siblings,
         has_following_sibling,
@@ -196,7 +196,7 @@ fn build_element_snapshot(dom: &Dom, node: NodeId) -> ElementSnapshot {
 /// children (shouldn't happen for a real `dom::Dom`, but this crate
 /// doesn't panic on DOM inconsistency elsewhere either) gets `(empty,
 /// false)`.
-fn sibling_snapshots(dom: &Dom, node: NodeId) -> (Vec<ElementSnapshot>, bool) {
+fn sibling_snapshots(dom: &Dom, node: NodeId) -> (Vec<ElementSnapshot<'_>>, bool) {
     let Some(parent) = dom.get(node).and_then(|n| n.parent) else {
         return (Vec::new(), false);
     };
@@ -229,12 +229,12 @@ fn sibling_snapshots(dom: &Dom, node: NodeId) -> (Vec<ElementSnapshot>, bool) {
 /// `Inline`). Once inside such a run, every descendant contributes
 /// inline — this doesn't re-check `display` on nested elements, per the
 /// module doc's "block-inside-inline isn't de-inlined" scope cut.
-fn collect_inline_spans(
-    dom: &Dom,
+fn collect_inline_spans<'a>(
+    dom: &'a Dom,
     node: NodeId,
     sheet: &Stylesheet,
     viewport_width: f64,
-    chain: &mut Vec<ElementSnapshot>,
+    chain: &mut Vec<ElementSnapshot<'a>>,
     parent_font_size: f64,
     parent_color: Color,
     out: &mut Vec<InlineSpanSource>,
@@ -295,12 +295,12 @@ fn collect_inline_spans(
 /// `collect_inline_spans`) — cascade resolution is cheap enough (a handful
 /// of declaration lookups) that recomputing it once more beats threading a
 /// pre-resolved style through both call shapes.
-fn is_inline_level(
-    dom: &Dom,
+fn is_inline_level<'a>(
+    dom: &'a Dom,
     node: NodeId,
     sheet: &Stylesheet,
     viewport_width: f64,
-    chain: &mut Vec<ElementSnapshot>,
+    chain: &mut Vec<ElementSnapshot<'a>>,
     parent_font_size: f64,
     parent_color: Color,
 ) -> bool {
@@ -337,81 +337,82 @@ fn is_inline_level(
 /// exactly one plain-text child (no inline element siblings) still takes
 /// the cheaper pre-existing `text: Some(...)` path via `build` instead,
 /// unchanged from before multi-span runs existed.
-fn build_children(
-    dom: &Dom,
+fn build_children<'a>(
+    dom: &'a Dom,
     child_ids: &[NodeId],
     sheet: &Stylesheet,
     viewport_width: f64,
-    chain: &mut Vec<ElementSnapshot>,
+    chain: &mut Vec<ElementSnapshot<'a>>,
     parent_font_size: f64,
     parent_color: Color,
 ) -> Vec<LayoutBox> {
     let mut result = Vec::new();
     let mut pending_inline_run: Vec<NodeId> = Vec::new();
 
-    let flush =
-        |run: &mut Vec<NodeId>, result: &mut Vec<LayoutBox>, chain: &mut Vec<ElementSnapshot>| {
-            if run.is_empty() {
-                return;
-            }
-            if run.len() == 1 {
-                if let Some(NodeData::Text(_)) = dom.get(run[0]).map(|n| &n.data) {
-                    if let Some(b) = build(
-                        dom,
-                        run[0],
-                        sheet,
-                        viewport_width,
-                        chain,
-                        parent_font_size,
-                        parent_color,
-                    ) {
-                        result.push(b);
-                    }
-                    run.clear();
-                    return;
-                }
-            }
-
-            let mut spans = Vec::new();
-            let first_node = run[0];
-            for &id in run.iter() {
-                collect_inline_spans(
+    let flush = |run: &mut Vec<NodeId>,
+                 result: &mut Vec<LayoutBox>,
+                 chain: &mut Vec<ElementSnapshot<'a>>| {
+        if run.is_empty() {
+            return;
+        }
+        if run.len() == 1 {
+            if let Some(NodeData::Text(_)) = dom.get(run[0]).map(|n| &n.data) {
+                if let Some(b) = build(
                     dom,
-                    id,
+                    run[0],
                     sheet,
                     viewport_width,
                     chain,
                     parent_font_size,
                     parent_color,
-                    &mut spans,
-                );
+                ) {
+                    result.push(b);
+                }
+                run.clear();
+                return;
             }
-            run.clear();
-            if !spans.is_empty() {
-                // The run's own baseline style, for the common single-span
-                // case (plain text, no inline element siblings) where it's
-                // exactly the text's real style - matches what a plain text
-                // leaf box carried before this module supported multi-span
-                // runs. When a run mixes multiple differently-styled spans,
-                // this is just the run's inherited starting point, not
-                // necessarily any one glyph's actual color/size - each glyph
-                // still gets its own correct value via `inline_spans`.
-                let mut style = ComputedStyle::initial();
-                style.font_size = parent_font_size;
-                style.color = parent_color;
-                result.push(LayoutBox {
-                    node: first_node,
-                    style,
-                    children: Vec::new(),
-                    dimensions: Dimensions::default(),
-                    border: ResolvedBorder::default(),
-                    text: None,
-                    inline_spans: Some(spans),
-                    glyphs: Vec::new(),
-                    image: None,
-                });
-            }
-        };
+        }
+
+        let mut spans = Vec::new();
+        let first_node = run[0];
+        for &id in run.iter() {
+            collect_inline_spans(
+                dom,
+                id,
+                sheet,
+                viewport_width,
+                chain,
+                parent_font_size,
+                parent_color,
+                &mut spans,
+            );
+        }
+        run.clear();
+        if !spans.is_empty() {
+            // The run's own baseline style, for the common single-span
+            // case (plain text, no inline element siblings) where it's
+            // exactly the text's real style - matches what a plain text
+            // leaf box carried before this module supported multi-span
+            // runs. When a run mixes multiple differently-styled spans,
+            // this is just the run's inherited starting point, not
+            // necessarily any one glyph's actual color/size - each glyph
+            // still gets its own correct value via `inline_spans`.
+            let mut style = ComputedStyle::initial();
+            style.font_size = parent_font_size;
+            style.color = parent_color;
+            result.push(LayoutBox {
+                node: first_node,
+                style,
+                children: Vec::new(),
+                dimensions: Dimensions::default(),
+                border: ResolvedBorder::default(),
+                text: None,
+                inline_spans: Some(spans),
+                glyphs: Vec::new(),
+                image: None,
+            });
+        }
+    };
 
     for &child in child_ids {
         if is_inline_level(
@@ -444,12 +445,12 @@ fn build_children(
     result
 }
 
-fn build(
-    dom: &Dom,
+fn build<'a>(
+    dom: &'a Dom,
     node: NodeId,
     sheet: &Stylesheet,
     viewport_width: f64,
-    chain: &mut Vec<ElementSnapshot>,
+    chain: &mut Vec<ElementSnapshot<'a>>,
     parent_font_size: f64,
     parent_color: Color,
 ) -> Option<LayoutBox> {

@@ -16,6 +16,8 @@ use std::os::raw::{c_int, c_void};
 
 use quickjs_sys as sys;
 
+use crate::js_helpers::{define_getter, define_method};
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -101,43 +103,6 @@ unsafe fn settled_promise(
     sys::JS_FreeValue(ctx, resolve);
     sys::JS_FreeValue(ctx, reject);
     promise
-}
-
-unsafe fn define_method(
-    ctx: *mut sys::JSContext,
-    proto: sys::JSValue,
-    name: &str,
-    func: sys::JSCFunction,
-    length: c_int,
-) {
-    let name_c = CString::new(name).unwrap();
-    let f = sys::JS_NewCFunction2(ctx, func, name_c.as_ptr(), length, sys::JS_CFUNC_GENERIC, 0);
-    sys::JS_SetPropertyStr(ctx, proto, name_c.as_ptr(), f);
-}
-
-type Getter =
-    unsafe extern "C" fn(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue;
-
-unsafe fn define_getter(ctx: *mut sys::JSContext, proto: sys::JSValue, name: &str, getter: Getter) {
-    let name_c = CString::new(name).unwrap();
-    let f = sys::JS_NewCFunction2(
-        ctx,
-        std::mem::transmute::<Getter, sys::JSCFunction>(getter),
-        name_c.as_ptr(),
-        0,
-        sys::JS_CFUNC_GETTER,
-        0,
-    );
-    let atom = sys::JS_NewAtom(ctx, name_c.as_ptr());
-    sys::JS_DefinePropertyGetSet(
-        ctx,
-        proto,
-        atom,
-        f,
-        sys::js_undefined(),
-        sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE,
-    );
-    sys::JS_FreeAtom(ctx, atom);
 }
 
 // ---------------------------------------------------------------------------

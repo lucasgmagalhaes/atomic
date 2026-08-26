@@ -15,12 +15,20 @@ use crate::parser::{
     Combinator, ComplexSelector, Declaration, PseudoClass, SimpleSelector, Stylesheet,
 };
 
+/// Borrows every field from the live `dom::Node`/attribute map a caller
+/// (`layout-engine`'s `tree.rs`, `js-runtime`'s `dom_bindings/selectors.rs`)
+/// already holds a reference to, rather than cloning each `String` per
+/// element per selector-matching pass — this snapshot is rebuilt on every
+/// layout pass and every `querySelector`/`matches`/`closest` call, so an
+/// owned copy here was real, measurable per-element allocation pressure
+/// (see `spec/RULES.md`'s hot-path rule). `'a` is the borrowed DOM data's
+/// own lifetime, threaded through recursively via `preceding_siblings`.
 #[derive(Debug, Clone, Default)]
-pub struct ElementSnapshot {
-    pub tag: String,
-    pub id: Option<String>,
-    pub classes: Vec<String>,
-    pub attributes: Vec<(String, String)>,
+pub struct ElementSnapshot<'a> {
+    pub tag: &'a str,
+    pub id: Option<&'a str>,
+    pub classes: Vec<&'a str>,
+    pub attributes: Vec<(&'a str, &'a str)>,
     /// Element siblings under the same parent that come *before* this one,
     /// in document order (the immediately preceding sibling is last) —
     /// used by `+`/`~` and `:nth-child`/`:first-child`. Flat, not
@@ -28,18 +36,18 @@ pub struct ElementSnapshot {
     /// needs to walk *this* element's own preceding-sibling list, since
     /// every compound in such a chain refers to a sibling under the same
     /// parent.
-    pub preceding_siblings: Vec<ElementSnapshot>,
+    pub preceding_siblings: Vec<ElementSnapshot<'a>>,
     /// Whether at least one element sibling follows this one under the
     /// same parent — used by `:last-child`.
     pub has_following_sibling: bool,
 }
 
-fn compound_matches(compound: &crate::parser::CompoundSelector, el: &ElementSnapshot) -> bool {
+fn compound_matches(compound: &crate::parser::CompoundSelector, el: &ElementSnapshot<'_>) -> bool {
     compound.0.iter().all(|simple| match simple {
         SimpleSelector::Universal => true,
-        SimpleSelector::Type(name) => el.tag == *name,
-        SimpleSelector::Id(id) => el.id.as_deref() == Some(id.as_str()),
-        SimpleSelector::Class(class) => el.classes.iter().any(|c| c == class),
+        SimpleSelector::Type(name) => el.tag == name.as_str(),
+        SimpleSelector::Id(id) => el.id == Some(id.as_str()),
+        SimpleSelector::Class(class) => el.classes.iter().any(|c| *c == class.as_str()),
         SimpleSelector::Attribute(attr) => match &attr.match_ {
             crate::parser::AttributeMatch::Has => {
                 el.attributes.iter().any(|(k, _)| *k == attr.name)
@@ -47,7 +55,7 @@ fn compound_matches(compound: &crate::parser::CompoundSelector, el: &ElementSnap
             crate::parser::AttributeMatch::Equals(v) => el
                 .attributes
                 .iter()
-                .any(|(k, val)| *k == attr.name && val == v),
+                .any(|(k, val)| *k == attr.name && *val == v),
         },
         SimpleSelector::PseudoClass(pseudo) => match pseudo {
             PseudoClass::FirstChild => el.preceding_siblings.is_empty(),

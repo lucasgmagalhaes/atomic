@@ -4,7 +4,7 @@
 use quickjs_sys as sys;
 use std::ffi::CString;
 
-pub(super) type Getter = unsafe extern "C" fn(*mut sys::JSContext, sys::JSValue) -> sys::JSValue;
+pub(super) use crate::js_helpers::Getter;
 
 pub(super) unsafe fn string(ctx: *mut sys::JSContext, s: &str) -> sys::JSValue {
     sys::JS_NewStringLen(ctx, s.as_ptr() as *const _, s.len())

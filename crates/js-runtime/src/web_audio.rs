@@ -28,6 +28,8 @@ use std::rc::Rc;
 
 use quickjs_sys as sys;
 
+use crate::js_helpers::{define_getter_setter, define_method};
+
 /// See `crate::class_registry` - one registry entry per `JSRuntime` per
 /// kind, not a single value shared across every `Runtime`.
 const CONTEXT_CLASS_KIND: &str = "OfflineAudioContext";
@@ -128,65 +130,6 @@ unsafe fn new_js_string(ctx: *mut sys::JSContext, s: &str) -> sys::JSValue {
 unsafe fn set_num(ctx: *mut sys::JSContext, obj: sys::JSValue, key: &str, val: f64) {
     let name = CString::new(key).unwrap();
     sys::JS_SetPropertyStr(ctx, obj, name.as_ptr(), sys::js_float64(val));
-}
-
-unsafe fn define_method(
-    ctx: *mut sys::JSContext,
-    proto: sys::JSValue,
-    name: &str,
-    func: sys::JSCFunction,
-    length: c_int,
-) {
-    let name_c = CString::new(name).unwrap();
-    let f = sys::JS_NewCFunction2(ctx, func, name_c.as_ptr(), length, sys::JS_CFUNC_GENERIC, 0);
-    sys::JS_SetPropertyStr(ctx, proto, name_c.as_ptr(), f);
-}
-
-type Getter =
-    unsafe extern "C" fn(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue;
-type Setter = unsafe extern "C" fn(
-    ctx: *mut sys::JSContext,
-    this_val: sys::JSValue,
-    val: sys::JSValue,
-) -> sys::JSValue;
-
-unsafe fn define_accessor(
-    ctx: *mut sys::JSContext,
-    proto: sys::JSValue,
-    name: &str,
-    getter: Getter,
-    setter: Setter,
-) {
-    let name_c = CString::new(name).unwrap();
-    let g = sys::JS_NewCFunction2(
-        ctx,
-        std::mem::transmute::<Getter, sys::JSCFunction>(getter),
-        name_c.as_ptr(),
-        0,
-        sys::JS_CFUNC_GETTER,
-        0,
-    );
-    let s = sys::JS_NewCFunction2(
-        ctx,
-        std::mem::transmute::<Setter, sys::JSCFunction>(setter),
-        name_c.as_ptr(),
-        1,
-        sys::JS_CFUNC_SETTER,
-        0,
-    );
-    let atom = sys::JS_NewAtom(ctx, name_c.as_ptr());
-    sys::JS_DefinePropertyGetSet(
-        ctx,
-        proto,
-        atom,
-        g,
-        s,
-        sys::JS_PROP_HAS_GET
-            | sys::JS_PROP_HAS_SET
-            | sys::JS_PROP_CONFIGURABLE
-            | sys::JS_PROP_ENUMERABLE,
-    );
-    sys::JS_FreeAtom(ctx, atom);
 }
 
 // ---- AudioNode (Oscillator/Gain/Destination share one opaque shape) ----
@@ -402,9 +345,9 @@ unsafe fn ensure_node_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
     define_method(ctx, proto, "connect", node_connect, 1);
     define_method(ctx, proto, "start", node_start, 1);
     define_method(ctx, proto, "stop", node_stop, 1);
-    define_accessor(ctx, proto, "frequency", frequency_get, frequency_set);
-    define_accessor(ctx, proto, "type", wave_type_get, wave_type_set);
-    define_accessor(ctx, proto, "gain", gain_get, gain_set);
+    define_getter_setter(ctx, proto, "frequency", frequency_get, frequency_set);
+    define_getter_setter(ctx, proto, "type", wave_type_get, wave_type_set);
+    define_getter_setter(ctx, proto, "gain", gain_get, gain_set);
     sys::JS_SetClassProto(ctx, class_id, proto);
     class_id
 }

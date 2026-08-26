@@ -4,7 +4,7 @@ use layout_engine::{resolve_style, Color};
 fn style_for(css_text: &str) -> layout_engine::ComputedStyle {
     let sheet = parse_stylesheet(css_text);
     let chain = vec![ElementSnapshot {
-        tag: "div".into(),
+        tag: "div",
         id: None,
         classes: vec![],
         ..Default::default()

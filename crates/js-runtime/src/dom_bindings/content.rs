@@ -3,10 +3,11 @@
 //! (`innerHTML`/`outerHTML`/`insertAdjacentHTML`), all gated through
 //! `crate::trusted_types` where applicable.
 
-use std::ffi::CString;
 use std::os::raw::c_int;
 
 use quickjs_sys as sys;
+
+use crate::js_helpers::define_getter_setter;
 
 use super::mutation::{first_child_of, next_sibling_of};
 use super::node_registry::{dom_opaque, node_id, node_opaque};
@@ -45,38 +46,13 @@ unsafe extern "C" fn node_text_content_set(
 /// Defines the `textContent` accessor on `proto`. Takes ownership of `proto`
 /// only in the sense of mutating it in place — callers still own the value.
 pub(super) unsafe fn define_text_content(ctx: *mut sys::JSContext, proto: sys::JSValue) {
-    let name = CString::new("textContent").unwrap();
-
-    let getter = sys::JS_NewCFunction2(
-        ctx,
-        std::mem::transmute::<Getter, sys::JSCFunction>(node_text_content_get),
-        name.as_ptr(),
-        0,
-        sys::JS_CFUNC_GETTER,
-        0,
-    );
-    let setter = sys::JS_NewCFunction2(
-        ctx,
-        std::mem::transmute::<Setter, sys::JSCFunction>(node_text_content_set),
-        name.as_ptr(),
-        1,
-        sys::JS_CFUNC_SETTER,
-        0,
-    );
-
-    let atom = sys::JS_NewAtom(ctx, name.as_ptr());
-    sys::JS_DefinePropertyGetSet(
+    define_getter_setter(
         ctx,
         proto,
-        atom,
-        getter,
-        setter,
-        sys::JS_PROP_HAS_GET
-            | sys::JS_PROP_HAS_SET
-            | sys::JS_PROP_CONFIGURABLE
-            | sys::JS_PROP_ENUMERABLE,
+        "textContent",
+        node_text_content_get,
+        node_text_content_set,
     );
-    sys::JS_FreeAtom(ctx, atom);
 }
 
 unsafe extern "C" fn node_value_get(
@@ -118,38 +94,7 @@ unsafe extern "C" fn node_value_set(
 /// deviation from a typed `HTMLInputElement`/`HTMLTextAreaElement`
 /// hierarchy this generic `Node` class makes).
 pub(super) unsafe fn define_value(ctx: *mut sys::JSContext, proto: sys::JSValue) {
-    let name = CString::new("value").unwrap();
-
-    let getter = sys::JS_NewCFunction2(
-        ctx,
-        std::mem::transmute::<Getter, sys::JSCFunction>(node_value_get),
-        name.as_ptr(),
-        0,
-        sys::JS_CFUNC_GETTER,
-        0,
-    );
-    let setter = sys::JS_NewCFunction2(
-        ctx,
-        std::mem::transmute::<Setter, sys::JSCFunction>(node_value_set),
-        name.as_ptr(),
-        1,
-        sys::JS_CFUNC_SETTER,
-        0,
-    );
-
-    let atom = sys::JS_NewAtom(ctx, name.as_ptr());
-    sys::JS_DefinePropertyGetSet(
-        ctx,
-        proto,
-        atom,
-        getter,
-        setter,
-        sys::JS_PROP_HAS_GET
-            | sys::JS_PROP_HAS_SET
-            | sys::JS_PROP_CONFIGURABLE
-            | sys::JS_PROP_ENUMERABLE,
-    );
-    sys::JS_FreeAtom(ctx, atom);
+    define_getter_setter(ctx, proto, "value", node_value_get, node_value_set);
 }
 
 /// Real `Node.prototype.nodeValue` getter — per spec:
@@ -191,36 +136,13 @@ unsafe extern "C" fn node_node_value_set(
 /// Defines the `nodeValue` accessor on `proto` — per spec, returns the
 /// text data for Text/Comment nodes, `null` for everything else.
 pub(super) unsafe fn define_node_value(ctx: *mut sys::JSContext, proto: sys::JSValue) {
-    let name = CString::new("nodeValue").unwrap();
-    let getter = sys::JS_NewCFunction2(
-        ctx,
-        std::mem::transmute::<Getter, sys::JSCFunction>(node_node_value_get),
-        name.as_ptr(),
-        0,
-        sys::JS_CFUNC_GETTER,
-        0,
-    );
-    let setter = sys::JS_NewCFunction2(
-        ctx,
-        std::mem::transmute::<Setter, sys::JSCFunction>(node_node_value_set),
-        name.as_ptr(),
-        1,
-        sys::JS_CFUNC_SETTER,
-        0,
-    );
-    let atom = sys::JS_NewAtom(ctx, name.as_ptr());
-    sys::JS_DefinePropertyGetSet(
+    define_getter_setter(
         ctx,
         proto,
-        atom,
-        getter,
-        setter,
-        sys::JS_PROP_HAS_GET
-            | sys::JS_PROP_HAS_SET
-            | sys::JS_PROP_CONFIGURABLE
-            | sys::JS_PROP_ENUMERABLE,
+        "nodeValue",
+        node_node_value_get,
+        node_node_value_set,
     );
-    sys::JS_FreeAtom(ctx, atom);
 }
 
 /// Replaces every child of `id` with the parsed content of `html`. Old
@@ -441,36 +363,7 @@ pub(super) unsafe fn define_inner_outer_html(ctx: *mut sys::JSContext, proto: sy
             node_outer_html_set as Setter,
         ),
     ] {
-        let name = CString::new(name).unwrap();
-        let getter = sys::JS_NewCFunction2(
-            ctx,
-            std::mem::transmute::<Getter, sys::JSCFunction>(getter),
-            name.as_ptr(),
-            0,
-            sys::JS_CFUNC_GETTER,
-            0,
-        );
-        let setter = sys::JS_NewCFunction2(
-            ctx,
-            std::mem::transmute::<Setter, sys::JSCFunction>(setter),
-            name.as_ptr(),
-            1,
-            sys::JS_CFUNC_SETTER,
-            0,
-        );
-        let atom = sys::JS_NewAtom(ctx, name.as_ptr());
-        sys::JS_DefinePropertyGetSet(
-            ctx,
-            proto,
-            atom,
-            getter,
-            setter,
-            sys::JS_PROP_HAS_GET
-                | sys::JS_PROP_HAS_SET
-                | sys::JS_PROP_CONFIGURABLE
-                | sys::JS_PROP_ENUMERABLE,
-        );
-        sys::JS_FreeAtom(ctx, atom);
+        define_getter_setter(ctx, proto, name, getter, setter);
     }
 }
 

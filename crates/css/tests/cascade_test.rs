@@ -1,10 +1,10 @@
 use css::{matching_declarations, parse_stylesheet, selector_matches, ElementSnapshot};
 
-fn el(tag: &str, id: Option<&str>, classes: &[&str]) -> ElementSnapshot {
+fn el<'a>(tag: &'a str, id: Option<&'a str>, classes: &[&'a str]) -> ElementSnapshot<'a> {
     ElementSnapshot {
-        tag: tag.to_string(),
-        id: id.map(str::to_string),
-        classes: classes.iter().map(|s| s.to_string()).collect(),
+        tag,
+        id,
+        classes: classes.to_vec(),
         ..Default::default()
     }
 }

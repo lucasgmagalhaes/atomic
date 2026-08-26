@@ -9,7 +9,7 @@ const MAX_SELECTOR_LENGTH: usize = 1024;
 pub(super) const MAX_SELECTOR_VISITS: usize = 4096;
 const MAX_SELECTOR_RESULTS: usize = 2048;
 
-fn element_snapshot(dom: &dom::Dom, id: dom::NodeId) -> Option<css::ElementSnapshot> {
+fn element_snapshot(dom: &dom::Dom, id: dom::NodeId) -> Option<css::ElementSnapshot<'_>> {
     let node = dom.get(id)?;
     let dom::NodeData::Element {
         tag, attributes, ..
@@ -18,15 +18,15 @@ fn element_snapshot(dom: &dom::Dom, id: dom::NodeId) -> Option<css::ElementSnaps
         return None;
     };
     Some(css::ElementSnapshot {
-        tag: tag.clone(),
-        id: attributes.get("id").cloned(),
+        tag,
+        id: attributes.get("id").map(String::as_str),
         classes: attributes
             .get("class")
-            .map(|value| value.split_ascii_whitespace().map(str::to_owned).collect())
+            .map(|value| value.split_ascii_whitespace().collect())
             .unwrap_or_default(),
         attributes: attributes
             .iter()
-            .map(|(key, value)| (key.clone(), value.clone()))
+            .map(|(key, value)| (key.as_str(), value.as_str()))
             .collect(),
         preceding_siblings: Vec::new(),
         has_following_sibling: false,
@@ -36,7 +36,7 @@ fn element_snapshot(dom: &dom::Dom, id: dom::NodeId) -> Option<css::ElementSnaps
 /// Builds the finite left-sibling chain needed by `+`/`~` matching. A
 /// sibling snapshot never recursively includes following siblings, avoiding
 /// a `first -> second -> first` cycle while retaining `a + b + c` support.
-fn preceding_snapshot(dom: &dom::Dom, id: dom::NodeId) -> Option<css::ElementSnapshot> {
+fn preceding_snapshot(dom: &dom::Dom, id: dom::NodeId) -> Option<css::ElementSnapshot<'_>> {
     let mut result = element_snapshot(dom, id)?;
     let parent = dom.get(id)?.parent?;
     let siblings = &dom.get(parent)?.children;
@@ -48,7 +48,7 @@ fn preceding_snapshot(dom: &dom::Dom, id: dom::NodeId) -> Option<css::ElementSna
     Some(result)
 }
 
-fn snapshot(dom: &dom::Dom, id: dom::NodeId) -> Option<css::ElementSnapshot> {
+fn snapshot(dom: &dom::Dom, id: dom::NodeId) -> Option<css::ElementSnapshot<'_>> {
     let mut result = preceding_snapshot(dom, id)?;
     let parent = dom.get(id)?.parent?;
     let siblings = &dom.get(parent)?.children;
@@ -59,7 +59,7 @@ fn snapshot(dom: &dom::Dom, id: dom::NodeId) -> Option<css::ElementSnapshot> {
     Some(result)
 }
 
-fn selector_chain(dom: &dom::Dom, id: dom::NodeId) -> Option<Vec<css::ElementSnapshot>> {
+fn selector_chain(dom: &dom::Dom, id: dom::NodeId) -> Option<Vec<css::ElementSnapshot<'_>>> {
     let mut ids = Vec::new();
     let mut current = Some(id);
     while let Some(node_id) = current {

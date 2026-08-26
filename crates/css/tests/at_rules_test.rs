@@ -1,8 +1,8 @@
 use css::{matching_declarations, parse_stylesheet, ElementSnapshot};
 
-fn el(tag: &str) -> ElementSnapshot {
+fn el(tag: &str) -> ElementSnapshot<'_> {
     ElementSnapshot {
-        tag: tag.to_string(),
+        tag,
         ..Default::default()
     }
 }

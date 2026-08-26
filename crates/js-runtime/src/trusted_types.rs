@@ -35,6 +35,8 @@ use std::os::raw::c_int;
 
 use quickjs_sys as sys;
 
+use crate::js_helpers::define_getter;
+
 const TRUSTED_HTML_KIND: &str = "TrustedHTML";
 
 unsafe fn new_js_string(ctx: *mut sys::JSContext, s: &str) -> sys::JSValue {
@@ -307,33 +309,4 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     let global = sys::JS_GetGlobalObject(ctx);
     sys::JS_SetPropertyStr(ctx, global, factory_name.as_ptr(), factory);
     sys::JS_FreeValue(ctx, global);
-}
-
-unsafe fn define_getter(
-    ctx: *mut sys::JSContext,
-    object: sys::JSValue,
-    name: &str,
-    getter: unsafe extern "C" fn(*mut sys::JSContext, sys::JSValue) -> sys::JSValue,
-) {
-    let name_c = CString::new(name).unwrap();
-    type Getter =
-        unsafe extern "C" fn(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue;
-    let f = sys::JS_NewCFunction2(
-        ctx,
-        std::mem::transmute::<Getter, sys::JSCFunction>(getter),
-        name_c.as_ptr(),
-        0,
-        sys::JS_CFUNC_GETTER,
-        0,
-    );
-    let atom = sys::JS_NewAtom(ctx, name_c.as_ptr());
-    sys::JS_DefinePropertyGetSet(
-        ctx,
-        object,
-        atom,
-        f,
-        sys::js_undefined(),
-        sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE,
-    );
-    sys::JS_FreeAtom(ctx, atom);
 }

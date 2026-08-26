@@ -25,14 +25,8 @@ thread_local! {
 /// Frees every cached `dataset` object for `ctx` — called from
 /// `node_registry::cleanup`.
 pub(super) unsafe fn cleanup(ctx: *mut sys::JSContext) {
-    if let Some(objects) = DATASET_OBJECTS.with(|reg| reg.borrow_mut().remove(&(ctx as usize))) {
-        for (_, obj) in objects {
-            sys::JS_FreeValue(ctx, obj);
-        }
-    }
-    DATASET_KEYS.with(|reg| {
-        reg.borrow_mut().remove(&(ctx as usize));
-    });
+    crate::js_helpers::cleanup_object_cache(&DATASET_OBJECTS, ctx);
+    crate::js_helpers::cleanup_aux_map(&DATASET_KEYS, ctx);
 }
 
 /// `data-foo-bar` -> `fooBar`, the reverse of `HTMLElement.dataset`'s own

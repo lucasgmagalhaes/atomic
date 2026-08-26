@@ -20,6 +20,8 @@ use std::ffi::CString;
 
 use quickjs_sys as sys;
 
+use crate::js_helpers::{Getter, Setter};
+
 unsafe fn read_js_string(ctx: *mut sys::JSContext, val: sys::JSValue) -> Option<String> {
     let mut len: usize = 0;
     let ptr = sys::JS_ToCStringLen2(ctx, &mut len, val, false);
@@ -75,14 +77,6 @@ unsafe extern "C" fn cookie_set(
 pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     let document = crate::document::get_or_create(ctx);
     let name = CString::new("cookie").unwrap();
-
-    type Getter =
-        unsafe extern "C" fn(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> sys::JSValue;
-    type Setter = unsafe extern "C" fn(
-        ctx: *mut sys::JSContext,
-        this_val: sys::JSValue,
-        val: sys::JSValue,
-    ) -> sys::JSValue;
 
     let getter = sys::JS_NewCFunction2(
         ctx,

@@ -24,6 +24,8 @@ use std::os::raw::c_int;
 
 use quickjs_sys as sys;
 
+use crate::js_helpers::Getter;
+
 const ENTRIES_PROP: &[u8] = b"__entries\0";
 const INDEX_PROP: &[u8] = b"__index\0";
 const MAX_ENTRIES: i64 = 1000;
@@ -297,7 +299,6 @@ unsafe extern "C" fn state_get(ctx: *mut sys::JSContext, this: sys::JSValue) -> 
     state
 }
 
-type Getter = unsafe extern "C" fn(*mut sys::JSContext, sys::JSValue) -> sys::JSValue;
 unsafe fn define_readonly(ctx: *mut sys::JSContext, obj: sys::JSValue, name: &str, getter: Getter) {
     let cname = CString::new(name).unwrap();
     let f = sys::JS_NewCFunction2(

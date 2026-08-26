@@ -14,12 +14,13 @@ use std::os::raw::c_int;
 
 use quickjs_sys as sys;
 
+use crate::js_helpers::{
+    define_getter as define_readonly, define_getter_setter as define_readwrite, define_method,
+};
+
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
-
-type Getter = unsafe extern "C" fn(*mut sys::JSContext, sys::JSValue) -> sys::JSValue;
-type Setter = unsafe extern "C" fn(*mut sys::JSContext, sys::JSValue, sys::JSValue) -> sys::JSValue;
 
 unsafe fn js_string(ctx: *mut sys::JSContext, s: &str) -> sys::JSValue {
     sys::JS_NewStringLen(ctx, s.as_ptr() as *const _, s.len())
@@ -45,79 +46,6 @@ unsafe fn get_property(ctx: *mut sys::JSContext, obj: sys::JSValue, key: &str) -
 unsafe fn set_property(ctx: *mut sys::JSContext, obj: sys::JSValue, key: &str, val: sys::JSValue) {
     let c = CString::new(key).unwrap();
     sys::JS_SetPropertyStr(ctx, obj, c.as_ptr(), val);
-}
-
-unsafe fn define_method(
-    ctx: *mut sys::JSContext,
-    obj: sys::JSValue,
-    name: &str,
-    func: sys::JSCFunction,
-    length: c_int,
-) {
-    let c = CString::new(name).unwrap();
-    let f = sys::JS_NewCFunction2(ctx, func, c.as_ptr(), length, sys::JS_CFUNC_GENERIC, 0);
-    sys::JS_SetPropertyStr(ctx, obj, c.as_ptr(), f);
-}
-
-unsafe fn define_readonly(ctx: *mut sys::JSContext, obj: sys::JSValue, name: &str, getter: Getter) {
-    let cname = CString::new(name).unwrap();
-    let f = sys::JS_NewCFunction2(
-        ctx,
-        std::mem::transmute::<Getter, sys::JSCFunction>(getter),
-        cname.as_ptr(),
-        0,
-        sys::JS_CFUNC_GETTER,
-        0,
-    );
-    let atom = sys::JS_NewAtom(ctx, cname.as_ptr());
-    sys::JS_DefinePropertyGetSet(
-        ctx,
-        obj,
-        atom,
-        f,
-        sys::js_undefined(),
-        sys::JS_PROP_HAS_GET | sys::JS_PROP_CONFIGURABLE | sys::JS_PROP_ENUMERABLE,
-    );
-    sys::JS_FreeAtom(ctx, atom);
-}
-
-unsafe fn define_readwrite(
-    ctx: *mut sys::JSContext,
-    obj: sys::JSValue,
-    name: &str,
-    getter: Getter,
-    setter: Setter,
-) {
-    let cname = CString::new(name).unwrap();
-    let g = sys::JS_NewCFunction2(
-        ctx,
-        std::mem::transmute::<Getter, sys::JSCFunction>(getter),
-        cname.as_ptr(),
-        0,
-        sys::JS_CFUNC_GETTER,
-        0,
-    );
-    let s = sys::JS_NewCFunction2(
-        ctx,
-        std::mem::transmute::<Setter, sys::JSCFunction>(setter),
-        cname.as_ptr(),
-        1,
-        sys::JS_CFUNC_SETTER,
-        0,
-    );
-    let atom = sys::JS_NewAtom(ctx, cname.as_ptr());
-    sys::JS_DefinePropertyGetSet(
-        ctx,
-        obj,
-        atom,
-        g,
-        s,
-        sys::JS_PROP_HAS_GET
-            | sys::JS_PROP_HAS_SET
-            | sys::JS_PROP_CONFIGURABLE
-            | sys::JS_PROP_ENUMERABLE,
-    );
-    sys::JS_FreeAtom(ctx, atom);
 }
 
 /// Build a TypeError and throw it via JS_Throw.

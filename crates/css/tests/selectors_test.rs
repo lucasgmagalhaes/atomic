@@ -2,20 +2,17 @@
 //! structural pseudo-classes (`crates/css/src/parser.rs`/`cascade.rs`).
 use css::{parse_stylesheet, selector_matches, ElementSnapshot};
 
-fn el(tag: &str) -> ElementSnapshot {
+fn el(tag: &str) -> ElementSnapshot<'_> {
     ElementSnapshot {
-        tag: tag.to_string(),
+        tag,
         ..Default::default()
     }
 }
 
-fn el_with_attrs(tag: &str, attrs: &[(&str, &str)]) -> ElementSnapshot {
+fn el_with_attrs<'a>(tag: &'a str, attrs: &[(&'a str, &'a str)]) -> ElementSnapshot<'a> {
     ElementSnapshot {
-        tag: tag.to_string(),
-        attributes: attrs
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect(),
+        tag,
+        attributes: attrs.to_vec(),
         ..Default::default()
     }
 }
@@ -23,9 +20,9 @@ fn el_with_attrs(tag: &str, attrs: &[(&str, &str)]) -> ElementSnapshot {
 /// Builds a target `ElementSnapshot` with `n` preceding element siblings
 /// (all a plain `<li>` with no attributes) and whether a following one
 /// exists — for `:first-child`/`:last-child`/`:nth-child` tests.
-fn el_at_position(tag: &str, preceding_count: usize, has_following: bool) -> ElementSnapshot {
+fn el_at_position(tag: &str, preceding_count: usize, has_following: bool) -> ElementSnapshot<'_> {
     ElementSnapshot {
-        tag: tag.to_string(),
+        tag,
         preceding_siblings: (0..preceding_count).map(|_| el("li")).collect(),
         has_following_sibling: has_following,
         ..Default::default()

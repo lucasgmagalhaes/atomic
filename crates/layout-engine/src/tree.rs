@@ -27,7 +27,9 @@
 //! so a stylesheet that wants `<b>`/`<span>`/etc. to flow inline has to
 //! say so explicitly (`b, span { display: inline; }`) - there's no
 //! built-in tag→display table anywhere in this crate.
-use css::{matching_declarations, ElementSnapshot, Stylesheet};
+use css::{
+    build_selector_index, matching_declarations_indexed, ElementSnapshot, SelectorIndex, Stylesheet,
+};
 use dom::{Dom, NodeData, NodeId};
 
 use crate::style::{resolve_style, Color, ComputedStyle, Display};
@@ -139,6 +141,7 @@ fn resolve_element_style<'a>(
     tag: &str,
     attributes: &std::collections::HashMap<String, String>,
     sheet: &Stylesheet,
+    index: &SelectorIndex,
     viewport_width: f64,
     viewport_height: f64,
     chain: &mut Vec<ElementSnapshot<'a>>,
@@ -148,7 +151,7 @@ fn resolve_element_style<'a>(
     let _ = (tag, attributes); // already folded into build_element_snapshot's own dom lookup
     chain.push(build_element_snapshot(dom, node));
     resolve_style(
-        &matching_declarations(sheet, chain, viewport_width, viewport_height),
+        &matching_declarations_indexed(index, sheet, chain, viewport_width, viewport_height),
         parent_font_size,
         parent_color,
     )
@@ -236,6 +239,7 @@ fn collect_inline_spans<'a>(
     dom: &'a Dom,
     node: NodeId,
     sheet: &Stylesheet,
+    index: &SelectorIndex,
     viewport_width: f64,
     viewport_height: f64,
     chain: &mut Vec<ElementSnapshot<'a>>,
@@ -267,6 +271,7 @@ fn collect_inline_spans<'a>(
                 tag,
                 attributes,
                 sheet,
+                index,
                 viewport_width,
                 viewport_height,
                 chain,
@@ -279,6 +284,7 @@ fn collect_inline_spans<'a>(
                         dom,
                         child,
                         sheet,
+                        index,
                         viewport_width,
                         viewport_height,
                         chain,
@@ -305,6 +311,7 @@ fn is_inline_level<'a>(
     dom: &'a Dom,
     node: NodeId,
     sheet: &Stylesheet,
+    index: &SelectorIndex,
     viewport_width: f64,
     viewport_height: f64,
     chain: &mut Vec<ElementSnapshot<'a>>,
@@ -325,6 +332,7 @@ fn is_inline_level<'a>(
                 tag,
                 attributes,
                 sheet,
+                index,
                 viewport_width,
                 viewport_height,
                 chain,
@@ -349,6 +357,7 @@ fn build_children<'a>(
     dom: &'a Dom,
     child_ids: &[NodeId],
     sheet: &Stylesheet,
+    index: &SelectorIndex,
     viewport_width: f64,
     viewport_height: f64,
     chain: &mut Vec<ElementSnapshot<'a>>,
@@ -370,6 +379,7 @@ fn build_children<'a>(
                     dom,
                     run[0],
                     sheet,
+                    index,
                     viewport_width,
                     viewport_height,
                     chain,
@@ -390,6 +400,7 @@ fn build_children<'a>(
                 dom,
                 id,
                 sheet,
+                index,
                 viewport_width,
                 viewport_height,
                 chain,
@@ -430,6 +441,7 @@ fn build_children<'a>(
             dom,
             child,
             sheet,
+            index,
             viewport_width,
             viewport_height,
             chain,
@@ -443,6 +455,7 @@ fn build_children<'a>(
                 dom,
                 child,
                 sheet,
+                index,
                 viewport_width,
                 viewport_height,
                 chain,
@@ -462,6 +475,7 @@ fn build<'a>(
     dom: &'a Dom,
     node: NodeId,
     sheet: &Stylesheet,
+    index: &SelectorIndex,
     viewport_width: f64,
     viewport_height: f64,
     chain: &mut Vec<ElementSnapshot<'a>>,
@@ -499,7 +513,7 @@ fn build<'a>(
 
     chain.push(build_element_snapshot(dom, node));
     let style = resolve_style(
-        &matching_declarations(sheet, chain, viewport_width, viewport_height),
+        &matching_declarations_indexed(index, sheet, chain, viewport_width, viewport_height),
         parent_font_size,
         parent_color,
     );
@@ -511,6 +525,7 @@ fn build<'a>(
             dom,
             &n.children,
             sheet,
+            index,
             viewport_width,
             viewport_height,
             chain,
@@ -572,10 +587,12 @@ pub fn build_box_tree_with_viewport(
 ) -> Option<LayoutBox> {
     let mut chain = Vec::new();
     let initial = ComputedStyle::initial();
+    let index = build_selector_index(sheet);
     build(
         dom,
         node,
         sheet,
+        &index,
         viewport_width,
         viewport_height,
         &mut chain,

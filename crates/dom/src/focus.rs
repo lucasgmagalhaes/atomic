@@ -12,6 +12,7 @@ impl Dom {
         if self.get(id).is_some() {
             self.focused = Some(id);
             self.focused_value_snapshot = Some(self.value(id));
+            self.bump_style_version();
         }
     }
 
@@ -29,6 +30,7 @@ impl Dom {
             let changed = self.focused_value_snapshot.as_deref() != Some(self.value(id).as_str());
             self.focused = None;
             self.focused_value_snapshot = None;
+            self.bump_style_version();
             Some(changed)
         } else {
             None
@@ -45,6 +47,7 @@ impl Dom {
         let changed = self.focused_value_snapshot.as_deref() != Some(self.value(id).as_str());
         self.focused = None;
         self.focused_value_snapshot = None;
+        self.bump_style_version();
         Some((id, changed))
     }
 

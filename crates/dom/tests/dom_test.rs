@@ -624,6 +624,62 @@ fn layout_version_bumps_only_on_layout_relevant_mutations() {
 }
 
 #[test]
+fn hover_set_and_clear_round_trip() {
+    let mut dom = Dom::new();
+    let root = dom.root();
+    let el = dom.create_element("div");
+    dom.append_child(root, el);
+
+    assert_eq!(dom.hovered_element(), None);
+    dom.set_hovered(el);
+    assert_eq!(dom.hovered_element(), Some(el));
+    dom.clear_hover();
+    assert_eq!(dom.hovered_element(), None);
+}
+
+#[test]
+fn hover_never_bumps_layout_version() {
+    let mut dom = Dom::new();
+    let root = dom.root();
+    let el = dom.create_element("div");
+    dom.append_child(root, el);
+
+    let v0 = dom.layout_version();
+    dom.set_hovered(el);
+    assert_eq!(dom.layout_version(), v0);
+    dom.clear_hover();
+    assert_eq!(dom.layout_version(), v0);
+}
+
+#[test]
+fn hover_and_focus_bump_style_version_layout_does_not() {
+    let mut dom = Dom::new();
+    let root = dom.root();
+    let el = dom.create_element("div");
+    dom.append_child(root, el);
+
+    let s0 = dom.style_version();
+    dom.set_hovered(el);
+    assert_eq!(dom.style_version(), s0 + 1);
+    // Setting the same node again is a no-op (already hovered).
+    dom.set_hovered(el);
+    assert_eq!(dom.style_version(), s0 + 1);
+    dom.clear_hover();
+    assert_eq!(dom.style_version(), s0 + 2);
+
+    dom.focus(el);
+    assert_eq!(dom.style_version(), s0 + 3);
+    dom.blur(el);
+    assert_eq!(dom.style_version(), s0 + 4);
+
+    // A structural, layout-relevant mutation never bumps style_version.
+    let s_before_structural = dom.style_version();
+    let el2 = dom.create_element("span");
+    dom.append_child(root, el2);
+    assert_eq!(dom.style_version(), s_before_structural);
+}
+
+#[test]
 fn contains_is_true_for_self_and_descendants_false_otherwise() {
     let mut dom = Dom::new();
     let root = dom.root();

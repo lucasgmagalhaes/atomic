@@ -20,6 +20,7 @@ use std::collections::HashMap;
 mod attributes;
 mod clone;
 mod focus;
+mod hover;
 mod mutation;
 mod query;
 mod serialize;
@@ -135,6 +136,19 @@ pub struct Dom {
     /// fires on commit — blur after the value actually moved — not on
     /// every keystroke, unlike `input`).
     focused_value_snapshot: Option<String>,
+    /// Real live `:hover` state — the one node currently hovered, or
+    /// `None`. See [`Dom::set_hovered`]/[`Dom::clear_hover`]/
+    /// [`Dom::hovered_element`]. Mirrors `focused`'s shape exactly; a
+    /// caller (e.g. a native embedding's per-frame mouse-move hit-test)
+    /// decides *when* this changes, same as focus.
+    hovered: Option<NodeId>,
+    /// Bumped whenever `hovered`/`focused` change (see
+    /// [`Dom::style_version`]) — a hover/focus change can affect which
+    /// CSS rules match (`:hover`/`:focus`) without ever affecting layout,
+    /// so it's a separate counter from `layout_version`: a caller with a
+    /// layout cache keyed on `layout_version` alone would otherwise never
+    /// notice its cached box tree's baked-in cascaded styles went stale.
+    style_version: u64,
     /// Backward-compatible monotonic mutation counter — bumped by every
     /// structural/content mutation, same as before. Kept for callers that
     /// still use `mutation_count()` (e.g. `profile-worker`'s layout cache).
@@ -180,6 +194,8 @@ impl Dom {
             root: root_id,
             focused: None,
             focused_value_snapshot: None,
+            hovered: None,
+            style_version: 0,
             mutations: 0,
             dirty: DirtyFlags::EMPTY,
             layout_version: 0,
@@ -195,5 +211,23 @@ impl Dom {
             self.layout_version = self.layout_version.wrapping_add(1);
         }
         self.dirty |= flags;
+    }
+
+    /// Real "has `:hover`/`:focus`-matchable state changed?" signal — see
+    /// [`Dom::style_version`]'s field doc for why this is separate from
+    /// `layout_version`. Called by [`hover::set_hovered`]/[`clear_hover`]
+    /// and [`focus`]/[`blur`]/[`clear_focus`], never by a structural
+    /// mutation (those already bump `layout_version` via `mark_dirty`).
+    pub(crate) fn bump_style_version(&mut self) {
+        self.style_version = self.style_version.wrapping_add(1);
+    }
+
+    /// Current value of the counter [`bump_style_version`] increments —
+    /// a caller with a layout/paint cache keyed on `layout_version` alone
+    /// (e.g. a chrome-engine embedding's box-tree cache) should also key
+    /// on this, so a hover/focus change that doesn't touch layout still
+    /// invalidates a cache whose cascaded styles depend on it.
+    pub fn style_version(&self) -> u64 {
+        self.style_version
     }
 }

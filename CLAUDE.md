@@ -62,7 +62,10 @@ JS-engine specifics (runtime, DOM, events, CSS/layout, paint, Web API classes) l
 - Indentation is 4 spaces (`rustfmt.toml`'s `tab_spaces`, `.editorconfig`'s `indent_size`) — run `cargo fmt --all` after editing.
 - Never commit `graphify-out/` (gitignored — contains absolute local filesystem paths).
 - Tests are integration-style, not inline `#[cfg(test)] mod tests` in `src/`: put them under `crate/tests/<file>_test.rs` (e.g. `crates/dom/tests/dom_test.rs`). Only works cleanly when the tests exercise the crate's public API — if a test needs a private item, that's a signal to reconsider what's private, not to fall back to an inline module.
-- Formatting is enforced on commit via a git pre-commit hook (`cargo fmt -- --check`), installed by `cargo-husky` (a dev-dependency of `xtask` — the Rust-native equivalent of Husky, since this workspace has no Node/npm anywhere). The hook installs itself into `.git/hooks/pre-commit` the first time `cargo test`/`cargo test -p xtask` runs after a fresh clone; run `cargo fmt --all` to fix a failing check, or `git commit --no-verify` to bypass in a pinch.
+- Formatting is enforced on commit via a git pre-commit hook, installed by `cargo-husky` (a dev-dependency of `xtask` — the Rust-native equivalent of Husky, since this workspace has no Node/npm anywhere) from the custom script at `.cargo-husky/hooks/pre-commit` (the `user-hooks` cargo-husky feature, not its fixed `run-cargo-fmt` one — this script needs to run more than one checker). The hook installs itself into `.git/hooks/pre-commit` the first time `cargo test`/`cargo test -p xtask` runs after a fresh clone. It runs two checks:
+  - `cargo fmt --all -- --check` for every Rust crate — run `cargo fmt --all` to fix a failing check.
+  - `dprint check` for the workspace's only non-Rust source, `apps/shell/chrome/**/*.{html,css,js}` (config: `dprint.json`) — run `dprint fmt` to fix a failing check. Requires `dprint` on `PATH` (`cargo install dprint`) and a one-time `dprint config add css markup typescript` to populate `dprint.json`'s plugin list (see that file's own comment for why it isn't pre-filled); the hook only warns and skips this half if `dprint` isn't installed, so a fresh clone without it still gets Rust formatting enforced.
+  - `git commit --no-verify` bypasses both in a pinch.
 
 ## Knowledge graph
 

@@ -1,0 +1,6 @@
+# Shell scripts must keep LF line endings regardless of the checking-out
+# platform's core.autocrlf setting - a CRLF-mangled shebang line breaks
+# `#!/bin/sh` on any real POSIX shell (git-bash on Windows tolerates it,
+# but the hook must also work if this repo is ever cloned on Linux/macOS).
+*.sh text eol=lf
+/.cargo-husky/hooks/* text eol=lf

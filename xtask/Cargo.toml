@@ -8,4 +8,4 @@ profile = { path = "../crates/profile" }
 platform-apis = { path = "../crates/platform-apis" }
 
 [dev-dependencies]
-cargo-husky = { version = "1", default-features = false, features = ["precommit-hook", "run-cargo-fmt"] }
+cargo-husky = { version = "1", default-features = false, features = ["precommit-hook", "user-hooks"] }

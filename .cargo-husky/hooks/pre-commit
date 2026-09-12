@@ -1,0 +1,17 @@
+#!/bin/sh
+# Custom user-hooks script (see xtask/Cargo.toml's cargo-husky features) so
+# Rust formatting and the non-Rust chrome-bundle formatting (CSS/HTML/JS
+# under apps/shell/chrome/) are both enforced from one script, rather than
+# cargo-husky's fixed run-cargo-fmt hook covering Rust alone.
+set -e
+
+echo "pre-commit: cargo fmt --all -- --check"
+cargo fmt --all -- --check
+
+if command -v dprint >/dev/null 2>&1; then
+    echo "pre-commit: dprint check"
+    dprint check
+else
+    echo "pre-commit: warning - dprint not installed, skipping CSS/HTML/JS format check." >&2
+    echo "pre-commit: install with 'cargo install dprint', then run 'dprint config add css markup typescript' once to populate dprint.json's plugin list (see dprint.json's own comment)." >&2
+fi

@@ -1,0 +1,23 @@
+{
+  // Formats the workspace's only non-Rust source: apps/shell's chrome
+  // bundles (HTML/CSS/JS). Rust itself is formatted by `cargo fmt`
+  // (rustfmt.toml), not dprint.
+  //
+  // `plugins` is intentionally empty here: dprint verifies each plugin
+  // download against a pinned checksum, and hand-typing one risks it going
+  // stale or simply being wrong. Run this once, locally, to populate it for
+  // real (dprint fetches the current version + checksum itself):
+  //
+  //   cargo install dprint
+  //   dprint config add css
+  //   dprint config add markup
+  //   dprint config add typescript
+  //
+  // `dprint config add typescript` also covers plain JS - the same plugin
+  // handles both. After that, `dprint fmt` formats and `dprint check`
+  // verifies (the pre-commit hook at .cargo-husky/hooks/pre-commit runs the
+  // latter, and only if `dprint` is on PATH).
+  "plugins": [],
+  "includes": ["apps/shell/chrome/**/*.{html,css,js}"],
+  "excludes": ["target/**", "graphify-out/**"]
+}

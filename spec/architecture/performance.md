@@ -570,6 +570,23 @@ Do not optimize based only on assumptions.
 
 ---
 
+### 21.6 Benchmark Results (2026-09-12)
+
+First real numbers for this section, produced against a stale-doc revisit request that questioned QuickJS and process-per-tab without evidence — see `PRODUCT.md`/CLAUDE.md, both already committed to these two choices. No swap followed; this only records the measurements that back keeping them.
+
+**QuickJS hot-loop throughput** — `cargo bench -p js-runtime` (`crates/js-runtime/benches/hot_loop.rs`): a synthetic idle-game-shaped tick handler (3 accumulators, `sqrt`/`log`/`%` each tick, 200,000 ticks) ran in **~185ms** (~171–199ms range across samples) on the dev machine, release profile. That's on the order of 5M+ transcendental-shaped ops/sec from a plain interpreter (no JIT). Real idle games tick far less often (1–60 Hz) with much lighter math per tick — QuickJS has large headroom here. **Conclusion: no case for a JIT'd engine swap on JS throughput alone.**
+
+**Per-process footprint** — `cargo run --release -p xtask -- bench-footprint` (`xtask/src/main.rs`): spawned 1 and then 5 real `profile-worker` processes against a fixed local test page, sampled via the existing `platform-apis::process_stats`:
+
+```text
+n=1: 114.6 MiB, ~0.4% CPU (idle)
+n=5: 541.1 MiB total, ~108.2 MiB/profile avg, ~1.0% CPU total (idle)
+```
+
+Memory scales close to linearly per profile (no shared-baseline discount observed at n=5 vs n=1 in this quick run — expected, since each `profile-worker` is a fully separate process with its own JS runtime + GPU context). Idle CPU stays negligible even at 5 concurrent profiles. This is a minimal test page (no heavy JS/DOM), so it measures process/engine *baseline* overhead, not a worst case — but baseline overhead is exactly what "many isolated profiles running light" needs to be small. **Conclusion: process-per-tab's fixed per-process cost (~100+ MiB) is the number to watch as real target pages get tested; nothing here argues for switching to thread-per-tab yet, and doing so would cost a comparably large rewrite (see CLAUDE.md's Known gotchas) for an unproven gain.**
+
+Both benchmarks are reusable — rerun `cargo bench -p js-runtime` and `cargo run --release -p xtask -- bench-footprint` whenever this question comes up again, instead of re-deciding from scratch.
+
 ---
 
 [← back to spec/INDEX.md](../INDEX.md)

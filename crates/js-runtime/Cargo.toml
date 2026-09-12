@@ -13,3 +13,10 @@ net = { path = "../net" }
 storage = { path = "../storage" }
 url = "2.5.8"
 urlencoding = "2.1"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "hot_loop"
+harness = false

@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+profile = { path = "../crates/profile" }
+platform-apis = { path = "../crates/platform-apis" }
 
 [dev-dependencies]
 cargo-husky = { version = "1", default-features = false, features = ["precommit-hook", "run-cargo-fmt"] }

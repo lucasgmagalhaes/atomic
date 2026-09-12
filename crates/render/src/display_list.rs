@@ -153,10 +153,13 @@ fn clip_rect(rect: Rect, clip: Option<ClipRect>) -> Option<Rect> {
 /// clip was already in effect from an ancestor - `None` in, `None` out
 /// only if `box_` itself doesn't clip either (checked by the caller
 /// before calling this; this function always produces a real bound).
-fn tighten_clip(box_: &LayoutBox, clip: Option<ClipRect>) -> ClipRect {
+/// `translate` is the accumulated `transform` offset in effect at `box_`
+/// itself (see `collect`'s own doc) - the clip region moves with the box
+/// it belongs to, same as every other paint primitive.
+fn tighten_clip(box_: &LayoutBox, clip: Option<ClipRect>, translate: (f64, f64)) -> ClipRect {
     let own = ClipRect {
-        x: box_.dimensions.x as f32,
-        y: box_.dimensions.y as f32,
+        x: (box_.dimensions.x + translate.0) as f32,
+        y: (box_.dimensions.y + translate.1) as f32,
         width: box_.dimensions.width as f32,
         height: box_.dimensions.height as f32,
     };
@@ -173,21 +176,40 @@ fn tighten_clip(box_: &LayoutBox, clip: Option<ClipRect>) -> ClipRect {
 /// rect — nothing downstream needs to know they exist.
 pub fn build_display_list(box_: &LayoutBox) -> Vec<Rect> {
     let mut list = Vec::new();
-    collect(box_, &mut list, None, 1.0);
+    collect(box_, &mut list, None, 1.0, (0.0, 0.0));
     list
 }
 
-fn collect(box_: &LayoutBox, out: &mut Vec<Rect>, clip: Option<ClipRect>, parent_opacity: f64) {
+/// `translate` is the accumulated `transform` offset in effect *above*
+/// `box_` (from every transformed ancestor) - `box_`'s own
+/// `style.transform` is added to it before painting `box_` itself and
+/// before recursing, so a transformed box's entire subtree moves with it
+/// as one rigid unit, same real semantics `opacity` already has for
+/// "applies to a box and composes down into its descendants" (see the
+/// module doc's own opacity paragraph) - see
+/// `layout_engine::ComputedStyle::transform`'s doc for the translate-only
+/// scope and why this never affects layout, only where things paint.
+fn collect(
+    box_: &LayoutBox,
+    out: &mut Vec<Rect>,
+    clip: Option<ClipRect>,
+    parent_opacity: f64,
+    parent_translate: (f64, f64),
+) {
     let opacity = parent_opacity * box_.style.opacity;
+    let translate = (
+        parent_translate.0 + box_.style.transform.0,
+        parent_translate.1 + box_.style.transform.1,
+    );
     if let Some(shadow) = box_.style.box_shadow {
         if shadow.color.a > 0 {
-            push_box_shadow_rect(box_, shadow, out, clip, opacity);
+            push_box_shadow_rect(box_, shadow, out, clip, opacity, translate);
         }
     }
     if box_.style.background_color.a > 0 {
         let rect = Rect {
-            x: box_.dimensions.x as f32,
-            y: box_.dimensions.y as f32,
+            x: (box_.dimensions.x + translate.0) as f32,
+            y: (box_.dimensions.y + translate.1) as f32,
             width: box_.dimensions.width as f32,
             height: box_.dimensions.height as f32,
             color: scale_alpha(box_.style.background_color, opacity),
@@ -198,15 +220,15 @@ fn collect(box_: &LayoutBox, out: &mut Vec<Rect>, clip: Option<ClipRect>, parent
         }
     }
     if box_.style.border_style != BorderStyle::None && box_.style.border_color.a > 0 {
-        push_border_rects(box_, out, clip, opacity);
+        push_border_rects(box_, out, clip, opacity, translate);
     }
     let child_clip = if box_.style.overflow == Overflow::Hidden {
-        Some(tighten_clip(box_, clip))
+        Some(tighten_clip(box_, clip, translate))
     } else {
         clip
     };
     for child in paint_order(&box_.children) {
-        collect(child, out, child_clip, opacity);
+        collect(child, out, child_clip, opacity, translate);
     }
 }
 
@@ -224,11 +246,12 @@ fn push_box_shadow_rect(
     out: &mut Vec<Rect>,
     clip: Option<ClipRect>,
     opacity: f64,
+    translate: (f64, f64),
 ) {
     let d = box_.dimensions;
     let rect = Rect {
-        x: (d.x + shadow.offset_x - shadow.spread) as f32,
-        y: (d.y + shadow.offset_y - shadow.spread) as f32,
+        x: (d.x + translate.0 + shadow.offset_x - shadow.spread) as f32,
+        y: (d.y + translate.1 + shadow.offset_y - shadow.spread) as f32,
         width: (d.width + shadow.spread * 2.0).max(0.0) as f32,
         height: (d.height + shadow.spread * 2.0).max(0.0) as f32,
         color: scale_alpha(shadow.color, opacity),
@@ -260,11 +283,19 @@ fn push_box_shadow_rect(
 /// - see `render::gpu`) - an acceptable seam at typical border widths,
 /// where a strip is thin enough that its "wrong" rounded corner is
 /// mostly hidden under the background rect it sits on top of.
-fn push_border_rects(box_: &LayoutBox, out: &mut Vec<Rect>, clip: Option<ClipRect>, opacity: f64) {
+fn push_border_rects(
+    box_: &LayoutBox,
+    out: &mut Vec<Rect>,
+    clip: Option<ClipRect>,
+    opacity: f64,
+    translate: (f64, f64),
+) {
     let d = box_.dimensions;
     let b = box_.border;
     let color = scale_alpha(box_.style.border_color, opacity);
     let radius = box_.style.border_radius as f32;
+    let x = d.x + translate.0;
+    let y = d.y + translate.1;
     let mut push = |rect: Rect| {
         if let Some(clipped) = clip_rect(rect, clip) {
             out.push(clipped);
@@ -272,8 +303,8 @@ fn push_border_rects(box_: &LayoutBox, out: &mut Vec<Rect>, clip: Option<ClipRec
     };
     if b.top > 0.0 {
         push(Rect {
-            x: d.x as f32,
-            y: d.y as f32,
+            x: x as f32,
+            y: y as f32,
             width: d.width as f32,
             height: b.top as f32,
             color,
@@ -282,8 +313,8 @@ fn push_border_rects(box_: &LayoutBox, out: &mut Vec<Rect>, clip: Option<ClipRec
     }
     if b.bottom > 0.0 {
         push(Rect {
-            x: d.x as f32,
-            y: (d.y + d.height - b.bottom) as f32,
+            x: x as f32,
+            y: (y + d.height - b.bottom) as f32,
             width: d.width as f32,
             height: b.bottom as f32,
             color,
@@ -292,8 +323,8 @@ fn push_border_rects(box_: &LayoutBox, out: &mut Vec<Rect>, clip: Option<ClipRec
     }
     if b.left > 0.0 {
         push(Rect {
-            x: d.x as f32,
-            y: d.y as f32,
+            x: x as f32,
+            y: y as f32,
             width: b.left as f32,
             height: d.height as f32,
             color,
@@ -302,8 +333,8 @@ fn push_border_rects(box_: &LayoutBox, out: &mut Vec<Rect>, clip: Option<ClipRec
     }
     if b.right > 0.0 {
         push(Rect {
-            x: (d.x + d.width - b.right) as f32,
-            y: d.y as f32,
+            x: (x + d.width - b.right) as f32,
+            y: y as f32,
             width: b.right as f32,
             height: d.height as f32,
             color,
@@ -337,7 +368,7 @@ pub struct ClippedGlyph {
 /// callers don't need to track box offsets themselves.
 pub fn build_glyph_list(box_: &LayoutBox) -> Vec<ClippedGlyph> {
     let mut list = Vec::new();
-    collect_glyphs(box_, &mut list, None, 1.0);
+    collect_glyphs(box_, &mut list, None, 1.0, (0.0, 0.0));
     list
 }
 
@@ -346,10 +377,15 @@ fn collect_glyphs(
     out: &mut Vec<ClippedGlyph>,
     clip: Option<ClipRect>,
     parent_opacity: f64,
+    parent_translate: (f64, f64),
 ) {
     let opacity = parent_opacity * box_.style.opacity;
-    let ox = box_.dimensions.x as i32;
-    let oy = box_.dimensions.y as i32;
+    let translate = (
+        parent_translate.0 + box_.style.transform.0,
+        parent_translate.1 + box_.style.transform.1,
+    );
+    let ox = (box_.dimensions.x + translate.0) as i32;
+    let oy = (box_.dimensions.y + translate.1) as i32;
     out.extend(box_.glyphs.iter().map(|g| ClippedGlyph {
         glyph: PositionedGlyph {
             x: g.x + ox,
@@ -360,12 +396,12 @@ fn collect_glyphs(
         opacity,
     }));
     let child_clip = if box_.style.overflow == Overflow::Hidden {
-        Some(tighten_clip(box_, clip))
+        Some(tighten_clip(box_, clip, translate))
     } else {
         clip
     };
     for child in paint_order(&box_.children) {
-        collect_glyphs(child, out, child_clip, opacity);
+        collect_glyphs(child, out, child_clip, opacity, translate);
     }
 }
 
@@ -401,7 +437,7 @@ pub struct ImageQuad {
 /// [`Rect`].
 pub fn build_image_list(box_: &LayoutBox) -> Vec<ImageQuad> {
     let mut list = Vec::new();
-    collect_images(box_, &mut list, None, 1.0);
+    collect_images(box_, &mut list, None, 1.0, (0.0, 0.0));
     list
 }
 
@@ -410,12 +446,17 @@ fn collect_images(
     out: &mut Vec<ImageQuad>,
     clip: Option<ClipRect>,
     parent_opacity: f64,
+    parent_translate: (f64, f64),
 ) {
     let opacity = parent_opacity * box_.style.opacity;
+    let translate = (
+        parent_translate.0 + box_.style.transform.0,
+        parent_translate.1 + box_.style.transform.1,
+    );
     if let Some(image) = &box_.image {
         out.push(ImageQuad {
-            x: box_.dimensions.x as f32,
-            y: box_.dimensions.y as f32,
+            x: (box_.dimensions.x + translate.0) as f32,
+            y: (box_.dimensions.y + translate.1) as f32,
             width: box_.dimensions.width as f32,
             height: box_.dimensions.height as f32,
             image: image.clone(),
@@ -424,11 +465,11 @@ fn collect_images(
         });
     }
     let child_clip = if box_.style.overflow == Overflow::Hidden {
-        Some(tighten_clip(box_, clip))
+        Some(tighten_clip(box_, clip, translate))
     } else {
         clip
     };
     for child in paint_order(&box_.children) {
-        collect_images(child, out, child_clip, opacity);
+        collect_images(child, out, child_clip, opacity, translate);
     }
 }

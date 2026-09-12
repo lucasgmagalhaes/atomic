@@ -331,6 +331,20 @@ pub struct ComputedStyle {
     /// consumer of this field; layout/sizing never reads it). `Some(n)`
     /// for any parsed integer, negative included.
     pub z_index: Option<i32>,
+    /// Real `transform`, scoped to 2D translation only — `(translate_x,
+    /// translate_y)` in px, `(0.0, 0.0)` (the initial value) meaning
+    /// `none`/no transform. Parses `translate(x[, y])`, `translateX(x)`,
+    /// `translateY(y)` (multiple functions in one value compose
+    /// additively, matching real translate-composition semantics without
+    /// a real matrix); `rotate`/`scale`/`skew`/`matrix` are recognized
+    /// (skipped past, so the parser stays synchronized) but contribute no
+    /// offset — this crate's paint primitives are axis-aligned rects with
+    /// no rotation/scale support (see `render::display_list`, the only
+    /// consumer), same "real but narrower" scope cut `border_radius`'s
+    /// own doc already documents for this codebase. A transform never
+    /// affects layout — siblings/ancestors are positioned as if untransformed,
+    /// exactly like `opacity` — only where this box (and its subtree) paints.
+    pub transform: (f64, f64),
 }
 
 impl ComputedStyle {
@@ -376,6 +390,7 @@ impl ComputedStyle {
             },
             opacity: 1.0,
             z_index: None,
+            transform: (0.0, 0.0),
         }
     }
 }
@@ -504,6 +519,86 @@ fn apply_box_shadow(style: &mut ComputedStyle, tokens: &[Token]) {
             color,
         });
     }
+}
+
+/// Real, but 2D-translate-only `transform` — see
+/// `ComputedStyle::transform`'s own doc for the full scope. `none` resets
+/// to `(0.0, 0.0)`; otherwise scans the token stream for
+/// `translate`/`translateX`/`translateY` function calls (one or more,
+/// space-separated real transform functions compose in the source
+/// order — this narrower pass just sums every translate offset it
+/// finds, ignoring any other function name's args entirely rather than
+/// trying to interpret them). A length argument's sign uses the same
+/// `Delim('-')`-then-number two-token lookahead `"z-index"`'s own
+/// parsing already documents (the lexer never folds a unary minus into
+/// a `Number`/`Dimension` token).
+fn apply_transform(style: &mut ComputedStyle, tokens: &[Token]) {
+    if let Some(Token::Ident(v)) = tokens.first() {
+        if v == "none" {
+            style.transform = (0.0, 0.0);
+            return;
+        }
+    }
+    /// Reads one length value (optionally signed) starting at `tokens[*i]`,
+    /// advancing `*i` past it. `None` if `tokens[*i]` isn't a length at all
+    /// (e.g. it's already `,`/`)`).
+    fn read_length(tokens: &[Token], i: &mut usize) -> Option<f64> {
+        match tokens.get(*i) {
+            Some(Token::Delim('-')) => {
+                let n = match tokens.get(*i + 1) {
+                    Some(Token::Dimension(n, _)) => *n,
+                    Some(Token::Number(n)) => *n,
+                    _ => return None,
+                };
+                *i += 2;
+                Some(-n)
+            }
+            Some(Token::Dimension(n, _)) => {
+                *i += 1;
+                Some(*n)
+            }
+            Some(Token::Number(n)) => {
+                *i += 1;
+                Some(*n)
+            }
+            _ => None,
+        }
+    }
+
+    let mut dx = 0.0;
+    let mut dy = 0.0;
+    let mut i = 0;
+    while i < tokens.len() {
+        let Some(Token::Ident(name)) = tokens.get(i) else {
+            i += 1;
+            continue;
+        };
+        let name = name.to_ascii_lowercase();
+        i += 1;
+        if tokens.get(i) != Some(&Token::LParen) {
+            continue;
+        }
+        i += 1;
+        let mut args = Vec::new();
+        while tokens.get(i) != Some(&Token::RParen) && i < tokens.len() {
+            if let Some(n) = read_length(tokens, &mut i) {
+                args.push(n);
+            } else {
+                i += 1;
+            }
+        }
+        i += 1; // past RParen (or end of input if malformed - harmless)
+        match name.as_str() {
+            "translate" => {
+                dx += args.first().copied().unwrap_or(0.0);
+                dy += args.get(1).copied().unwrap_or(0.0);
+            }
+            "translatex" => dx += args.first().copied().unwrap_or(0.0),
+            "translatey" => dy += args.first().copied().unwrap_or(0.0),
+            _ => {}
+        }
+    }
+    style.transform = (dx, dy);
 }
 
 /// Real `border-radius: <length>` — single uniform value only (see
@@ -781,6 +876,7 @@ fn apply_declaration(style: &mut ComputedStyle, decl: &Declaration) {
                 _ => style.z_index,
             };
         }
+        "transform" => apply_transform(style, &decl.value),
         _ => {}
     }
 }

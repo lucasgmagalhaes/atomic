@@ -1674,6 +1674,60 @@ fn click_at_then_type_key_types_into_a_real_focused_input() {
 }
 
 #[test]
+fn clicking_to_focus_an_input_updates_its_real_computed_focus_style() {
+    // `:focus` changes dom::Dom::style_version, not layout_version - if
+    // Page's layout/computed-style cache is keyed on layout_version alone
+    // (missing style_version), a click that only focuses an element
+    // (nothing layout-affecting) returns the stale pre-focus tree, and
+    // this getComputedStyle read would wrongly still see the unfocused
+    // backgroundColor.
+    let page_addr = serve_html_once(
+        r##"<input id="field">
+        <style>
+            #field { width: 150px; height: 30px; background-color: red; }
+            #field:focus { background-color: blue; }
+        </style>"##,
+    );
+
+    let name = unique_shmem_name("focus-style-cache");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+    profile
+        .navigate(&format!("http://{page_addr}/"))
+        .expect("protocol should not fail")
+        .expect("navigate should succeed");
+
+    assert_eq!(
+        profile
+            .evaluate("getComputedStyle(document.getElementById('field')).backgroundColor")
+            .expect("protocol should not fail")
+            .expect("computed style should be readable"),
+        "rgba(255, 0, 0, 1)",
+        "unfocused input should start with its plain background-color"
+    );
+
+    let click_result = profile
+        .click_at(10.0, 10.0)
+        .expect("protocol should not fail");
+    assert!(
+        click_result.is_ok(),
+        "clicking the real <input> should succeed: {click_result:?}"
+    );
+
+    assert_eq!(
+        profile
+            .evaluate("getComputedStyle(document.getElementById('field')).backgroundColor")
+            .expect("protocol should not fail")
+            .expect("computed style should be readable"),
+        "rgba(0, 0, 255, 1)",
+        "focusing the input via a real click must invalidate the cached \
+         layout/computed-style tree, not keep serving the stale unfocused one"
+    );
+
+    profile.quit();
+}
+
+#[test]
 fn type_key_with_nothing_focused_reports_an_error() {
     let name = unique_shmem_name("type-key-unfocused");
     let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");

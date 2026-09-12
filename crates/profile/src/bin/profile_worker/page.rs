@@ -22,9 +22,7 @@ use render::{
 use crate::document_load::LoadedDocument;
 use crate::layout_snapshot::{collect_computed_styles, collect_layout_rects};
 use crate::network::ResourceCache;
-use crate::page_source::{
-    build_stylesheet, collect_meta_csp_policies, collect_script_sources, load_images,
-};
+use crate::page_source::{build_stylesheet, collect_meta_csp_policies, load_images, load_scripts};
 
 /// Runs only against the built-in demo page (never a real navigated
 /// page, which has no `#counter` element for it to find): increments a
@@ -146,8 +144,15 @@ impl<'rt> Page<'rt> {
             dns_server,
             &mut cache,
         );
-        let mut scripts = Vec::new();
-        collect_script_sources(&dom, html_el, &mut scripts);
+        let scripts = load_scripts(
+            &dom,
+            html_el,
+            base_url,
+            storage_root,
+            proxy,
+            dns_server,
+            &mut cache,
+        );
 
         let mut ctx = match storage_host {
             Some(host) => {

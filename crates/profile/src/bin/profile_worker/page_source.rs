@@ -57,32 +57,88 @@ fn collect_css_sources(dom: &Dom, node: NodeId, out: &mut Vec<CssSource>) {
     }
 }
 
-/// Real `<script>` tag execution - previously only the hardcoded demo
-/// page's own `DEMO_SCRIPT` ever ran (`run_demo_script`, see `Page::load`);
-/// a genuinely fetched/navigated page's own inline `<script>` content was
-/// parsed into the DOM (as a real text-content child, same as any other
-/// element) but never evaluated. Collects every `<script>` element's real
-/// text content in document order (matches real script execution order -
-/// a script placed after the elements it references, the common real
-/// pattern, sees them already in the DOM by the time it runs).
-///
-/// Scope cut, same shape as `<link>` stylesheets' own history before this:
-/// only inline `<script>...</script>` content - a `<script src="...">`
-/// external script is a real further network-fetch feature, not attempted
-/// in this pass, and its tag is walked past without effect (not an error).
-pub(crate) fn collect_script_sources(dom: &Dom, node: NodeId, out: &mut Vec<String>) {
+/// One `<script>` element in document order - either its real inline text
+/// content, or the real `src` URL an external one needs fetched before it
+/// can run.
+enum ScriptSource {
+    Inline(String),
+    External(String),
+}
+
+/// Collects every `<script>` element's source in document order (matches
+/// real script execution order - a script placed after the elements it
+/// references, the common real pattern, sees them already in the DOM by
+/// the time it runs).
+fn collect_script_sources(dom: &Dom, node: NodeId, out: &mut Vec<ScriptSource>) {
     let Some(n) = dom.get(node) else { return };
     if let NodeData::Element {
         tag, attributes, ..
     } = &n.data
     {
-        if tag == "script" && !attributes.contains_key("src") {
-            out.push(dom.text_content(node));
+        if tag == "script" {
+            match attributes.get("src") {
+                Some(src) => out.push(ScriptSource::External(src.clone())),
+                None => out.push(ScriptSource::Inline(dom.text_content(node))),
+            }
         }
     }
     for &child in &n.children {
         collect_script_sources(dom, child, out);
     }
+}
+
+/// Real `<script>` tag execution - previously only the hardcoded demo
+/// page's own `DEMO_SCRIPT` ever ran (`run_demo_script`, see `Page::load`);
+/// a genuinely fetched/navigated page's own inline `<script>` content was
+/// parsed into the DOM (as a real text-content child, same as any other
+/// element) but never evaluated, and a `<script src="...">` external
+/// script wasn't fetched at all. Both are real now: inline text is used
+/// verbatim, and an external script is fetched (same
+/// `ResourceCache`/`resolve_url` pipeline `<link>`/`<img>` already use) and
+/// its response body decoded as UTF-8 - a fetch failure (bad URL, network
+/// error, non-UTF8 body) silently drops that one script and moves on,
+/// same "one resource failing doesn't fail the whole page" convention
+/// `load_images` already has for a broken `<img>`. Every source lands in
+/// the returned `Vec` in real document order regardless of inline/external
+/// mix, so multi-script execution order still matches a real browser's.
+///
+/// Scope cut: no `defer`/`async`/module-type distinction yet - every
+/// script (inline or external) runs synchronously in document order, the
+/// same "parser-blocking" semantics this engine already gave inline
+/// scripts before this pass. `type="module"` scripts are treated as plain
+/// classic scripts (no ES module resolution exists yet - see
+/// `ROADMAP.md` P2 item 19).
+pub(crate) fn load_scripts(
+    dom: &Dom,
+    root: NodeId,
+    base_url: Option<&str>,
+    storage_root: &std::path::Path,
+    proxy: Option<&net::ProxyConfig>,
+    dns_server: Option<std::net::SocketAddr>,
+    cache: &mut ResourceCache,
+) -> Vec<String> {
+    let mut sources = Vec::new();
+    collect_script_sources(dom, root, &mut sources);
+
+    let mut scripts = Vec::with_capacity(sources.len());
+    for source in sources {
+        match source {
+            ScriptSource::Inline(text) => scripts.push(text),
+            ScriptSource::External(src) => {
+                let Some(url) = resolve_url(base_url, &src) else {
+                    continue;
+                };
+                let Ok(response) = cache.fetch_cached(&url, storage_root, proxy, dns_server) else {
+                    continue;
+                };
+                let Ok(text) = String::from_utf8(response.body.to_vec()) else {
+                    continue;
+                };
+                scripts.push(text);
+            }
+        }
+    }
+    scripts
 }
 
 /// Walks `node`'s subtree in document order collecting every

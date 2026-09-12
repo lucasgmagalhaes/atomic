@@ -437,6 +437,36 @@ fn navigate_applies_a_real_style_block_extracted_from_the_fetched_page() {
 }
 
 #[test]
+fn navigate_fetches_and_runs_a_real_external_script() {
+    let script_addr =
+        serve_html_once("document.getElementById('box').textContent = 'ran-from-external';");
+    let script_url = format!("http://{script_addr}/script.js");
+    let html = format!(r#"<div id="box">hi</div><script src="{script_url}"></script>"#);
+    let page_addr = serve_html_once(&html);
+    let page_url = format!("http://{page_addr}/");
+
+    let name = unique_shmem_name("external-script");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let result = profile
+        .navigate(&page_url)
+        .expect("protocol should not fail");
+    assert!(result.is_ok(), "navigate should succeed: {result:?}");
+
+    let text = profile
+        .evaluate("document.getElementById('box').textContent")
+        .expect("protocol should not fail")
+        .expect("script must not throw");
+    assert_eq!(
+        text, "ran-from-external",
+        "the fetched external <script src> should have run and mutated the DOM"
+    );
+
+    profile.quit();
+}
+
+#[test]
 fn navigate_fetches_a_linked_stylesheet_and_applies_it() {
     let css_addr =
         serve_html_once("#box { background-color: #ff00ff; width: 300px; height: 150px; }");

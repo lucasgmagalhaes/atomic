@@ -171,12 +171,13 @@ fn nearest_id_ancestor(dom: &Dom, node: NodeId) -> Option<String> {
 pub(crate) fn dispatch_click_at(
     page: &mut Page,
     width: u32,
+    height: u32,
     x: f64,
     y: f64,
     scroll_top: f64,
 ) -> Result<Option<String>, String> {
     let node = page
-        .hit_test_at(width, x, y, scroll_top)
+        .hit_test_at(width, height, x, y, scroll_top)
         .ok_or("no element at that point")?;
     let click_id = {
         let dom_ref = page.ctx.dom().ok_or("no DOM available")?;

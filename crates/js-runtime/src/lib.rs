@@ -542,6 +542,22 @@ impl<'rt> Context<'rt> {
             .unwrap_or(0.0)
     }
 
+    /// Dispatches a real, synchronous `"resize"` event on `window` — same
+    /// convention `window`'s own scroll dispatch uses (see
+    /// `crate::window::fire_scroll_event`), just callable by the host
+    /// directly rather than only from a JS-facing setter, since a resize
+    /// is host-initiated (a live `RESIZE` command), not driven by script.
+    /// A host calls this right after [`Context::set_viewport_size`] so a
+    /// page's own `"resize"` listener sees the new `innerWidth`/
+    /// `innerHeight` already in place.
+    pub fn fire_resize(&self) {
+        unsafe {
+            let global = sys::JS_GetGlobalObject(self.ptr);
+            crate::events::dispatch_simple(self.ptr, global, "resize", false, false);
+            sys::JS_FreeValue(self.ptr, global);
+        }
+    }
+
     /// Replaces every real layout rect (`getBoundingClientRect`/
     /// `offsetWidth`/etc — see `layout_measurement`) wholesale — a host
     /// (`profile-worker`'s `Page::render`, after it runs `layout-engine`

@@ -88,6 +88,7 @@ pub(crate) struct Page<'rt> {
 
 struct LayoutCache {
     width: u32,
+    height: u32,
     layout_ver: u64,
     adopted_version: u64,
     tree: LayoutBox,
@@ -214,15 +215,18 @@ impl<'rt> Page<'rt> {
         }
     }
 
-    /// Builds and lays out this page's real box tree against `width` —
-    /// shared by `render` and `hit_test_at` so they always agree on
-    /// exactly the same box positions/sizes (previously each rebuilt its
-    /// own tree independently, which would have silently disagreed once
-    /// `<img>` intrinsic sizing entered the picture - `apply_image_sizes`
-    /// must run after box-tree construction and before layout, so both
-    /// callers need it applied identically). `None` only if the parse/
-    /// box-tree-construction step itself fails.
-    fn layout(&self, width: u32) -> Option<LayoutBox> {
+    /// Builds and lays out this page's real box tree against `width`/
+    /// `height` (the latter feeding `@media (min-height: ...)`/
+    /// `(max-height: ...)` resolution, same role `width` already plays for
+    /// `(min-width: ...)` — see `css::MediaQuery::matches`) — shared by
+    /// `render` and `hit_test_at` so they always agree on exactly the same
+    /// box positions/sizes (previously each rebuilt its own tree
+    /// independently, which would have silently disagreed once `<img>`
+    /// intrinsic sizing entered the picture - `apply_image_sizes` must run
+    /// after box-tree construction and before layout, so both callers need
+    /// it applied identically). `None` only if the parse/box-tree-
+    /// construction step itself fails.
+    fn layout(&self, width: u32, height: u32) -> Option<LayoutBox> {
         let dom = self.ctx.dom()?;
         // `layout_version` bumps only when a layout-relevant mutation
         // occurs (LAYOUT dirty flag set), so it's the precise cache key
@@ -239,6 +243,7 @@ impl<'rt> Page<'rt> {
 
         if let Some(cached) = self.layout_cache.borrow().as_ref() {
             if cached.width == width
+                && cached.height == height
                 && cached.layout_ver == layout_ver
                 && cached.adopted_version == adopted_version
             {
@@ -259,24 +264,14 @@ impl<'rt> Page<'rt> {
             merged.rules.extend(parse_stylesheet(&adopted_text).rules);
             std::borrow::Cow::Owned(merged)
         };
-        // `DEFAULT_VIEWPORT_HEIGHT` here, not the real per-process height:
-        // `Page::layout` isn't threaded a height today (only `width`, see
-        // this method's own cache key) - real height-aware `@media
-        // (min-height: ...)` for profile pages waits on the live `RESIZE`
-        // work (`ROADMAP.md` P3 item 23's other half), which is what
-        // actually needs to plumb a real height in here.
-        let mut tree = build_box_tree_with_viewport(
-            dom,
-            self.html_el,
-            &sheet,
-            width as f64,
-            layout_engine::DEFAULT_VIEWPORT_HEIGHT,
-        )?;
+        let mut tree =
+            build_box_tree_with_viewport(dom, self.html_el, &sheet, width as f64, height as f64)?;
         apply_image_sizes(dom, &mut tree, &self.images);
         layout_block(&mut tree, width as f64, 0.0, 0.0);
 
         *self.layout_cache.borrow_mut() = Some(LayoutCache {
             width,
+            height,
             layout_ver,
             adopted_version,
             tree: tree.clone(),
@@ -284,14 +279,14 @@ impl<'rt> Page<'rt> {
         Some(tree)
     }
 
-    /// This page's real total content height at `width` — the root box's
-    /// own laid-out height, which already includes every descendant
-    /// (block layout stacks children downward with no clamping to any
-    /// viewport). Used to clamp `SCROLL`'s offset to real content, not an
-    /// arbitrary range. `0.0` if layout itself fails (same "nothing to
-    /// scroll" outcome as a page shorter than its viewport).
-    pub(crate) fn content_height(&self, width: u32) -> f64 {
-        self.layout(width)
+    /// This page's real total content height at `width`/`height` — the
+    /// root box's own laid-out height, which already includes every
+    /// descendant (block layout stacks children downward with no clamping
+    /// to any viewport). Used to clamp `SCROLL`'s offset to real content,
+    /// not an arbitrary range. `0.0` if layout itself fails (same "nothing
+    /// to scroll" outcome as a page shorter than its viewport).
+    pub(crate) fn content_height(&self, width: u32, height: u32) -> f64 {
+        self.layout(width, height)
             .map(|tree| tree.dimensions.height)
             .unwrap_or(0.0)
     }
@@ -334,7 +329,7 @@ impl<'rt> Page<'rt> {
         scroll_top: f64,
     ) -> Vec<u8> {
         let tree = self
-            .layout(width)
+            .layout(width, height)
             .expect("parsed HTML always produces a box");
         self.ctx.set_layout_rects(collect_layout_rects(&tree));
         self.ctx.set_computed_styles(collect_computed_styles(&tree));
@@ -392,11 +387,12 @@ impl<'rt> Page<'rt> {
     pub(crate) fn hit_test_at(
         &self,
         width: u32,
+        height: u32,
         x: f64,
         y: f64,
         scroll_top: f64,
     ) -> Option<NodeId> {
-        let tree = self.layout(width)?;
+        let tree = self.layout(width, height)?;
         layout_engine::hit_test(&tree, x, y + scroll_top)
     }
 }

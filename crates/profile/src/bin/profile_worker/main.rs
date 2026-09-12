@@ -190,7 +190,7 @@ const FRAME_INTERVAL: Duration = Duration::from_nanos(1_000_000_000 / TARGET_FPS
 /// compositor-driven scroll has.
 fn sync_scroll(page: &mut page::Page, width: u32, height: u32, scroll_top: &mut f64) {
     let requested = page.ctx.scroll_y();
-    let max_scroll = (page.content_height(width) - height as f64).max(0.0);
+    let max_scroll = (page.content_height(width, height) - height as f64).max(0.0);
     let clamped = requested.clamp(0.0, max_scroll);
     *scroll_top = clamped;
     page.ctx.set_scroll_y(clamped);
@@ -203,8 +203,8 @@ fn main() {
         std::process::exit(2);
     }
     let shmem_name = &args[1];
-    let width: u32 = args[2].parse().expect("width must be a positive integer");
-    let height: u32 = args[3].parse().expect("height must be a positive integer");
+    let mut width: u32 = args[2].parse().expect("width must be a positive integer");
+    let mut height: u32 = args[3].parse().expect("height must be a positive integer");
     let proxy = parse_proxy_arg(args.get(4).map(String::as_str));
     let dns_server = parse_dns_arg(args.get(5).map(String::as_str));
     // A missing/empty/unparseable value degrades to `render::GpuRenderer::
@@ -287,6 +287,13 @@ fn main() {
     // `RELOAD`/`NAVIGATE` same as `focused_id`, since a fresh page always
     // starts scrolled to the top.
     let mut scroll_top: f64 = 0.0;
+    // Real live resize (`RESIZE` below): a new shared-memory segment is
+    // created per resize rather than growing the fixed-size original one
+    // in place (see `ipc::FrameWriter`'s module doc on the region's size
+    // being fixed at creation) - `resize_count` names each successive
+    // segment `<shmem_name>-r<N>` so the host can find and reopen it.
+    let mut resize_count: u32 = 0;
+    page.ctx.set_viewport_size(width as f64, height as f64);
 
     'render_loop: loop {
         while let Ok(line) = cmd_rx.try_recv() {
@@ -381,7 +388,7 @@ fn main() {
                     .and_then(|(x, y)| Some((x.parse::<f64>().ok()?, y.parse::<f64>().ok()?)));
                 match coords {
                     Some((x, y)) => {
-                        let result = dispatch_click_at(&mut page, width, x, y, scroll_top);
+                        let result = dispatch_click_at(&mut page, width, height, x, y, scroll_top);
                         sync_scroll(&mut page, width, height, &mut scroll_top);
                         writer.publish(&page.render(&renderer, width, height, scroll_top));
                         match result {
@@ -478,6 +485,40 @@ fn main() {
                     }
                     _ => {
                         let _ = writeln!(stdout, "ERROR fps cap must be a positive integer");
+                    }
+                }
+                let _ = stdout.flush();
+            } else if let Some(rest) = line.strip_prefix("RESIZE ") {
+                let mut parts = rest.trim().splitn(2, ' ');
+                let dims = parts
+                    .next()
+                    .zip(parts.next())
+                    .and_then(|(w, h)| Some((w.parse::<u32>().ok()?, h.parse::<u32>().ok()?)));
+                match dims {
+                    Some((new_width, new_height)) => {
+                        resize_count += 1;
+                        let new_shmem_name = format!("{shmem_name}-r{resize_count}");
+                        match ipc::FrameWriter::new(&new_shmem_name, new_width, new_height) {
+                            Ok(new_writer) => {
+                                writer = new_writer;
+                                width = new_width;
+                                height = new_height;
+                                page.ctx.set_viewport_size(width as f64, height as f64);
+                                page.ctx.fire_resize();
+                                sync_scroll(&mut page, width, height, &mut scroll_top);
+                                writer.publish(&page.render(&renderer, width, height, scroll_top));
+                                let _ = writeln!(stdout, "RESIZED {new_shmem_name}");
+                            }
+                            Err(e) => {
+                                let _ = writeln!(
+                                    stdout,
+                                    "ERROR failed to open resized frame buffer: {e}"
+                                );
+                            }
+                        }
+                    }
+                    None => {
+                        let _ = writeln!(stdout, "ERROR RESIZE requires two positive integers");
                     }
                 }
                 let _ = stdout.flush();

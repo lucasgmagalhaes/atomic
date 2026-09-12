@@ -263,6 +263,57 @@ fn reload_publishes_a_new_generation() {
 }
 
 #[test]
+fn resize_republishes_a_frame_at_the_new_dimensions_and_flips_a_height_media_query() {
+    let name = unique_shmem_name("resize");
+    let mut profile = Profile::spawn(worker_path(), &name, 100, 100).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let html = "<style>#box{background-color:red}@media (min-height: 300px){#box{background-color:blue}}</style><div id=\"box\">x</div>";
+    let addr = serve_html_once(html);
+    profile
+        .navigate(&format!("http://{addr}/"))
+        .unwrap()
+        .unwrap();
+    wait_for_a_frame(&profile);
+
+    // Below the media query's threshold at the original 100px height - the
+    // unconditional `background-color: red` rule applies.
+    let before = profile
+        .evaluate(
+            "getComputedStyle(document.getElementById('box')).getPropertyValue('background-color')",
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(before, "rgba(255, 0, 0, 1)");
+
+    profile.resize(100, 400).unwrap().unwrap();
+    // The resized worker republishes into a *new* shared-memory segment
+    // (see `Profile::resize`'s own doc), whose generation counter starts
+    // fresh at 0 - comparing it against the old segment's generation
+    // wouldn't mean anything, so this only checks that the new segment has
+    // a real published frame at all.
+    assert!(profile.frame_generation() > 0);
+
+    let frame = profile
+        .latest_frame()
+        .expect("resize should publish a frame");
+    assert_eq!(frame.len(), 100 * 400 * 4);
+
+    // Above the threshold now - the media query flips, and a real
+    // synchronous `"resize"` event already ran on `window` by the time
+    // this evaluates (see `Context::fire_resize`).
+    let after = profile
+        .evaluate(
+            "getComputedStyle(document.getElementById('box')).getPropertyValue('background-color')",
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(after, "rgba(0, 0, 255, 1)");
+
+    profile.quit();
+}
+
+#[test]
 fn quit_makes_the_child_process_exit() {
     let name = unique_shmem_name("quit");
     let profile = Profile::spawn(worker_path(), &name, 16, 16).expect("spawn should succeed");

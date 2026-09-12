@@ -40,6 +40,17 @@ pub struct ElementSnapshot<'a> {
     /// Whether at least one element sibling follows this one under the
     /// same parent — used by `:last-child`.
     pub has_following_sibling: bool,
+    /// Real live `:hover` state now — whether this is the element a
+    /// caller's own hit-test currently reports as hovered (see
+    /// `dom::Dom::hovered_element`). Defaults to `false` via `Default`,
+    /// same "a caller that doesn't populate it just never matches"
+    /// convention every other field here already documents — a caller
+    /// with no notion of hover (e.g. a headless test) simply never sets
+    /// this and `:hover` stays inert for it, not a panic.
+    pub is_hovered: bool,
+    /// Real live `:focus` state — whether this is `dom::Dom::active_element()`.
+    /// Same default-`false`/opt-in convention as `is_hovered`.
+    pub is_focused: bool,
 }
 
 fn compound_matches(compound: &crate::parser::CompoundSelector, el: &ElementSnapshot<'_>) -> bool {
@@ -63,11 +74,12 @@ fn compound_matches(compound: &crate::parser::CompoundSelector, el: &ElementSnap
             PseudoClass::NthChild(formula) => {
                 formula.matches(el.preceding_siblings.len() as i64 + 1)
             }
-            // No real hover/focus state is tracked anywhere in this engine
-            // yet (no input-event plumbing reaches selector matching) -
-            // always false rather than faking a match. See the parser
-            // module doc.
-            PseudoClass::Hover | PseudoClass::Focus => false,
+            // Real now — see ElementSnapshot::is_hovered/is_focused's own
+            // doc. A caller that never populates them (still valid, see
+            // the field docs) gets the same "always false" behavior this
+            // used to hard-code for everyone.
+            PseudoClass::Hover => el.is_hovered,
+            PseudoClass::Focus => el.is_focused,
         },
     })
 }

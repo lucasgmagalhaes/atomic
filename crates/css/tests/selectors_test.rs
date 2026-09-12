@@ -231,16 +231,59 @@ fn nth_child_bare_n_matches_every_position() {
     }
 }
 
-// --- Honest hover/focus stand-in ---
+// --- Real :hover/:focus ---
 
 #[test]
-fn hover_and_focus_pseudo_classes_parse_but_never_match() {
+fn hover_and_focus_pseudo_classes_are_inert_when_the_snapshot_says_neither() {
     let sheet = parse_stylesheet("a:hover {} input:focus {}");
     assert_eq!(sheet.rules.len(), 2);
+    // `el`'s ..Default::default() leaves is_hovered/is_focused false, same
+    // as a caller with no notion of either (e.g. a headless test) never
+    // populating them - the honest "opted out" case, not a hard-coded one.
     let anchor = el("a");
     let input = el("input");
     assert!(!selector_matches(&sheet.rules[0].selectors.0[0], &[anchor]));
     assert!(!selector_matches(&sheet.rules[1].selectors.0[0], &[input]));
+}
+
+#[test]
+fn hover_pseudo_class_matches_only_when_the_snapshot_says_hovered() {
+    let sheet = parse_stylesheet("a:hover {}");
+    let hovered = ElementSnapshot {
+        tag: "a",
+        is_hovered: true,
+        ..Default::default()
+    };
+    let not_hovered = ElementSnapshot {
+        tag: "a",
+        is_hovered: false,
+        ..Default::default()
+    };
+    assert!(selector_matches(&sheet.rules[0].selectors.0[0], &[hovered]));
+    assert!(!selector_matches(
+        &sheet.rules[0].selectors.0[0],
+        &[not_hovered]
+    ));
+}
+
+#[test]
+fn focus_pseudo_class_matches_only_when_the_snapshot_says_focused() {
+    let sheet = parse_stylesheet("input:focus {}");
+    let focused = ElementSnapshot {
+        tag: "input",
+        is_focused: true,
+        ..Default::default()
+    };
+    let not_focused = ElementSnapshot {
+        tag: "input",
+        is_focused: false,
+        ..Default::default()
+    };
+    assert!(selector_matches(&sheet.rules[0].selectors.0[0], &[focused]));
+    assert!(!selector_matches(
+        &sheet.rules[0].selectors.0[0],
+        &[not_focused]
+    ));
 }
 
 // --- Specificity ---

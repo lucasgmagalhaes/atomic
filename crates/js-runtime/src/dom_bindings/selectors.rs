@@ -30,6 +30,8 @@ fn element_snapshot(dom: &dom::Dom, id: dom::NodeId) -> Option<css::ElementSnaps
             .collect(),
         preceding_siblings: Vec::new(),
         has_following_sibling: false,
+        is_hovered: dom.hovered_element() == Some(id),
+        is_focused: dom.active_element() == Some(id),
     })
 }
 

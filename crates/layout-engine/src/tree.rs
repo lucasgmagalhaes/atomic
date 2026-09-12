@@ -185,6 +185,8 @@ fn build_element_snapshot(dom: &Dom, node: NodeId) -> ElementSnapshot<'_> {
             .collect(),
         preceding_siblings,
         has_following_sibling,
+        is_hovered: dom.hovered_element() == Some(node),
+        is_focused: dom.active_element() == Some(node),
     }
 }
 

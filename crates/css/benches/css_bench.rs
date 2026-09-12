@@ -6,7 +6,10 @@
 //! call (this crate has no such whole-tree entry point — that's
 //! `layout-engine`'s job).
 use criterion::{criterion_group, criterion_main, Criterion};
-use css::{matching_declarations, parse_stylesheet, ElementSnapshot};
+use css::{
+    build_selector_index, matching_declarations, matching_declarations_indexed, parse_stylesheet,
+    ElementSnapshot,
+};
 
 fn el<'a>(tag: &'a str, classes: Vec<&'a str>) -> ElementSnapshot<'a> {
     ElementSnapshot {
@@ -33,6 +36,38 @@ fn bench_nodes_vs_rules(c: &mut Criterion) {
             b.iter(|| {
                 for _ in 0..nodes {
                     let _ = matching_declarations(&sheet, &chain, 1024.0, 768.0);
+                }
+            });
+        });
+    }
+    group.finish();
+}
+
+/// Same shape as `bench_nodes_vs_rules`, but comparing `SelectorIndex`'s
+/// indexed path against the unindexed one - `flat_sheet` gives every
+/// rule a distinct class name, so a target matching only 2 of them via
+/// `matching_declarations_indexed` should check far fewer candidate
+/// selectors than `matching_declarations`'s "every rule" scan once the
+/// rule count is large. The index itself is built once outside the
+/// timed loop, matching its real call shape (`layout_engine::tree`
+/// builds it once per `build_box_tree` call, not once per element).
+fn bench_indexed_vs_unindexed(c: &mut Criterion) {
+    let mut group = c.benchmark_group("matching_declarations_indexed_vs_unindexed");
+    for (nodes, rules) in [(1_000, 100), (10_000, 500)] {
+        let sheet = flat_sheet(rules);
+        let index = build_selector_index(&sheet);
+        let chain = [el("div", vec!["class-0", "class-1"])];
+        group.bench_function(format!("unindexed_{nodes}_nodes_{rules}_rules"), |b| {
+            b.iter(|| {
+                for _ in 0..nodes {
+                    let _ = matching_declarations(&sheet, &chain, 1024.0, 768.0);
+                }
+            });
+        });
+        group.bench_function(format!("indexed_{nodes}_nodes_{rules}_rules"), |b| {
+            b.iter(|| {
+                for _ in 0..nodes {
+                    let _ = matching_declarations_indexed(&index, &sheet, &chain, 1024.0, 768.0);
                 }
             });
         });
@@ -80,6 +115,7 @@ fn bench_parse_stylesheet(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_nodes_vs_rules,
+    bench_indexed_vs_unindexed,
     bench_deep_selectors,
     bench_parse_stylesheet
 );

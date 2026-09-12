@@ -284,6 +284,12 @@ pub struct ComputedStyle {
     /// documented simplification, same shape as `font-size`'s own
     /// "px only, no keyword sizes" scope cut.
     pub border_color: Color,
+    /// One radius for all four corners - real per-corner radii
+    /// (`border-top-left-radius`, ...) and the two-value-per-corner
+    /// elliptical form aren't modeled, same "one shorthand value only"
+    /// scope cut `border_width`'s own doc already takes. `px` only,
+    /// matching `font_size`. `0.0` (square corners) is the initial value.
+    pub border_radius: f64,
     /// Only meaningful when this box's own `display` is `Flex` - controls
     /// how *its* children are arranged.
     pub flex_direction: FlexDirection,
@@ -346,6 +352,7 @@ impl ComputedStyle {
                 b: 0,
                 a: 255,
             },
+            border_radius: 0.0,
             flex_direction: FlexDirection::Row,
             justify_content: JustifyContent::Start,
             align_items: AlignItems::Stretch,
@@ -488,6 +495,17 @@ fn apply_box_shadow(style: &mut ComputedStyle, tokens: &[Token]) {
             spread,
             color,
         });
+    }
+}
+
+/// Real `border-radius: <length>` — single uniform value only (see
+/// [`ComputedStyle::border_radius`]'s own doc for the per-corner scope
+/// cut). `0`/`0px` explicitly clears a previously cascaded radius back to
+/// square corners, same reset behavior every other length property here
+/// already has.
+fn apply_border_radius(style: &mut ComputedStyle, tokens: &[Token]) {
+    if let Some(Length::Px(px)) = tokens.first().and_then(parse_length) {
+        style.border_radius = px;
     }
 }
 
@@ -727,6 +745,7 @@ fn apply_declaration(style: &mut ComputedStyle, decl: &Declaration) {
             }
         }
         "box-shadow" => apply_box_shadow(style, &decl.value),
+        "border-radius" => apply_border_radius(style, &decl.value),
         "opacity" => {
             let value = match decl.value.first() {
                 Some(Token::Number(n)) => Some(*n),

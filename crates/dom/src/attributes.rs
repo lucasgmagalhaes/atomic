@@ -19,6 +19,7 @@ impl Dom {
                     attributes,
                     value: value_field,
                     checked: checked_field,
+                    selected: selected_field,
                     ..
                 },
             ..
@@ -42,6 +43,11 @@ impl Dom {
             if name == "checked" {
                 *checked_field = true;
             }
+            // Same mirroring for `.selected` (an `<option>`'s boolean
+            // attribute, same shape as `checked`).
+            if name == "selected" {
+                *selected_field = true;
+            }
         }
     }
 
@@ -64,6 +70,7 @@ impl Dom {
                     attributes,
                     value: value_field,
                     checked: checked_field,
+                    selected: selected_field,
                     ..
                 },
             ..
@@ -74,6 +81,9 @@ impl Dom {
             }
             if name == "checked" {
                 *checked_field = false;
+            }
+            if name == "selected" {
+                *selected_field = false;
             }
             return attributes.remove(name).is_some();
         }
@@ -251,6 +261,33 @@ impl Dom {
         }) = self.get_mut(id)
         {
             *checked_field = checked;
+        }
+    }
+
+    /// Real, independent `.selected` read side for `<option>` — mirrors
+    /// [`Dom::checked`]'s own doc. `false` for a non-`Element` node.
+    pub fn selected(&self, id: NodeId) -> bool {
+        matches!(
+            self.get(id).map(|n| &n.data),
+            Some(NodeData::Element { selected: true, .. })
+        )
+    }
+
+    /// Real `.selected =` write side for `<option>` — independent of the
+    /// `selected` attribute, same shape [`Dom::set_checked`] has for
+    /// `.checked`. No-op on a non-`Element` node.
+    pub fn set_selected(&mut self, id: NodeId, selected: bool) {
+        self.mark_dirty(DirtyFlags::DOM);
+        if let Some(Node {
+            data:
+                NodeData::Element {
+                    selected: selected_field,
+                    ..
+                },
+            ..
+        }) = self.get_mut(id)
+        {
+            *selected_field = selected;
         }
     }
 

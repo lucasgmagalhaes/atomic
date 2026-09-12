@@ -225,18 +225,35 @@ unsafe extern "C" fn node_disabled_set(
 ) -> sys::JSValue {
     boolean_attribute_set(ctx, this_val, val, "disabled")
 }
+/// Real, independent `.selected` — like `.checked`, not a direct
+/// attribute reflection (that's `.defaultSelected`, see
+/// `content::define_default_selected`), so `form_reset`'s per-`<select>`
+/// restore has a live value to overwrite that's independent of the
+/// `selected` attribute it restores from.
 unsafe extern "C" fn node_selected_get(
     ctx: *mut sys::JSContext,
     this_val: sys::JSValue,
 ) -> sys::JSValue {
-    boolean_attribute_get(ctx, this_val, "selected")
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_bool(false);
+    };
+    let dom = dom_opaque(ctx);
+    sys::js_bool(!dom.is_null() && (*dom).selected(id))
 }
 unsafe extern "C" fn node_selected_set(
     ctx: *mut sys::JSContext,
     this_val: sys::JSValue,
     val: sys::JSValue,
 ) -> sys::JSValue {
-    boolean_attribute_set(ctx, this_val, val, "selected")
+    let Some(id) = node_id(ctx, this_val) else {
+        return throw_type_error(ctx, "attribute target must be a node");
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() || (*dom).get(id).is_none() {
+        return throw_type_error(ctx, "node is no longer attached to this document");
+    }
+    (*dom).set_selected(id, sys::JS_ToBool(ctx, val) != 0);
+    sys::js_undefined()
 }
 
 pub(super) unsafe fn define_attribute_properties(ctx: *mut sys::JSContext, proto: sys::JSValue) {

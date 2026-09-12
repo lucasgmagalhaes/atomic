@@ -198,6 +198,53 @@ pub(super) unsafe fn define_default_checked(ctx: *mut sys::JSContext, proto: sys
     );
 }
 
+unsafe extern "C" fn node_default_selected_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_bool(false);
+    };
+    let dom_ptr = dom_opaque(ctx);
+    sys::js_bool(!dom_ptr.is_null() && (*dom_ptr).attribute(id, "selected").is_some())
+}
+
+unsafe extern "C" fn node_default_selected_set(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    val: sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    let dom_ptr = dom_opaque(ctx);
+    if !dom_ptr.is_null() {
+        if sys::JS_ToBool(ctx, val) != 0 {
+            (*dom_ptr).set_attribute(id, "selected", "");
+        } else {
+            (*dom_ptr).remove_attribute(id, "selected");
+        }
+    }
+    sys::js_undefined()
+}
+
+/// Defines the `defaultSelected` accessor on `proto` — reflects the
+/// `selected` *content attribute* directly, same relationship
+/// [`define_default_checked`]'s own doc describes between
+/// `defaultChecked` and `.checked`: an untouched `<option>`'s `.selected`
+/// starts equal to `.defaultSelected`, then diverges independently once
+/// either is set. `forms.rs`'s `form_reset` uses this to restore
+/// `.selected` on every `<option>` when its owning `<select>` resets.
+pub(super) unsafe fn define_default_selected(ctx: *mut sys::JSContext, proto: sys::JSValue) {
+    define_getter_setter(
+        ctx,
+        proto,
+        "defaultSelected",
+        node_default_selected_get,
+        node_default_selected_set,
+    );
+}
+
 /// Reads a JS number value already tagged `INT`/`FLOAT64` as a
 /// non-negative `usize` — no string/object-to-number coercion (no
 /// `JS_ToFloat64` binding exists yet, same scope cut

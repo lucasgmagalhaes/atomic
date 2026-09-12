@@ -124,6 +124,14 @@ pub enum NodeData {
         /// reason `value`/`checked` are: one generic `Node` JS class, not
         /// a typed `HTMLInputElement`/`HTMLTextAreaElement` hierarchy.
         selection: (usize, usize, String),
+        /// Real, independent `.selected` for `<option>` — mirrors
+        /// `checked`'s own doc exactly: an independently-mutable live
+        /// property, not just a reflection of the `selected` content
+        /// attribute (that's `.defaultSelected`, see
+        /// `js_runtime::dom_bindings::content`). Always mirrored in from
+        /// `set_attribute`/`remove_attribute` when the `selected`
+        /// attribute changes, same as `checked`.
+        selected: bool,
     },
     Text(String),
     Comment(String),

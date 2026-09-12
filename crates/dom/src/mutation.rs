@@ -49,6 +49,7 @@ impl Dom {
             value: None,
             checked: false,
             selection: (0, 0, "none".to_string()),
+            selected: false,
         })
     }
 

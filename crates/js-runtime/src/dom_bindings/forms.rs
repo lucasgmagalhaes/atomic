@@ -205,11 +205,10 @@ unsafe extern "C" fn form_elements_get(
 /// per control — matches real `reset()`, which only fires its own one
 /// `"reset"` event, not a cascade of others.
 ///
-/// Scope cut: `<select>` isn't touched. Its `.selected`
-/// (`attributes.rs`'s `boolean_attribute_get`/`_set`) is still a direct
-/// reflection of the `selected` attribute with no independent
-/// `defaultSelected` storage per `<option>` to restore from — a real,
-/// separate follow-up (per-`<option>` state, not a single control's).
+/// Also restores every `<option>` descendant's live `.selected` to its
+/// `.defaultSelected` (the `selected` attribute — see
+/// `content::define_default_selected`'s doc) — real per-option state,
+/// unlike `<input>`/`<textarea>` which reset per-control.
 unsafe extern "C" fn form_reset(
     ctx: *mut sys::JSContext,
     this_val: sys::JSValue,
@@ -241,6 +240,10 @@ unsafe extern "C" fn form_reset(
                 .to_string();
             (*dom).set_value(control, &default);
         }
+    }
+    for option in descendants_matching_tags(&*dom, id, &["option"]) {
+        let default_selected = (*dom).attribute(option, "selected").is_some();
+        (*dom).set_selected(option, default_selected);
     }
     sys::js_undefined()
 }
@@ -405,7 +408,7 @@ unsafe extern "C" fn select_selected_index_get(
         .into_iter()
         .enumerate()
     {
-        if (*dom).attribute(option, "selected").is_some() {
+        if (*dom).selected(option) {
             return sys::JSValue {
                 u: sys::JSValueUnion {
                     int32: index as i32,
@@ -420,6 +423,13 @@ unsafe extern "C" fn select_selected_index_get(
     }
 }
 
+/// Sets the live `.selected` on exactly one `<option>` descendant of
+/// `id` (real single-select exclusivity — clearing every other option
+/// first), leaving the `selected` *attribute* (and therefore
+/// `.defaultSelected`) on every option untouched. Real spec behavior:
+/// picking a different option via `selectedIndex`/`.value` doesn't
+/// rewrite markup, only `Element.reset()` restores from it — same
+/// live-vs-default split `set_checked`/`defaultChecked` already have.
 unsafe extern "C" fn select_selected_index_set(
     ctx: *mut sys::JSContext,
     this_val: sys::JSValue,
@@ -439,11 +449,11 @@ unsafe extern "C" fn select_selected_index_set(
     };
     let options = descendants_matching_tags(&*dom, id, &["option"]);
     for option in &options {
-        (*dom).remove_attribute(*option, "selected");
+        (*dom).set_selected(*option, false);
     }
     if index >= 0 {
         if let Some(option) = options.get(index as usize) {
-            (*dom).set_attribute(*option, "selected", "");
+            (*dom).set_selected(*option, true);
         }
     }
     sys::js_undefined()
@@ -461,7 +471,7 @@ unsafe extern "C" fn select_value_get(
         return new_js_string(ctx, "");
     }
     for option in descendants_matching_tags(&*dom, id, &["option"]) {
-        if (*dom).attribute(option, "selected").is_some() {
+        if (*dom).selected(option) {
             return new_js_string(ctx, &option_effective_value(&*dom, option));
         }
     }
@@ -485,11 +495,11 @@ unsafe extern "C" fn select_value_set(
     }
     let options = descendants_matching_tags(&*dom, id, &["option"]);
     for option in &options {
-        (*dom).remove_attribute(*option, "selected");
+        (*dom).set_selected(*option, false);
     }
     for option in &options {
         if option_effective_value(&*dom, *option) == wanted {
-            (*dom).set_attribute(*option, "selected", "");
+            (*dom).set_selected(*option, true);
             break;
         }
     }

@@ -15,7 +15,7 @@
 - [ ] CSSOM: `CSSStyleSheet`, `CSSStyleDeclaration`, `getComputedStyle`, `style`, stylesheet mutation and adopted stylesheets.
 - [ ] Incremental style/layout invalidation and retained layout tree (currently safe full relayout is used).
 - [ ] Full formatting contexts: grid, table, multicolumn, ruby, list markers, replaced-element rules and fragmentation.
-- [ ] Full position model: sticky/fixed edge cases, containing blocks, stacking contexts, z-index and transforms.
+- [~] Full position model: sticky/fixed edge cases, containing blocks and transforms still `[ ]`. Stacking contexts and z-index are real (2026-09-12) — `ComputedStyle::z_index`, `render::display_list`'s paint-order sort — see `spec/ROADMAP.md` items 24-25 for the exact scope cut.
 - [ ] Fonts: `@font-face`, fallback, shaping, kerning, bidi, line breaking and font loading API.
 - [ ] CSS animations, transitions, transforms, filters, gradients, masks, blend modes and container queries.
 - [ ] Accessibility tree and semantics derived from the DOM/layout tree.

@@ -502,6 +502,41 @@ fn navigate_fetches_and_runs_a_real_external_script() {
 }
 
 #[test]
+fn a_deferred_external_script_runs_after_a_later_plain_script_despite_coming_first_in_markup() {
+    let deferred_addr =
+        serve_html_once("document.getElementById('log').textContent += 'deferred;';");
+    let deferred_url = format!("http://{deferred_addr}/deferred.js");
+    let html = format!(
+        r#"<div id="log"></div>
+        <script defer src="{deferred_url}"></script>
+        <script>document.getElementById('log').textContent += 'inline;';</script>"#
+    );
+    let page_addr = serve_html_once(&html);
+    let page_url = format!("http://{page_addr}/");
+
+    let name = unique_shmem_name("defer-script-order");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let result = profile
+        .navigate(&page_url)
+        .expect("protocol should not fail");
+    assert!(result.is_ok(), "navigate should succeed: {result:?}");
+
+    let text = profile
+        .evaluate("document.getElementById('log').textContent")
+        .expect("protocol should not fail")
+        .expect("script must not throw");
+    assert_eq!(
+        text, "inline;deferred;",
+        "a <script defer> must run after the later plain <script>, even though it appears \
+         first in markup - defer's ordering guarantee, not document position"
+    );
+
+    profile.quit();
+}
+
+#[test]
 fn navigate_fetches_a_linked_stylesheet_and_applies_it() {
     let css_addr =
         serve_html_once("#box { background-color: #ff00ff; width: 300px; height: 150px; }");

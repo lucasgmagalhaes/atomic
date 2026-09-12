@@ -59,10 +59,13 @@ fn collect_css_sources(dom: &Dom, node: NodeId, out: &mut Vec<CssSource>) {
 
 /// One `<script>` element in document order - either its real inline text
 /// content, or the real `src` URL an external one needs fetched before it
-/// can run.
+/// can run. `defer` is real per spec only for an external script (`src`
+/// present) - a `defer`/`async` attribute on an inline `<script>` is
+/// ignored (ignored here the same way: `Inline` carries no defer flag,
+/// always runs in its document-order slot in the non-deferred group).
 enum ScriptSource {
     Inline(String),
-    External(String),
+    External { src: String, defer: bool },
 }
 
 /// Collects every `<script>` element's source in document order (matches
@@ -77,7 +80,10 @@ fn collect_script_sources(dom: &Dom, node: NodeId, out: &mut Vec<ScriptSource>) 
     {
         if tag == "script" {
             match attributes.get("src") {
-                Some(src) => out.push(ScriptSource::External(src.clone())),
+                Some(src) => out.push(ScriptSource::External {
+                    src: src.clone(),
+                    defer: attributes.contains_key("defer"),
+                }),
                 None => out.push(ScriptSource::Inline(dom.text_content(node))),
             }
         }
@@ -102,10 +108,26 @@ fn collect_script_sources(dom: &Dom, node: NodeId, out: &mut Vec<ScriptSource>) 
 /// the returned `Vec` in real document order regardless of inline/external
 /// mix, so multi-script execution order still matches a real browser's.
 ///
-/// Scope cut: no `defer`/`async`/module-type distinction yet - every
-/// script (inline or external) runs synchronously in document order, the
-/// same "parser-blocking" semantics this engine already gave inline
-/// scripts before this pass. `type="module"` scripts are treated as plain
+/// Real `defer` ordering: every non-deferred script (inline, or external
+/// without `defer`) runs first, in document order - then every `defer`red
+/// external script runs, also in its own document order. This engine
+/// parses the whole document before running any script (no streaming
+/// parser insertion-point timing to honor), so `defer`'s only observable
+/// effect here is that ordering guarantee - a `<script defer>` placed
+/// *before* a later plain `<script>` in markup must still run *after* it,
+/// exactly like a real browser deferring it past the parse. Both groups
+/// still run before `Context::dispatch_lifecycle_events`'s
+/// `DOMContentLoaded`/`load`, matching spec (`defer` scripts run before
+/// `DOMContentLoaded`, not after).
+///
+/// Scope cut: no `async`/module-type distinction. Real `async` ordering
+/// (a script runs as soon as *its own* fetch completes, out of document
+/// order relative to other scripts) needs concurrent, independently-
+/// completing fetches - this worker fetches scripts one at a time on a
+/// single thread, so there's no real race to reorder around; treating
+/// `async` as a synchronous non-deferred script (this engine's existing
+/// classic-script behavior) is the honest projection of that, not a
+/// distinct code path. `type="module"` scripts are treated as plain
 /// classic scripts (no ES module resolution exists yet - see
 /// `ROADMAP.md` P2 item 19).
 pub(crate) fn load_scripts(
@@ -120,25 +142,33 @@ pub(crate) fn load_scripts(
     let mut sources = Vec::new();
     collect_script_sources(dom, root, &mut sources);
 
-    let mut scripts = Vec::with_capacity(sources.len());
+    let fetch_text = |src: &str, cache: &mut ResourceCache| -> Option<String> {
+        let url = resolve_url(base_url, src)?;
+        let response = cache
+            .fetch_cached(&url, storage_root, proxy, dns_server)
+            .ok()?;
+        String::from_utf8(response.body.to_vec()).ok()
+    };
+
+    let mut immediate = Vec::new();
+    let mut deferred = Vec::new();
     for source in sources {
         match source {
-            ScriptSource::Inline(text) => scripts.push(text),
-            ScriptSource::External(src) => {
-                let Some(url) = resolve_url(base_url, &src) else {
-                    continue;
-                };
-                let Ok(response) = cache.fetch_cached(&url, storage_root, proxy, dns_server) else {
-                    continue;
-                };
-                let Ok(text) = String::from_utf8(response.body.to_vec()) else {
-                    continue;
-                };
-                scripts.push(text);
+            ScriptSource::Inline(text) => immediate.push(text),
+            ScriptSource::External { src, defer } if defer => {
+                if let Some(text) = fetch_text(&src, cache) {
+                    deferred.push(text);
+                }
+            }
+            ScriptSource::External { src, .. } => {
+                if let Some(text) = fetch_text(&src, cache) {
+                    immediate.push(text);
+                }
             }
         }
     }
-    scripts
+    immediate.extend(deferred);
+    immediate
 }
 
 /// Walks `node`'s subtree in document order collecting every

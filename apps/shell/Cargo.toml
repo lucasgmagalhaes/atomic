@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 eframe = "0.28"
-egui = "0.28"
+egui = "0.36"
 profile = { path = "../../crates/profile" }
 automation = { path = "../../crates/automation" }
 js-runtime = { path = "../../crates/js-runtime" }

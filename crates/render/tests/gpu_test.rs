@@ -35,6 +35,7 @@ fn paints_a_solid_rect_at_the_right_pixels() {
             b: 0,
             a: 255,
         },
+        radius: 0.0,
     }];
     let pixels = renderer.render_to_rgba(&rects, 8, 8, [0.0, 0.0, 0.0, 1.0]);
 
@@ -60,6 +61,7 @@ fn later_rects_paint_over_earlier_ones_at_the_same_pixel() {
                 b: 255,
                 a: 255,
             },
+            radius: 0.0,
         },
         Rect {
             x: 0.0,
@@ -72,6 +74,7 @@ fn later_rects_paint_over_earlier_ones_at_the_same_pixel() {
                 b: 0,
                 a: 255,
             },
+            radius: 0.0,
         },
     ];
     let pixels = renderer.render_to_rgba(&rects, 8, 8, [0.0, 0.0, 0.0, 1.0]);

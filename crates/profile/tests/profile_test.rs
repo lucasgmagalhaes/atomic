@@ -1654,6 +1654,88 @@ fn type_key_with_nothing_focused_reports_an_error() {
 }
 
 #[test]
+fn tab_moves_focus_to_the_next_element_in_tab_order() {
+    let page_addr = serve_html_once(
+        r##"<input id="first"><input id="second"><style>input { width: 60px; height: 20px; }</style>"##,
+    );
+
+    let name = unique_shmem_name("tab-moves-focus");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+    profile
+        .navigate(&format!("http://{page_addr}/"))
+        .expect("protocol should not fail")
+        .expect("navigate should succeed");
+
+    let result = profile.tab(false).expect("protocol should not fail");
+    assert!(
+        result.is_ok(),
+        "tabbing to the first field should succeed: {result:?}"
+    );
+
+    assert_eq!(
+        profile
+            .evaluate("document.activeElement.id")
+            .expect("protocol should not fail")
+            .expect("active element id should be readable"),
+        "first",
+        "Tab with nothing focused should move focus to the first tab-order target"
+    );
+
+    let result = profile.tab(false).expect("protocol should not fail");
+    assert!(
+        result.is_ok(),
+        "tabbing to the second field should succeed: {result:?}"
+    );
+
+    assert_eq!(
+        profile
+            .evaluate("document.activeElement.id")
+            .expect("protocol should not fail")
+            .expect("active element id should be readable"),
+        "second",
+        "a second Tab should move focus to the next tab-order target"
+    );
+
+    profile.quit();
+}
+
+#[test]
+fn a_keydown_listener_that_prevents_default_blocks_tab_focus_movement() {
+    let page_addr = serve_html_once(
+        r##"<input id="first"><input id="second">
+        <style>input { width: 60px; height: 20px; }</style>
+        <script>document.addEventListener('keydown', (e) => { if (e.key === 'Tab') e.preventDefault(); });</script>"##,
+    );
+
+    let name = unique_shmem_name("tab-prevented");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+    profile
+        .navigate(&format!("http://{page_addr}/"))
+        .expect("protocol should not fail")
+        .expect("navigate should succeed");
+
+    let result = profile.tab(false).expect("protocol should not fail");
+    assert_eq!(
+        result,
+        Err("default action prevented".to_string()),
+        "a keydown listener that calls preventDefault() should block the engine's Tab default action"
+    );
+
+    assert_eq!(
+        profile
+            .evaluate("document.activeElement === null")
+            .expect("protocol should not fail")
+            .expect("active element check should be readable"),
+        "true",
+        "focus must not have moved when the keydown default action was prevented"
+    );
+
+    profile.quit();
+}
+
+#[test]
 fn spawn_with_gpu_adapter_zero_opens_a_real_adapter_and_renders_correctly() {
     // Adapter 0 always exists if this dev machine can run any of this
     // workspace's other GPU tests at all - proves the index actually

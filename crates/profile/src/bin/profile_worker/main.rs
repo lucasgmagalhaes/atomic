@@ -171,7 +171,9 @@ use js_runtime::Runtime;
 use render::GpuRenderer;
 
 use document_load::{load_source, PageSource};
-use input_commands::{dispatch_click, dispatch_click_at, fill_element, tab_focus, type_key};
+use input_commands::{
+    dispatch_click, dispatch_click_at, fill_element, tab_focus, type_key, TabOutcome,
+};
 use network::{parse_dns_arg, parse_proxy_arg};
 
 const TARGET_FPS: u32 = 60;
@@ -518,13 +520,16 @@ fn main() {
                 sync_scroll(&mut page, width, height, &mut scroll_top);
                 writer.publish(&page.render(&renderer, width, height, scroll_top));
                 match result {
-                    Ok(Some(id)) => {
+                    Ok(TabOutcome::Moved(id)) => {
                         focused_id = Some(id);
                         let _ = writeln!(stdout, "TABBED");
                     }
-                    Ok(None) => {
+                    Ok(TabOutcome::NothingFocusable) => {
                         let _ =
                             writeln!(stdout, "ERROR no focusable element with an id on this page");
+                    }
+                    Ok(TabOutcome::DefaultPrevented) => {
+                        let _ = writeln!(stdout, "ERROR default action prevented");
                     }
                     Err(message) => {
                         let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));

@@ -387,10 +387,14 @@ impl Profile {
     /// `"blur"`/`"change"`/`"focus"` events fire the same as a
     /// [`click_at`](Self::click_at)-driven focus change - a caller can
     /// [`type_key`](Self::type_key) into the newly focused field right
-    /// after. `Ok(Err(message))` if the tab order is empty or every
-    /// element in it lacks a real `id` (see `profile-worker`'s
-    /// `tab_focus` doc for why an `id` is required to reach a target
-    /// through this protocol).
+    /// after. Dispatches a real, cancelable `"keydown"` `KeyboardEvent`
+    /// (`key: "Tab"`) at the currently focused element (or `document`)
+    /// first — `Ok(Err("default action prevented".into()))` if the
+    /// page's own listener called `preventDefault()`, same as a real
+    /// browser suppressing its own Tab handling. `Ok(Err(message))` also
+    /// covers the tab order being empty or every element in it lacking a
+    /// real `id` (see `profile-worker`'s `tab_focus` doc for why an `id`
+    /// is required to reach a target through this protocol).
     pub fn tab(&mut self, reverse: bool) -> std::io::Result<Result<(), String>> {
         writeln!(
             self.stdin,

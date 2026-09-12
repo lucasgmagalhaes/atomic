@@ -48,6 +48,14 @@ pub struct Rect {
     pub width: f32,
     pub height: f32,
     pub color: Color,
+    /// Real `border-radius` now — see `layout_engine::ComputedStyle::border_radius`'s
+    /// own doc for the "one uniform value" scope cut, and `render::gpu`'s
+    /// module doc for how this actually gets painted (a per-pixel signed-
+    /// distance-field edge in the fragment shader, not faked geometry).
+    /// `0.0` (the overwhelming majority of rects, including every clip
+    /// rect and shadow rect this pass didn't touch) paints byte-identical
+    /// to before this field existed.
+    pub radius: f32,
 }
 
 /// An axis-aligned clip region in absolute page coordinates - the
@@ -96,6 +104,7 @@ fn clip_rect(rect: Rect, clip: Option<ClipRect>) -> Option<Rect> {
             width: x1 - x0,
             height: y1 - y0,
             color: rect.color,
+            radius: rect.radius,
         })
     }
 }
@@ -142,6 +151,7 @@ fn collect(box_: &LayoutBox, out: &mut Vec<Rect>, clip: Option<ClipRect>, parent
             width: box_.dimensions.width as f32,
             height: box_.dimensions.height as f32,
             color: scale_alpha(box_.style.background_color, opacity),
+            radius: box_.style.border_radius as f32,
         };
         if let Some(clipped) = clip_rect(rect, clip) {
             out.push(clipped);
@@ -182,6 +192,11 @@ fn push_box_shadow_rect(
         width: (d.width + shadow.spread * 2.0).max(0.0) as f32,
         height: (d.height + shadow.spread * 2.0).max(0.0) as f32,
         color: scale_alpha(shadow.color, opacity),
+        // Not rounded to match box_.style.border_radius this pass - a
+        // shadow behind a rounded box is a real, separate scope cut left
+        // for later (same "flat blur-less shadow" honesty this function's
+        // own doc already states for blur-radius).
+        radius: 0.0,
     };
     if let Some(clipped) = clip_rect(rect, clip) {
         out.push(clipped);
@@ -190,20 +205,26 @@ fn push_box_shadow_rect(
 
 /// Real, but flat: paints `box_`'s border as up to 4 solid-color strips
 /// hugging the outer edge of its (already border-inclusive, see
-/// `layout_engine::layout::layout_block`'s own doc) `dimensions` - no
-/// `border-radius` (a rounded corner would need real anti-aliased or
-/// masked geometry this engine's "flat rects only" pipeline doesn't
-/// have), no per-side colors/styles. A side with `0` resolved width
+/// `layout_engine::layout::layout_block`'s own doc) `dimensions`, no
+/// per-side colors/styles. A side with `0` resolved width
 /// (`layout_engine::ResolvedBorder`) contributes no rect, same as a
 /// transparent background contributing none. The 4 strips' corners
 /// slightly overlap (e.g. the top strip's own left end sits under the
 /// left strip's top end) rather than being mitered - harmless since
 /// every side shares one solid `border_color`, so double-painting the
-/// same pixel with the same color is a no-op.
+/// same pixel with the same color is a no-op. `border-radius` is real
+/// now too (see `Rect::radius`'s own doc), applied uniformly to every
+/// strip rather than to just the two outer corners each strip actually
+/// owns (a real per-corner rounding would need each strip to carry two
+/// different corner radii, which this pass's SDF shader doesn't support
+/// - see `render::gpu`) - an acceptable seam at typical border widths,
+/// where a strip is thin enough that its "wrong" rounded corner is
+/// mostly hidden under the background rect it sits on top of.
 fn push_border_rects(box_: &LayoutBox, out: &mut Vec<Rect>, clip: Option<ClipRect>, opacity: f64) {
     let d = box_.dimensions;
     let b = box_.border;
     let color = scale_alpha(box_.style.border_color, opacity);
+    let radius = box_.style.border_radius as f32;
     let mut push = |rect: Rect| {
         if let Some(clipped) = clip_rect(rect, clip) {
             out.push(clipped);
@@ -216,6 +237,7 @@ fn push_border_rects(box_: &LayoutBox, out: &mut Vec<Rect>, clip: Option<ClipRec
             width: d.width as f32,
             height: b.top as f32,
             color,
+            radius,
         });
     }
     if b.bottom > 0.0 {
@@ -225,6 +247,7 @@ fn push_border_rects(box_: &LayoutBox, out: &mut Vec<Rect>, clip: Option<ClipRec
             width: d.width as f32,
             height: b.bottom as f32,
             color,
+            radius,
         });
     }
     if b.left > 0.0 {
@@ -234,6 +257,7 @@ fn push_border_rects(box_: &LayoutBox, out: &mut Vec<Rect>, clip: Option<ClipRec
             width: b.left as f32,
             height: d.height as f32,
             color,
+            radius,
         });
     }
     if b.right > 0.0 {
@@ -243,6 +267,7 @@ fn push_border_rects(box_: &LayoutBox, out: &mut Vec<Rect>, clip: Option<ClipRec
             width: b.right as f32,
             height: d.height as f32,
             color,
+            radius,
         });
     }
 }

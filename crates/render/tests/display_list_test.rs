@@ -44,6 +44,40 @@ fn colored_box_produces_one_rect_matching_its_dimensions() {
 }
 
 #[test]
+fn colored_box_with_no_radius_produces_a_zero_radius_rect() {
+    let mut d = Dom::new();
+    let root = d.root();
+    let div = d.create_element("div");
+    d.append_child(root, div);
+
+    let sheet = parse_stylesheet("div { width: 100px; height: 50px; background-color: red; }");
+    let mut tree = build_box_tree(&d, div, &sheet).unwrap();
+    layout_block(&mut tree, 800.0, 0.0, 0.0);
+
+    let list = build_display_list(&tree);
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].radius, 0.0);
+}
+
+#[test]
+fn border_radius_flows_onto_the_background_rect() {
+    let mut d = Dom::new();
+    let root = d.root();
+    let div = d.create_element("div");
+    d.append_child(root, div);
+
+    let sheet = parse_stylesheet(
+        "div { width: 100px; height: 50px; background-color: red; border-radius: 12px; }",
+    );
+    let mut tree = build_box_tree(&d, div, &sheet).unwrap();
+    layout_block(&mut tree, 800.0, 0.0, 0.0);
+
+    let list = build_display_list(&tree);
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].radius, 12.0);
+}
+
+#[test]
 fn parent_paints_before_children_so_children_can_draw_on_top() {
     let mut d = Dom::new();
     let root = d.root();

@@ -3,9 +3,9 @@
 
 use shell::chrome_import;
 
-use super::NimbleApp;
+use super::AtomicApp;
 
-impl NimbleApp {
+impl AtomicApp {
     pub(super) fn draw_settings_window(&mut self, ctx: &egui::Context) {
         if !self.settings_open {
             return;

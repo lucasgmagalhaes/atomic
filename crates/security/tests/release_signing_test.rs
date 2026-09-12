@@ -5,7 +5,7 @@ fn temp_file(tag: &str, contents: &[u8]) -> std::path::PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let path = std::env::temp_dir().join(format!("nimble-updater-test-{tag}-{nanos}.bin"));
+    let path = std::env::temp_dir().join(format!("atomic-updater-test-{tag}-{nanos}.bin"));
     std::fs::write(&path, contents).unwrap();
     path
 }
@@ -45,7 +45,7 @@ fn full_update_flow_verifies_and_swaps_the_file() {
     let (signing_key, verifying_key) = updater::generate_keypair();
     let artifact = temp_file("artifact", b"new browser binary bytes");
     let install = std::env::temp_dir().join(format!(
-        "nimble-updater-test-install-{}.bin",
+        "atomic-updater-test-install-{}.bin",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()

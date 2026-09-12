@@ -1,5 +1,5 @@
 $env:PATH += ";C:\Program Files\GitHub CLI"
-$projectDir = "E:\github\nimble"
+$projectDir = "E:\github\atomic"
 $tasksDir = "$projectDir\.opencode\tasks"
 
 if (Test-Path $tasksDir) { Remove-Item $tasksDir -Recurse -Force }

@@ -213,7 +213,7 @@ fn unique_shmem_name(tag: &str) -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    format!("nimble-profile-test-{tag}-{nanos}")
+    format!("atomic-profile-test-{tag}-{nanos}")
 }
 
 fn worker_path() -> &'static str {
@@ -1273,7 +1273,7 @@ fn spawn_fake_dns_server(answer: std::net::Ipv4Addr) -> std::net::SocketAddr {
 
 #[test]
 fn navigate_routes_through_a_configured_dns_server() {
-    // "custom.nimble.test" isn't a real domain - this only resolves (and
+    // "custom.atomic.test" isn't a real domain - this only resolves (and
     // the navigate only succeeds) because the worker actually used the
     // fake DNS server's answer (127.0.0.1) instead of the OS resolver,
     // which would fail this hostname outright.
@@ -1281,7 +1281,7 @@ fn navigate_routes_through_a_configured_dns_server() {
         r#"<div id="box">hi</div><style>#box { background-color: #0000ff; width: 32px; height: 32px; }</style>"#,
     );
     let dns_addr = spawn_fake_dns_server(std::net::Ipv4Addr::LOCALHOST);
-    let page_url = format!("http://custom.nimble.test:{}/", page_addr.port());
+    let page_url = format!("http://custom.atomic.test:{}/", page_addr.port());
 
     let name = unique_shmem_name("dns-navigate");
     let mut profile =

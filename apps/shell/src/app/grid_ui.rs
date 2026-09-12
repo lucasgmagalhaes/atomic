@@ -5,9 +5,9 @@ use shell::i18n;
 use shell::tiling;
 
 use super::resource_overlay::draw_resource_overlay;
-use super::{NimbleApp, PANE_HEIGHT, PANE_WIDTH};
+use super::{AtomicApp, PANE_HEIGHT, PANE_WIDTH};
 
-impl NimbleApp {
+impl AtomicApp {
     pub(super) fn draw_pane_grid(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
             let available = ui.available_rect_before_wrap();

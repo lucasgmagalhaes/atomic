@@ -3,7 +3,7 @@ param(
 )
 
 $env:PATH += ";C:\Program Files\GitHub CLI"
-$projectDir = "E:\github\nimble"
+$projectDir = "E:\github\atomic"
 $notesFile = "$projectDir\.opencode\REVIEW_NOTES.md"
 
 if (Test-Path $notesFile) { Remove-Item $notesFile -Force }

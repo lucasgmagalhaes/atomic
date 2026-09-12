@@ -2,7 +2,7 @@ use std::fs;
 
 fn temp_path(name: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
-        "nimble-net-download-test-{}-{name}",
+        "atomic-net-download-test-{}-{name}",
         std::process::id()
     ))
 }
@@ -61,12 +61,12 @@ fn download_with_headers_sends_extra_request_headers() {
     let dest = temp_path("headers-echo.json");
     net::download_with_headers(
         "https://httpbin.org/headers",
-        &[("X-Nimble-Test", "hello-nimble")],
+        &[("X-Atomic-Test", "hello-atomic")],
         &dest,
     )
     .expect("download should succeed");
     let contents = fs::read_to_string(&dest).unwrap();
-    assert!(contents.contains("hello-nimble"));
+    assert!(contents.contains("hello-atomic"));
 
     fs::remove_file(&dest).ok();
 }

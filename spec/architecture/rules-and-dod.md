@@ -163,7 +163,7 @@ API implemented
 
 ## 38. Final Engineering Principle
 
-The goal of Nimble should not be:
+The goal of Atomic should not be:
 
 > Implement as many browser APIs as possible.
 

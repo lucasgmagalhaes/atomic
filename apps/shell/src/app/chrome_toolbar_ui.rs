@@ -1,5 +1,5 @@
 //! Track B spike: draws the toolbar rendered by `crate::chrome_engine`
-//! (Nimble's own HTML/CSS/JS engine) as an egui texture, right below the
+//! (Atomic's own HTML/CSS/JS engine) as an egui texture, right below the
 //! real `draw_toolbar` — additive, not a replacement, so today's working
 //! toolbar keeps working while this proves the architecture. Regenerates
 //! the texture every frame (fine for a small, low-frequency-repaint
@@ -7,11 +7,11 @@
 //! engine's own DOM mutation/layout version, same as `Page::layout`'s
 //! cache).
 
-use super::NimbleApp;
+use super::AtomicApp;
 
 const CHROME_HEIGHT: u32 = 40;
 
-impl NimbleApp {
+impl AtomicApp {
     pub(super) fn draw_chrome_toolbar_spike(&mut self, ctx: &egui::Context) {
         let workspaces: Vec<(String, bool)> = {
             let active = self.workspace.active_index();

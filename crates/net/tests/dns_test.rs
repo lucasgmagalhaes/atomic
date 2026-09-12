@@ -72,7 +72,7 @@ fn spawn_fake_http_server(body: &'static str) -> u16 {
 #[tokio::test]
 async fn resolve_a_returns_the_real_answer_from_a_local_dns_server() {
     let dns_addr = spawn_fake_dns_server(Ipv4Addr::new(203, 0, 113, 42));
-    let ip = net::resolve_a("custom.nimble.test", dns_addr)
+    let ip = net::resolve_a("custom.atomic.test", dns_addr)
         .await
         .expect("resolution should succeed");
     assert_eq!(ip, Ipv4Addr::new(203, 0, 113, 42));
@@ -90,7 +90,7 @@ async fn resolve_a_times_out_against_a_server_that_never_answers() {
 
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(7),
-        net::resolve_a("nimble.test", addr),
+        net::resolve_a("atomic.test", addr),
     )
     .await;
     assert!(
@@ -102,7 +102,7 @@ async fn resolve_a_times_out_against_a_server_that_never_answers() {
 
 #[test]
 fn get_via_dns_uses_the_custom_resolver_not_the_os_one() {
-    // "custom.nimble.test" isn't a real domain - if this succeeds, the
+    // "custom.atomic.test" isn't a real domain - if this succeeds, the
     // request only could have worked because get_via_dns actually used
     // our fake DNS server's answer (127.0.0.1) instead of asking the OS
     // resolver (which would fail to resolve it at all).
@@ -110,7 +110,7 @@ fn get_via_dns_uses_the_custom_resolver_not_the_os_one() {
     let http_port = spawn_fake_http_server("hello from custom dns");
     std::thread::sleep(std::time::Duration::from_millis(50));
 
-    let url = format!("http://custom.nimble.test:{http_port}/");
+    let url = format!("http://custom.atomic.test:{http_port}/");
     let response = net::get_via_dns(&url, &[], dns_addr)
         .expect("request should succeed via the custom resolver");
 
@@ -130,6 +130,6 @@ fn get_via_dns_fails_when_the_dns_server_has_no_answer() {
     let addr = silent.local_addr().unwrap();
     let _keep_alive = silent;
 
-    let result = net::get_via_dns("http://custom.nimble.test/", &[], addr);
+    let result = net::get_via_dns("http://custom.atomic.test/", &[], addr);
     assert!(result.is_err());
 }

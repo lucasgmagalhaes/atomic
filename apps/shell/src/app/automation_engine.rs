@@ -3,9 +3,9 @@
 
 use shell::automation_bridge;
 
-use super::NimbleApp;
+use super::AtomicApp;
 
-impl NimbleApp {
+impl AtomicApp {
     /// Runs `self.automation_script`'s top-level code once against
     /// `self.automation_engine` - the app-lifetime engine every `update()`
     /// tick pumps (see `tick_automation_engine`) - scoped to every live

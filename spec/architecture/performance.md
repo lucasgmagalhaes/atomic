@@ -494,7 +494,7 @@ Large list layout
 
 ### 21.5 Idle Game Benchmark
 
-Because Nimble is optimized for lightweight and idle-game workloads, maintain a workload specifically representing the target use case.
+Because Atomic is optimized for lightweight and idle-game workloads, maintain a workload specifically representing the target use case.
 
 Example:
 

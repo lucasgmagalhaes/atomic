@@ -13,7 +13,7 @@
 - [x] Lifecycle: `DOMContentLoaded`, `load`, cancelable `beforeunload` — see changelog item 5.
 - [x] Same-origin policy, opaque origins, CORS (simple-request subset), mixed-content blocking, referrer policy (`strict-origin-when-cross-origin`) — see changelog item 7 (`crates/js-runtime/src/cors.rs`).
 - [x] CSP enforcement (`connect-src`/`default-src`, header + `<meta http-equiv>` delivery) and Trusted Types (`require-trusted-types-for 'script'` gating `innerHTML`/`outerHTML`/`insertAdjacentHTML`) — see changelog item 7 (`crates/js-runtime/src/csp.rs`, `trusted_types.rs`).
-- [x] Permissions Policy for the capability surfaces Nimble exposes (`clipboard-read`/`clipboard-write`, `notifications`) — `Context::set_permissions_policy`.
+- [x] Permissions Policy for the capability surfaces Atomic exposes (`clipboard-read`/`clipboard-write`, `notifications`) — `Context::set_permissions_policy`.
 
 **Needed**
 

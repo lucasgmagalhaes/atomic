@@ -223,7 +223,7 @@ fn main() {
     // real per-origin partitioning. Doesn't persist across the worker
     // process's own lifetime yet - see `Page::load`'s doc.
     let storage_root = std::env::temp_dir()
-        .join("nimble-profile-storage")
+        .join("atomic-profile-storage")
         .join(shmem_name);
 
     let runtime = Runtime::new();

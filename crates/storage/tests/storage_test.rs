@@ -5,7 +5,7 @@ fn temp_path(tag: &str) -> std::path::PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    std::env::temp_dir().join(format!("nimble-storage-test-{tag}-{nanos}.txt"))
+    std::env::temp_dir().join(format!("atomic-storage-test-{tag}-{nanos}.txt"))
 }
 
 #[test]

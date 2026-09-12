@@ -58,14 +58,14 @@ pub fn import_passwords(
 
 /// The real per-pane storage root a spawned profile's cookies actually
 /// live under - mirrors `profile_worker.rs`'s own
-/// `temp_dir/nimble-profile-storage/<shmem-name>` construction, which for
+/// `temp_dir/atomic-profile-storage/<shmem-name>` construction, which for
 /// a stable-identity pane (`browser_view::BrowserView::spawn_with_identity`)
-/// is `nimble-profile-<pane-id>`. Kept here (not re-derived ad hoc at each
+/// is `atomic-profile-<pane-id>`. Kept here (not re-derived ad hoc at each
 /// call site) so the one formula has one real home.
 pub fn pane_storage_root(pane_id: &str) -> PathBuf {
     std::env::temp_dir()
-        .join("nimble-profile-storage")
-        .join(format!("nimble-profile-{pane_id}"))
+        .join("atomic-profile-storage")
+        .join(format!("atomic-profile-{pane_id}"))
 }
 
 /// Writes `cookie` into the selected pane's own real, on-disk

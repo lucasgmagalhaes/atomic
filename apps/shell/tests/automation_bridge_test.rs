@@ -1,5 +1,5 @@
 //! End-to-end coverage for `automation_bridge::run_script` — the same path
-//! `NimbleApp`'s "Automation" panel's Run button drives (see main.rs), just
+//! `AtomicApp`'s "Automation" panel's Run button drives (see main.rs), just
 //! called directly instead of through egui: real `BrowserView`s (real
 //! spawned `profile-worker` processes), a real `WorkspaceManager` naming
 //! each pane, and a real script evaluated against them.

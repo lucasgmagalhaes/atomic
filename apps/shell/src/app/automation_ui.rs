@@ -3,9 +3,9 @@
 
 use shell::i18n;
 
-use super::NimbleApp;
+use super::AtomicApp;
 
-impl NimbleApp {
+impl AtomicApp {
     pub(super) fn draw_automation_panel(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::bottom("automation").show(ctx, |ui| {
             let pane_ids = self

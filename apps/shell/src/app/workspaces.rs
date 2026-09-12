@@ -1,9 +1,9 @@
 //! Workspace switching/creation and moving a pane between workspaces, plus
 //! background-throttling panes not in the active workspace.
 
-use super::NimbleApp;
+use super::AtomicApp;
 
-impl NimbleApp {
+impl AtomicApp {
     /// Moves `self.panes[index]`'s id to the workspace at `workspace_index`
     /// via the real, already-tested `WorkspaceManager::move_profile`. The
     /// pane keeps running exactly as before - only which workspace lists

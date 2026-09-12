@@ -1,4 +1,4 @@
-# IdleBrowser — Spec técnica de execução
+# Atomic — Spec técnica de execução
 
 > Posicionamento de produto ampliado além de "idle games" — ver `spec/ROADMAP.md`'s "Product scope decision" (2026-08-26). Isolamento multi-perfil leve é o diferencial central; jogos idle são um caso de uso, não o único.
 
@@ -32,10 +32,10 @@
 ## Estrutura de diretórios
 
 ```bash
-mkdir -p idlebrowser/apps/shell/src/{ui,tiling,workspace}
-mkdir -p idlebrowser/crates/{net,html,css,layout-engine,dom,render,webgl,storage,workers,platform-apis,profile,ipc,security}/src
-mkdir -p idlebrowser/crates/js-runtime/src idlebrowser/crates/js-runtime/quickjs-sys/src
-mkdir -p idlebrowser/xtask/src
+mkdir -p atomic/apps/shell/src/{ui,tiling,workspace}
+mkdir -p atomic/crates/{net,html,css,layout-engine,dom,render,webgl,storage,workers,platform-apis,profile,ipc,security}/src
+mkdir -p atomic/crates/js-runtime/src atomic/crates/js-runtime/quickjs-sys/src
+mkdir -p atomic/xtask/src
 ```
 
 ## `Cargo.toml` (workspace root)
@@ -219,9 +219,9 @@ Checar versão atual de `eframe`/`egui` no `cargo add` antes do scaffold — spe
 `apps/shell/src/main.rs`:
 ```rust
 fn main() -> eframe::Result<()> {
-    eframe::run_simple_native("IdleBrowser", eframe::NativeOptions::default(), move |ctx, _frame| {
+    eframe::run_simple_native("Atomic", eframe::NativeOptions::default(), move |ctx, _frame| {
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.label("IdleBrowser — shell stub (fase 1)");
+            ui.label("Atomic — shell stub (fase 1)");
         });
     })
 }
@@ -246,11 +246,11 @@ Não implementar: QuickJS FFI real, parsing HTML/CSS real, renderer wgpu real, I
 
 ## Features do mockup (UI) — mapeamento pra spec
 
-Levantamento de `mockup/Nimble Browser.dc.html` (nome do produto no mockup: **Nimble**, spec usa **IdleBrowser** — alinhar nome). Cada feature mapeada pra crate/fase responsável.
+Levantamento de `mockup/Atomic Browser.dc.html` (nome do produto no mockup: **Atomic**, spec usa **Atomic** — alinhar nome). Cada feature mapeada pra crate/fase responsável.
 
 | Feature no mockup | Crate/fase responsável | Status na spec |
 |---|---|---|
-| Grid de panes 1/2/4/6 com tiling | apps/shell, layout BSP (fase 1 stub → 4 completo) | coberto de verdade agora — `apps/shell/src/tiling.rs` (presets fixos 1/2/4/6 + fallback N-colunas, não BSP recursivo literal — ver doc do módulo) + `NimbleApp` com `Vec<Pane>` real (cada uma um `profile-worker` de verdade, registrado em `WorkspaceManager`); antes disso o diretório `tiling/` estava vazio e só um profile era spawnado |
+| Grid de panes 1/2/4/6 com tiling | apps/shell, layout BSP (fase 1 stub → 4 completo) | coberto de verdade agora — `apps/shell/src/tiling.rs` (presets fixos 1/2/4/6 + fallback N-colunas, não BSP recursivo literal — ver doc do módulo) + `AtomicApp` com `Vec<Pane>` real (cada uma um `profile-worker` de verdade, registrado em `WorkspaceManager`); antes disso o diretório `tiling/` estava vazio e só um profile era spawnado |
 | Input sync entre panes (toggle "Input sync on/off") | ipc (fase 4) | **gap** — spec de ipc só cobre frame+input+comandos ponto-a-ponto shell↔profile; sync de input entre múltiplos profiles simultâneos não está especificado |
 | Workspaces nomeados (Principal/Farm squad/Trades/Testing), múltiplas contas por workspace | apps/shell/workspace (fase 4) | **parcialmente coberto** — `WorkspaceManager` real e testado (create/switch/move profiles) existe em `apps/shell`, mas sem UI de switch/grid especificada nem fluxo de "múltiplas contas por workspace" completo |
 | Resource monitor (CPU/RAM/FPS por profile, gráfico 60s, kill process) | platform-apis + profile (fase 4) | **gap parcial** — `platform-apis` agora tem `process_stats::sample`/`cpu_percent` reais (`GetProcessTimes`+`GetProcessMemoryInfo` via `windows-sys`, testado contra processo real), FPS já existe via `Profile::frame_generation()`, kill process já existe via `Profile::quit()`/`Drop`; falta só o gráfico de 60s e a UI de monitor em `apps/shell` |
@@ -262,7 +262,7 @@ Levantamento de `mockup/Nimble Browser.dc.html` (nome do produto no mockup: **Ni
 | Settings: Automation (input sync scope, script sandbox, failure handling, schedule engine/cron) | ipc, novo crate de scripting | **gap** — mesmo gap de automation scripts acima |
 | Interface language switch (EN/PT, aplicado sem restart) | apps/shell | **gap** — i18n não mencionado em nenhuma fase |
 | Onboarding ("No profiles yet", criar 1º perfil, import from Chrome) | apps/shell | **gap** — "Import from Chrome" implica ler perfis/cookies do Chrome, não especificado e foge do escopo "sem fingerprint" declarado |
-| Add profile modal (nome, start URL, email/senha autofill, proxy, launch on start) | profile, storage (credential vault) | coberto de verdade agora — `apps/shell`'s "+ Add Profile" modal (`AddProfileForm`/`NimbleApp::create_profile`): nome valida unicidade real, navega pra start URL, aplica proxy no spawn, salva email/senha no vault real. "Launch on start" não implementado (nenhum restart persiste quais perfis existiam ainda) |
+| Add profile modal (nome, start URL, email/senha autofill, proxy, launch on start) | profile, storage (credential vault) | coberto de verdade agora — `apps/shell`'s "+ Add Profile" modal (`AddProfileForm`/`AtomicApp::create_profile`): nome valida unicidade real, navega pra start URL, aplica proxy no spawn, salva email/senha no vault real. "Launch on start" não implementado (nenhum restart persiste quais perfis existiam ainda) |
 | Credential autofill visual ("Credentials autofilled by profile") | storage (fase 4) | coberto conceitualmente por storage/security, sem detalhe de autofill de formulário |
 | Update/release modal (v1.2.0, restart in place, sessões restauradas) | novo — updater assinado já citado na fase 5 | parcialmente coberto — updater assinado real existe (`security::updater`: manifest ed25519 + hash SHA-256 + swap atômico via `fs::rename`, testado contra chave errada/manifest adulterado/artefato trocado), mas "restart in place com sessões restauradas" exige serialização de estado de profile não especificada |
 | Context menu por pane (reload, duplicate profile, run auto login, mute audio, move to workspace, dev tools, close pane) | apps/shell + automation crate | **gap** — "dev tools" implica um inspector completo, não mencionado em nenhuma fase |

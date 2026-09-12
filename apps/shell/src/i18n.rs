@@ -1,7 +1,7 @@
 //! EN/PT string table for `apps/shell`'s UI (closes the "Interface i18n"
 //! spec gap). `main.rs`'s toolbar/panel calls [`t`] (and [`fill`] for the
 //! two templates with `{}` placeholders) for every string listed below,
-//! selected by `NimbleApp.locale` and toggled live via EN/PT buttons in
+//! selected by `AtomicApp.locale` and toggled live via EN/PT buttons in
 //! the toolbar - no restart needed, since every string is looked up fresh
 //! each frame. Still hardcoded in `main.rs`: the per-pane context menu's
 //! labels (Reload, Duplicate profile, ...) and the disabled Mute audio/Dev

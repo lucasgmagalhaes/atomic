@@ -3,12 +3,12 @@
 //! `chrome_toolbar_ui.rs` already established, additive next to the real
 //! `draw_downloads_history_panel` for now.
 
-use super::NimbleApp;
+use super::AtomicApp;
 
 const CHROME_WIDTH: u32 = 260;
 const CHROME_HEIGHT: u32 = 400;
 
-impl NimbleApp {
+impl AtomicApp {
     pub(super) fn draw_chrome_downloads_history_spike(&mut self, ctx: &egui::Context) {
         let visible = self.active_workspace_pane_indices();
         if visible.is_empty() {

@@ -5,7 +5,7 @@ chcp 65001 | Out-Null
 [Console]::InputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
-$projectDir = "E:\github\nimble"
+$projectDir = "E:\github\atomic"
 $tasksDir = "$projectDir\.opencode\tasks"
 $stopFile = "$projectDir\.opencode\STOP"
 $pickBatchScript = "$projectDir\.opencode\pick-batch-tasks.ps1"

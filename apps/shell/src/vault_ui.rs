@@ -6,7 +6,7 @@
 //! One vault per shell process (not per profile - the mockup's "Add
 //! profile modal" autofill fields aren't wired to this yet, so there's no
 //! per-profile identity to key separate vaults off), living under
-//! `%TEMP%/nimble-vault/` - same "dev-stage, not a real installed app data
+//! `%TEMP%/atomic-vault/` - same "dev-stage, not a real installed app data
 //! dir" caveat `profile-worker`'s own storage_root already carries.
 //!
 //! No autofill wiring into pages - the mockup's own "Credentials
@@ -20,7 +20,7 @@ use std::path::PathBuf;
 use security::vault::CredentialVault;
 
 pub fn default_vault_dir() -> PathBuf {
-    std::env::temp_dir().join("nimble-vault")
+    std::env::temp_dir().join("atomic-vault")
 }
 
 /// Opens (creating if needed) the vault at `dir/vault.enc` with its key at

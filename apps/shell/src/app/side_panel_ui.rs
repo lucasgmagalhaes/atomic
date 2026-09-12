@@ -1,8 +1,8 @@
 //! The Downloads & History side panel for the selected pane.
 
-use super::NimbleApp;
+use super::AtomicApp;
 
-impl NimbleApp {
+impl AtomicApp {
     pub(super) fn draw_downloads_history_panel(&mut self, ctx: &egui::Context) {
         egui::SidePanel::right("downloads_history")
             .resizable(true)

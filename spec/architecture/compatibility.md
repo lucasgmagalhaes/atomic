@@ -211,7 +211,7 @@ Run targeted WPT subset
 Fix compatibility failures
       │
       ▼
-Add Nimble regression tests
+Add Atomic regression tests
       │
       ▼
 Track compatibility percentage

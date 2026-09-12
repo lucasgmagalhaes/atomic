@@ -2,16 +2,9 @@
 
 Guidance for Claude Code (and any other agent) working in this repo.
 
-## Project naming — unresolved inconsistency
+## Project naming (decided 2026-09-12)
 
-The project is referred to by **three different names** across the repo, not yet unified:
-
-- `README.md` title: **idleGo**
-- `mockup/browser-idle-spec.md` title: **IdleBrowser**
-- `mockup/Nimble Browser.dc.html` (product mockup) branding: **Nimble**
-- `mockup/github.md` refers to a file named "Idle Labs Browser.dc.html", which does not match the actual `Nimble Browser.dc.html` in the repo (flagged AMBIGUOUS by graphify — confidence 0.25, likely stale doc)
-
-Do not assume one name is canonical. If you need to pick one for new code/docs, ask the user first — this has not been decided.
+The project is named **Atomic**. It previously went by three different, never-unified names across the repo (`README.md`'s "idleGo", `mockup/browser-idle-spec.md`'s "IdleBrowser", and the mockup/UI's own "Nimble" branding) — all three, plus every internal identifier that used one of them (the `NimbleApp` struct, the `window.nimble` JS bridge namespace, `nimble-*` shared-memory/temp-dir/vault path prefixes, etc.), were renamed to Atomic in one pass. If you find a leftover "idleGo"/"IdleBrowser"/"Nimble"/"nimble" anywhere, it's a miss from that rename, not a live naming decision — fix it to Atomic rather than treating it as an open question.
 
 ## Product positioning (decided 2026-08-26)
 
@@ -19,7 +12,7 @@ The product framing is broader than "idle games" alone now — see [`spec/ROADMA
 
 ## Source of truth for architecture
 
-`mockup/browser-idle-spec.md` is the technical execution spec (Rust workspace, crate breakdown, phased roadmap). `mockup/Nimble Browser.dc.html` is the UI/UX mockup (interactive HTML prototype) — it drives product features, not implementation. `mockup/rendering-engine-gaps.md` is a detailed, code-verified gap map of the rendering engine specifically (css/layout-engine/render/webgl/dom) — what's real vs missing at the CSS-property/API level, not the crate/phase level `browser-idle-spec.md` tracks.
+`mockup/browser-idle-spec.md` is the technical execution spec (Rust workspace, crate breakdown, phased roadmap). `mockup/Atomic Browser.dc.html` is the UI/UX mockup (interactive HTML prototype) — it drives product features, not implementation. `mockup/rendering-engine-gaps.md` is a detailed, code-verified gap map of the rendering engine specifically (css/layout-engine/render/webgl/dom) — what's real vs missing at the CSS-property/API level, not the crate/phase level `browser-idle-spec.md` tracks.
 
 **`spec/` is the source of truth for granular JS-engine status and architecture rules** (split from a single `FULL_SPEC.md` into small per-topic files so an agent doesn't have to read one giant doc). Start at `spec/INDEX.md`, then `spec/ROADMAP.md` to pick a task, then `spec/RULES.md` before writing code. `spec/matrix/*.md` are done/needed checklists (with file references) of the JS runtime, DOM, events, CSS/layout, paint/compositing, browser Web API classes, and navigation/security/lifecycle; `spec/architecture/*.md` is the shared-infrastructure-over-API-specific-code playbook and the P0–P5 priority order. The "Implementation status" section below deliberately does not duplicate what the matrix already tracks.
 

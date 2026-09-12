@@ -8,6 +8,6 @@ rem nested-quoted `cmd /c "..."` string passed through make's own shell
 rem layer gets its escaped inner quotes mangled before cmd.exe ever sees
 rem it, so cmd fails to find the vcvars64.bat path at all. One quoted
 rem path here, no nesting, works.
-if not defined NIMBLE_VCVARS set "NIMBLE_VCVARS=E:\VSBuildTools\VC\Auxiliary\Build\vcvars64.bat"
-call "%NIMBLE_VCVARS%" >nul
+if not defined ATOMIC_VCVARS set "ATOMIC_VCVARS=E:\VSBuildTools\VC\Auxiliary\Build\vcvars64.bat"
+call "%ATOMIC_VCVARS%" >nul
 cargo %*

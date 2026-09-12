@@ -6,7 +6,7 @@ fn temp_dir(tag: &str) -> std::path::PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    std::env::temp_dir().join(format!("nimble-cursor-test-{tag}-{nanos}"))
+    std::env::temp_dir().join(format!("atomic-cursor-test-{tag}-{nanos}"))
 }
 
 fn seeded_store(tag: &str) -> IndexedDb {

@@ -1,6 +1,6 @@
-# idleGo
+# Atomic
 
-A free and open source browser built from scratch around one core idea: run many isolated profiles side by side — light enough that having dozens open costs a fraction of what Chromium-based multi-profile tools cost. Also referred to as **Nimble** in the product mockup (`mockup/`) — naming is not yet unified across README/spec/mockup.
+A free and open source browser built from scratch around one core idea: run many isolated profiles side by side — light enough that having dozens open costs a fraction of what Chromium-based multi-profile tools cost. Also referred to as **Atomic** in the product mockup (`mockup/`) — naming is not yet unified across README/spec/mockup.
 
 ## Goal
 

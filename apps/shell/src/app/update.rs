@@ -3,9 +3,9 @@
 
 use std::time::Duration;
 
-use super::NimbleApp;
+use super::AtomicApp;
 
-impl eframe::App for NimbleApp {
+impl eframe::App for AtomicApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Every pane's process keeps rendering on its own real vsync loop
         // regardless of whether this GUI repaints - poll on a matching

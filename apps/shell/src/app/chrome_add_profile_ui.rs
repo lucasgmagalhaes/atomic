@@ -5,12 +5,12 @@
 //! via `ChromeEngine::click_at_with_focus`/`type_key` (keyboard routing
 //! follows `grid_ui.rs`'s existing real-pane pattern almost verbatim).
 
-use super::NimbleApp;
+use super::AtomicApp;
 
 const CHROME_WIDTH: u32 = 320;
 const CHROME_HEIGHT: u32 = 220;
 
-impl NimbleApp {
+impl AtomicApp {
     pub(super) fn draw_chrome_add_profile_spike(&mut self, ctx: &egui::Context) {
         let Some(form) = self.add_profile_form.as_ref() else {
             self.chrome_add_profile_was_open = false;

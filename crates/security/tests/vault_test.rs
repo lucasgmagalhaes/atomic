@@ -4,8 +4,8 @@ fn temp_paths(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
     let dir = std::env::temp_dir();
     let pid = std::process::id();
     (
-        dir.join(format!("nimble-vault-test-{pid}-{name}.bin")),
-        dir.join(format!("nimble-vault-test-{pid}-{name}.key")),
+        dir.join(format!("atomic-vault-test-{pid}-{name}.bin")),
+        dir.join(format!("atomic-vault-test-{pid}-{name}.key")),
     )
 }
 

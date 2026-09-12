@@ -34,15 +34,15 @@ Workflows: tiled panes of isolated profile sessions, workspaces (create/switch/m
 - **Honest performance claim**: idle memory/CPU footprint and cold-start time at scale (many profiles) — not raw JS execution throughput or layout/paint throughput, where Chromium's V8 JIT and Skia+GPU compositor realistically win. Do not position messaging around beating Chromium on general browsing speed.
 - No dev tools/inspector panel — deliberate non-goal, no devtools protocol implemented or planned.
 - Windows is the primary supported OS for security features (Credential Manager, process sandboxing via Job Objects); Linux/macOS keychain and sandboxing are documented `Unsupported`.
-- Naming is unresolved in the repo (README: idleGo, spec: IdleBrowser, mockup branding: Nimble) — **this PRODUCT.md and future work should use "Nimble"** (confirmed 2026-09-12), but README.md/spec docs still say otherwise and are not yet updated.
+- Naming is unresolved in the repo (README: Atomic, spec: Atomic, mockup branding: Atomic) — **this PRODUCT.md and future work should use "Atomic"** (confirmed 2026-09-12), but README.md/spec docs still say otherwise and are not yet updated.
 
 ## Brand Commitments
 
-Name: **Nimble** (confirmed 2026-09-12 as the name to standardize on going forward; not yet propagated to README.md or spec/ docs). Product mockup (`mockup/Nimble Browser.dc.html`) shows version string "Nimble 1.2.0" and an accent-colored wordmark — no logo asset beyond the text wordmark in the mockup.
+Name: **Atomic** (confirmed 2026-09-12 as the name to standardize on going forward; not yet propagated to README.md or spec/ docs). Product mockup (`mockup/Atomic Browser.dc.html`) shows version string "Atomic 1.2.0" and an accent-colored wordmark — no logo asset beyond the text wordmark in the mockup.
 
 ## Evidence on Hand
 
-No real user testimonials, case studies, press, or pricing exist — do not fabricate any. The only visual reference is the interactive HTML mockup at `mockup/Nimble Browser.dc.html` (UI/UX prototype, drives product features not implementation) and `mockup/browser-idle-spec.md` (technical execution spec).
+No real user testimonials, case studies, press, or pricing exist — do not fabricate any. The only visual reference is the interactive HTML mockup at `mockup/Atomic Browser.dc.html` (UI/UX prototype, drives product features not implementation) and `mockup/browser-idle-spec.md` (technical execution spec).
 
 ## Product Principles
 

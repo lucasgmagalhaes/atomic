@@ -193,8 +193,8 @@ fn spawn_cookie_setting_server() -> std::net::SocketAddr {
 /// file `BrowserView` never gets a handle to itself.
 fn cookie_jar_path(pane_id: &str, host: &str) -> std::path::PathBuf {
     std::env::temp_dir()
-        .join("nimble-profile-storage")
-        .join(format!("nimble-profile-{pane_id}"))
+        .join("atomic-profile-storage")
+        .join(format!("atomic-profile-{pane_id}"))
         .join(host)
         .join("cookies.txt")
 }

@@ -8,13 +8,13 @@ use import::import_passwords;
 
 fn temp_path(name: &str) -> std::path::PathBuf {
     std::env::temp_dir()
-        .join("nimble-import-crypto-test")
+        .join("atomic-import-crypto-test")
         .join(name)
 }
 
 fn encrypt_password(raw_key: &[u8; 32], plaintext: &str) -> Vec<u8> {
     let cipher = Aes256Gcm::new_from_slice(raw_key).unwrap();
-    let nonce_bytes: [u8; 12] = *b"nimble-pwd12";
+    let nonce_bytes: [u8; 12] = *b"atomic-pwd12";
     let ciphertext = cipher
         .encrypt((&nonce_bytes).into(), plaintext.as_bytes())
         .unwrap();

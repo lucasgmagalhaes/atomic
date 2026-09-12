@@ -2,7 +2,7 @@ use shell::history::History;
 
 fn temp_path(name: &str) -> std::path::PathBuf {
     std::env::temp_dir()
-        .join("nimble-shell-history-test")
+        .join("atomic-shell-history-test")
         .join(name)
 }
 

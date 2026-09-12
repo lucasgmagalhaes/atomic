@@ -1,10 +1,10 @@
-# Nimble - common developer commands.
+# Atomic - common developer commands.
 #
 # Windows note: `quickjs-sys`'s C build needs a Developer Command Prompt
 # environment (cc-rs's own MSVC autodetection doesn't find the toolchain
 # on this machine's split VS/SDK-drive layout - see CLAUDE.md). Every
 # cargo invocation below runs through scripts/with-vcvars.bat, which
-# sources vcvars64.bat first, when running on Windows. Set NIMBLE_VCVARS
+# sources vcvars64.bat first, when running on Windows. Set ATOMIC_VCVARS
 # in your environment if your vcvars64.bat lives somewhere else (that
 # script's own default matches this dev machine). On Linux/macOS this is
 # skipped entirely - plain `cargo` needs no such setup there.
@@ -33,7 +33,7 @@ endif
         fmt fmt-check lint clean update doc graphify auto-loop auto-stop
 
 help:
-	@echo "Nimble - make targets:"
+	@echo "Atomic - make targets:"
 	@echo "  build          cargo build --workspace (debug)"
 	@echo "  build-release  cargo build --workspace --release (prod)"
 	@echo "  run            run the shell app (debug)"

@@ -3,7 +3,7 @@
 use import::import_bookmarks;
 
 fn temp_path(name: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join("nimble-import-test").join(name)
+    std::env::temp_dir().join("atomic-import-test").join(name)
 }
 
 const REAL_CHROME_BOOKMARKS_SHAPE: &str = r#"{

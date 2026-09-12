@@ -22,7 +22,7 @@
     common for shortcuts / Start Menu / Task Scheduler - they often default
     to C:\Windows\System32 or C:\), opencode ends up rooted at that folder
     instead of your actual project. Defaults to the folder this script
-    itself lives in ($PSScriptRoot) - i.e. just this one project (nimble),
+    itself lives in ($PSScriptRoot) - i.e. just this one project (atomic),
     not every repo under E:\GitHub. Pass a different path to root it
     somewhere else instead.
 

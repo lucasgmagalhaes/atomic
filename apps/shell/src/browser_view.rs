@@ -18,7 +18,7 @@
 //! Scoped down from a real browser chrome: one profile, no tabs/workspace
 //! *switcher* UI yet (`main.rs` now uses `workspace::WorkspaceManager` to
 //! name the one running profile for `automation`'s `pane(...)` — see
-//! `NimbleApp::run_automation_script` — but there's still no UI to create/
+//! `AtomicApp::run_automation_script` — but there's still no UI to create/
 //! switch workspaces or spawn more than one profile into one), a fixed
 //! frame size decided at spawn time (a real implementation would re-spawn
 //! - or resize the shared-memory region - on window resize; this doesn't).
@@ -78,7 +78,7 @@ pub struct BrowserView {
     // this `Rc` (via `profile_handle`) is what lets a long-lived engine
     // (ticked every GUI frame - see `main.rs`'s `tick_automation_engine`)
     // reach the current pane's profile without holding a borrow of
-    // `NimbleApp::panes` open across frames. `RefCell` gives real
+    // `AtomicApp::panes` open across frames. `RefCell` gives real
     // runtime-checked mutable access instead of raw pointers into
     // something that might move.
     profile: Option<Rc<RefCell<profile::Profile>>>,
@@ -125,7 +125,7 @@ impl BrowserView {
     pub fn spawn_with_proxy(width: u32, height: u32, proxy: Option<&str>) -> Self {
         static SPAWN_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let n = SPAWN_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let shmem_name = format!("nimble-shell-{}-{n}", std::process::id());
+        let shmem_name = format!("atomic-shell-{}-{n}", std::process::id());
         Self::spawn_with_shmem_name(&shmem_name, width, height, proxy, None)
     }
 
@@ -165,7 +165,7 @@ impl BrowserView {
         proxy: Option<&str>,
         gpu_adapter: Option<usize>,
     ) -> Self {
-        let shmem_name = format!("nimble-profile-{pane_id}");
+        let shmem_name = format!("atomic-profile-{pane_id}");
         Self::spawn_with_shmem_name(&shmem_name, width, height, proxy, gpu_adapter)
     }
 
@@ -317,7 +317,7 @@ impl BrowserView {
                 if let Some(pixels) = profile.latest_frame() {
                     let image = rgba_to_color_image(&pixels, self.width, self.height);
                     let handle = ctx.load_texture(
-                        "nimble-browser-frame",
+                        "atomic-browser-frame",
                         image,
                         egui::TextureOptions::LINEAR,
                     );

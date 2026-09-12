@@ -6,9 +6,9 @@ use shell::browser_view::BrowserView;
 use shell::resource_monitor::PaneMonitor;
 
 use super::pane::{spawn_pane, spawn_pane_with_proxy};
-use super::{AddProfileForm, NimbleApp, PANE_HEIGHT, PANE_WIDTH};
+use super::{AddProfileForm, AtomicApp, PANE_HEIGHT, PANE_WIDTH};
 
-impl NimbleApp {
+impl AtomicApp {
     /// Indices into `self.panes` whose id is registered in the *active*
     /// workspace - what the grid actually draws, and what the "Panes:"
     /// count buttons grow/shrink. A pane belonging to a different

@@ -273,7 +273,7 @@ pub(super) unsafe fn define_attribute_properties(ctx: *mut sys::JSContext, proto
 }
 
 unsafe fn attrs_owner(ctx: *mut sys::JSContext, value: sys::JSValue) -> Option<dom::NodeId> {
-    let name = CString::new("__nimbleAttributesOwner").unwrap();
+    let name = CString::new("__atomicAttributesOwner").unwrap();
     let owner = sys::JS_GetPropertyStr(ctx, value, name.as_ptr());
     let id = node_id(ctx, owner);
     sys::JS_FreeValue(ctx, owner);
@@ -382,7 +382,7 @@ unsafe extern "C" fn node_attributes_get(
     let proto = super::class_list::array_prototype(ctx);
     sys::JS_SetPrototype(ctx, object, proto);
     sys::JS_FreeValue(ctx, proto);
-    let owner = CString::new("__nimbleAttributesOwner").unwrap();
+    let owner = CString::new("__atomicAttributesOwner").unwrap();
     sys::JS_SetPropertyStr(ctx, object, owner.as_ptr(), sys::JS_DupValue(ctx, this_val));
     let method_name = CString::new("getNamedItem").unwrap();
     sys::JS_SetPropertyStr(

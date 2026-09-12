@@ -10,7 +10,7 @@ use crate::page::Page;
 
 const DEMO_HTML: &str = r#"
 <div id="container">
-  <p>Nimble profile worker</p>
+  <p>Atomic profile worker</p>
   <p>Rendering real HTML via html5ever.</p>
   <p id="counter">tick 0</p>
 </div>

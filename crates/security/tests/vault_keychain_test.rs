@@ -8,14 +8,14 @@ use security::vault::CredentialVault;
 
 fn temp_vault_path(label: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
-        "nimble-vault-keychain-test-{label}-{}.bin",
+        "atomic-vault-keychain-test-{label}-{}.bin",
         std::process::id()
     ))
 }
 
 fn cleanup(path: &std::path::Path) {
     let _ = std::fs::remove_file(path);
-    let target = format!("nimble-vault:{}", path.display());
+    let target = format!("atomic-vault:{}", path.display());
     let _ = keychain::delete_credential(&target);
 }
 
@@ -44,7 +44,7 @@ fn second_open_reuses_the_same_keychain_key_not_a_freshly_generated_one() {
     let path = temp_vault_path("key-reuse");
     cleanup(&path);
 
-    let target = format!("nimble-vault:{}", path.display());
+    let target = format!("atomic-vault:{}", path.display());
 
     {
         let _vault = CredentialVault::open_or_create_with_keychain(&path)
@@ -83,7 +83,7 @@ fn vault_file_cannot_be_decrypted_without_the_matching_keychain_key() {
     // touching the vault file, then reopening - open_or_create_with_keychain
     // provisions a *fresh* key on a missing credential, and that fresh key
     // cannot decrypt the old file.
-    let target = format!("nimble-vault:{}", path.display());
+    let target = format!("atomic-vault:{}", path.display());
     keychain::delete_credential(&target).expect("delete should succeed");
 
     let result = CredentialVault::open_or_create_with_keychain(&path);

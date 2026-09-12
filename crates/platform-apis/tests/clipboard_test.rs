@@ -5,7 +5,7 @@
 #[test]
 #[ignore]
 fn round_trips_through_the_real_os_clipboard() {
-    let marker = format!("nimble-clipboard-test-{}", std::process::id());
+    let marker = format!("atomic-clipboard-test-{}", std::process::id());
     platform_apis::clipboard_write_text(&marker).unwrap();
     let read_back = platform_apis::clipboard_read_text().unwrap();
     assert_eq!(read_back, marker);

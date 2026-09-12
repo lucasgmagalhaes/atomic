@@ -92,7 +92,7 @@ impl CredentialVault {
     /// (Windows Credential Manager — see [`crate::keychain`]) instead of a
     /// plain file, closing the "OS keychain" deviation this module's own
     /// doc comment flags. The credential's target name is derived from
-    /// `path` itself (`nimble-vault:<absolute path>`), so a distinct vault
+    /// `path` itself (`atomic-vault:<absolute path>`), so a distinct vault
     /// file gets a distinct keychain entry without the caller having to
     /// pick a name.
     ///
@@ -188,7 +188,7 @@ fn serialize_entries(entries: &BTreeMap<String, String>) -> Vec<u8> {
 /// Deterministic keychain target name for a given vault file — one
 /// credential per distinct vault path.
 fn keychain_target_for(path: &Path) -> String {
-    format!("nimble-vault:{}", path.display())
+    format!("atomic-vault:{}", path.display())
 }
 
 #[cfg(windows)]

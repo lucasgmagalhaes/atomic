@@ -4,7 +4,7 @@
 //! not a placeholder list.
 //!
 //! Files land under a dedicated OS temp subdirectory
-//! (`%TEMP%/nimble-downloads/<pane-id>/`), not the user's real Downloads
+//! (`%TEMP%/atomic-downloads/<pane-id>/`), not the user's real Downloads
 //! folder - this is agent-authored code the user runs themselves, so
 //! there's no "Claude downloaded a file" consent question here, but a
 //! browser feature landing files somewhere so specific to this project's

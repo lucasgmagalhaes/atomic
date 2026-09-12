@@ -439,7 +439,7 @@ unsafe extern "C" fn create_object_url(
         return sys::js_undefined();
     }
     let id = NEXT_BLOB_URL_ID.fetch_add(1, Ordering::Relaxed);
-    let url = format!("blob:nimble-internal/{id:016x}");
+    let url = format!("blob:atomic-internal/{id:016x}");
     let entry = BlobInner {
         bytes: (*ptr).bytes.clone(),
         mime: (*ptr).mime.clone(),

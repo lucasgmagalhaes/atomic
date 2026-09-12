@@ -6,7 +6,7 @@
 use security::keychain;
 
 fn unique_target(label: &str) -> String {
-    format!("nimble-keychain-test:{label}:{}", std::process::id())
+    format!("atomic-keychain-test:{label}:{}", std::process::id())
 }
 
 #[test]

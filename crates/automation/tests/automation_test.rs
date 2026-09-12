@@ -72,7 +72,7 @@ fn every_and_on_fire_through_tick() {
 
 #[test]
 fn pane_goto_reaches_a_real_profile() {
-    let profile = Rc::new(RefCell::new(spawn_demo_profile("nimble-automation-test-1")));
+    let profile = Rc::new(RefCell::new(spawn_demo_profile("atomic-automation-test-1")));
     let mut panes = HashMap::new();
     panes.insert("acc1".to_string(), profile.clone());
 
@@ -92,7 +92,7 @@ fn pane_goto_reaches_a_real_profile() {
 
 #[test]
 fn pane_fill_and_click_reach_a_real_element_on_the_demo_page() {
-    let profile = Rc::new(RefCell::new(spawn_demo_profile("nimble-automation-test-2")));
+    let profile = Rc::new(RefCell::new(spawn_demo_profile("atomic-automation-test-2")));
     let mut panes = HashMap::new();
     panes.insert("acc1".to_string(), profile.clone());
 
@@ -116,7 +116,7 @@ fn pane_fill_and_click_reach_a_real_element_on_the_demo_page() {
 
 #[test]
 fn pane_fill_and_click_throw_on_an_unknown_id_or_selector() {
-    let profile = Rc::new(RefCell::new(spawn_demo_profile("nimble-automation-test-3")));
+    let profile = Rc::new(RefCell::new(spawn_demo_profile("atomic-automation-test-3")));
     let mut panes = HashMap::new();
     panes.insert("acc1".to_string(), profile.clone());
 
@@ -180,7 +180,7 @@ fn rebind_lets_the_same_engine_control_a_pane_added_after_construction() {
         .expect("script should eval cleanly");
 
     let profile = Rc::new(RefCell::new(spawn_demo_profile(
-        "nimble-automation-test-rebind",
+        "atomic-automation-test-rebind",
     )));
     let mut panes = HashMap::new();
     panes.insert("acc1".to_string(), profile.clone());
@@ -203,7 +203,7 @@ fn rebind_lets_the_same_engine_control_a_pane_added_after_construction() {
 #[test]
 fn rebind_removes_access_to_a_pane_no_longer_present() {
     let profile = Rc::new(RefCell::new(spawn_demo_profile(
-        "nimble-automation-test-rebind-remove",
+        "atomic-automation-test-rebind-remove",
     )));
     let mut panes = HashMap::new();
     panes.insert("acc1".to_string(), profile.clone());

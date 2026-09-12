@@ -5,7 +5,7 @@
 //! this module owns the throttled sampling cadence, the 60-point rolling
 //! history a sparkline draws from, and FPS derived from
 //! `profile::Profile::frame_generation()`. "Kill process" isn't new work -
-//! it's `NimbleApp::close_pane`, already real (closes a pane's
+//! it's `AtomicApp::close_pane`, already real (closes a pane's
 //! `BrowserView`/`Profile`, which force-kills the child on `Drop`).
 //!
 //! On a platform `process_stats::sample` doesn't support yet (anything but

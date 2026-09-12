@@ -5,7 +5,7 @@ fn temp_dir(tag: &str) -> std::path::PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    std::env::temp_dir().join(format!("nimble-doc-cookie-test-{tag}-{nanos}"))
+    std::env::temp_dir().join(format!("atomic-doc-cookie-test-{tag}-{nanos}"))
 }
 
 #[test]

@@ -89,7 +89,7 @@ pub(crate) unsafe fn serialize(
         return None;
     }
     let id = NEXT_BOUNDARY_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let boundary = format!("----nimbleFormData{id:016x}");
+    let boundary = format!("----atomicFormData{id:016x}");
     let mut body = Vec::new();
     for entry in &(*ptr).entries {
         encode_entry(&mut body, &boundary, entry);

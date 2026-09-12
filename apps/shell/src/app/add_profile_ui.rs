@@ -1,8 +1,8 @@
 //! The mockup's "Add Profile" modal window.
 
-use super::NimbleApp;
+use super::AtomicApp;
 
-impl NimbleApp {
+impl AtomicApp {
     pub(super) fn draw_add_profile_modal(&mut self, ctx: &egui::Context) {
         if self.add_profile_form.is_none() {
             return;

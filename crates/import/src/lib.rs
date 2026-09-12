@@ -1,7 +1,7 @@
 //! Real "Import from Chrome" — the mockup's onboarding flow CLAUDE.md
 //! flagged as needing a decision (it conflicts with this project's "no
 //! fingerprint spoofing" isolation requirement: pulling a real Chrome
-//! profile's cookies/passwords into a nimble profile makes that profile
+//! profile's cookies/passwords into a atomic profile makes that profile
 //! traceable back to the user's real browser). Decision made: full import,
 //! **opt-in per profile** — nothing here runs unless a caller (`apps/shell`)
 //! explicitly invokes it for one profile the user chose, never automatic,
@@ -84,7 +84,7 @@ pub(crate) fn snapshot_sqlite(source: &Path, label: &str) -> io::Result<SqliteSn
             use std::fmt::Write as _;
             write!(&mut suffix, "{byte:02x}").expect("writing to a String cannot fail");
         }
-        let path = std::env::temp_dir().join(format!("nimble-import-{label}-{suffix}.sqlite"));
+        let path = std::env::temp_dir().join(format!("atomic-import-{label}-{suffix}.sqlite"));
         let mut output = match open_private_file(&path) {
             Ok(file) => file,
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,

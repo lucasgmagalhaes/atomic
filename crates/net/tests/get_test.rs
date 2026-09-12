@@ -38,12 +38,12 @@ fn captures_response_headers() {
 fn sends_extra_request_headers() {
     let response = net::get_with_headers(
         "https://httpbin.org/headers",
-        &[("X-Nimble-Test", "hello-nimble")],
+        &[("X-Atomic-Test", "hello-atomic")],
     )
     .expect("request should succeed");
     let body = String::from_utf8_lossy(&response.body);
     assert!(
-        body.contains("hello-nimble"),
+        body.contains("hello-atomic"),
         "expected the custom header echoed back, got: {body}"
     );
 }

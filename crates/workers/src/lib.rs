@@ -26,7 +26,7 @@ use std::thread;
 
 use js_runtime::{Context, Runtime};
 
-const TERMINATE_SENTINEL: &str = "\0__nimble_worker_terminate__\0";
+const TERMINATE_SENTINEL: &str = "\0__atomic_worker_terminate__\0";
 
 fn escape_js_string(s: &str) -> String {
     let mut out = String::with_capacity(s.len());

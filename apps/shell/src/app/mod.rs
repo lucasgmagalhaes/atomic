@@ -1,11 +1,11 @@
-//! `NimbleApp`, the `eframe::App` implementation that is the whole GUI shell.
+//! `AtomicApp`, the `eframe::App` implementation that is the whole GUI shell.
 //! Split into one file per cohesive responsibility (SRP), same convention
 //! this workspace's other large-file splits use (`js-runtime`'s
 //! `dom_bindings`/`form_data`, `profile`'s `profile_worker`, `dom`'s own
 //! module split):
 //! - [`pane`]: `Pane` (one live grid cell) and its spawn helpers.
 //! - [`resource_overlay`]: the CPU/RAM/FPS sparkline drawn on each pane.
-//! - [`panes`]: pane lifecycle (`NimbleApp` methods) — spawn/close/duplicate,
+//! - [`panes`]: pane lifecycle (`AtomicApp` methods) — spawn/close/duplicate,
 //!   pane-count changes, per-pane proxy/FPS/GPU application, address bar
 //!   navigation, and the per-pane download box.
 //! - [`workspaces`]: workspace switching/creation and moving a pane between
@@ -24,7 +24,7 @@
 //!   Settings window, the Downloads & History side panel, and the pane grid
 //!   itself (click/scroll/keyboard routing, context menu, texture paint).
 //!
-//! Every field on [`NimbleApp`] stays private to this crate and is reached
+//! Every field on [`AtomicApp`] stays private to this crate and is reached
 //! directly from every submodule above (they're descendants of this
 //! module), matching how the `dom` crate's own split reaches `Dom`'s
 //! private fields from its sibling submodules.
@@ -57,7 +57,7 @@ use pane::Pane;
 pub(crate) const PANE_WIDTH: u32 = 512;
 pub(crate) const PANE_HEIGHT: u32 = 320;
 
-pub(crate) struct NimbleApp {
+pub(crate) struct AtomicApp {
     panes: Vec<Pane>,
     /// Index into `panes` the address bar / proxy box / Reload button
     /// target - set by clicking a pane in the grid. Clamped back into
@@ -80,14 +80,14 @@ pub(crate) struct NimbleApp {
     /// `Err(message)` if it raised. `None` before any script has run.
     automation_result: Option<Result<String, String>>,
     /// App-lifetime automation engine - genuinely never dropped for as
-    /// long as `NimbleApp` runs, so `every`/`on`/`cron` callbacks a script
+    /// long as `AtomicApp` runs, so `every`/`on`/`cron` callbacks a script
     /// registers via `run_automation_script` keep firing on every
     /// subsequent `tick_automation_engine` call, closing the automation
     /// crate's own long-documented "ephemeral per run" gap. Borrows a
     /// `js_runtime::Runtime` that's `Box::leak`ed once at startup (see
     /// `Default::default`) - a real, deliberate leak, not a bug: this
     /// runtime needs to outlive `AutomationEngine`, which needs to live as
-    /// long as `NimbleApp` itself, and `NimbleApp` isn't guaranteed not to
+    /// long as `AtomicApp` itself, and `AtomicApp` isn't guaranteed not to
     /// move after construction (`eframe` owns it behind a `Box<dyn App>`)
     /// - leaking is the same "give it a stable heap address, app-lifetime,
     /// no cleanup needed before process exit" trade this workspace's
@@ -138,7 +138,7 @@ pub(crate) struct NimbleApp {
     /// a previous attempt's typed values don't linger into the next one.
     add_profile_form: Option<AddProfileForm>,
     add_profile_error: Option<String>,
-    /// Track B spike: the toolbar rendered by Nimble's own engine instead
+    /// Track B spike: the toolbar rendered by Atomic's own engine instead
     /// of egui (see `crate::chrome_engine`) — additive next to the real
     /// `draw_toolbar` for now, not a replacement, so nothing regresses
     /// while the architecture proves itself. `chrome_gpu` is this chrome
@@ -183,20 +183,20 @@ struct AddProfileForm {
     proxy: String,
 }
 
-impl Default for NimbleApp {
+impl Default for AtomicApp {
     fn default() -> Self {
         let mut workspace = WorkspaceManager::new();
         let panes = vec![pane::spawn_pane(&mut workspace, "pane-1".to_string())];
 
         // See `automation_engine`'s own doc for why this leak is
         // deliberate: the runtime must outlive an app-lifetime engine,
-        // and `NimbleApp` isn't guaranteed a stable address of its own.
+        // and `AtomicApp` isn't guaranteed a stable address of its own.
         let automation_runtime: &'static js_runtime::Runtime =
             Box::leak(Box::new(js_runtime::Runtime::new()));
         let automation_engine =
             automation::AutomationEngine::new(automation_runtime, std::collections::HashMap::new());
 
-        NimbleApp {
+        AtomicApp {
             panes,
             selected: 0,
             address_bar_text: String::new(),
@@ -221,7 +221,7 @@ impl Default for NimbleApp {
             add_profile_error: None,
             // Same deliberate leak `automation_engine` above already
             // documents: this runtime must outlive the chrome engine, and
-            // `NimbleApp` isn't guaranteed a stable address of its own.
+            // `AtomicApp` isn't guaranteed a stable address of its own.
             chrome_toolbar: crate::chrome_engine::ChromeEngine::new_toolbar(Box::leak(Box::new(
                 js_runtime::Runtime::new(),
             ))),

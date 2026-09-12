@@ -14,7 +14,7 @@ use import::{import_cookies, recover_master_key};
 
 fn temp_dir(name: &str) -> std::path::PathBuf {
     std::env::temp_dir()
-        .join("nimble-import-crypto-test")
+        .join("atomic-import-crypto-test")
         .join(name)
 }
 
@@ -67,7 +67,7 @@ fn write_real_local_state(user_data_dir: &std::path::Path, raw_key: &[u8; 32]) {
 
 fn encrypt_cookie_value(raw_key: &[u8; 32], plaintext: &str) -> Vec<u8> {
     let cipher = Aes256Gcm::new_from_slice(raw_key).unwrap();
-    let nonce_bytes: [u8; 12] = *b"nimble-nonce"; // 12 real bytes, fixed for test determinism
+    let nonce_bytes: [u8; 12] = *b"atomic-nonce"; // 12 real bytes, fixed for test determinism
     let ciphertext = cipher
         .encrypt((&nonce_bytes).into(), plaintext.as_bytes())
         .unwrap();

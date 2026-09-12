@@ -1,6 +1,6 @@
 //! Native bridge exposed to the chrome engine's own JS as
-//! `globalThis.nimble.{addProfile, setPaneCount}` — the spike's proof that
-//! chrome-as-HTML can drive real `NimbleApp` state, not just render static
+//! `globalThis.atomic.{addProfile, setPaneCount}` — the spike's proof that
+//! chrome-as-HTML can drive real `AtomicApp` state, not just render static
 //! markup. Mirrors `automation::cron`'s registration pattern (a
 //! thread-local registry keyed by the owning `JSContext` pointer, since
 //! this is a second, independent embedding of `js-runtime` with its own
@@ -151,57 +151,57 @@ unsafe extern "C" fn set_locale_fn(
     sys::js_undefined()
 }
 
-/// Registers one `nimble.<name>` native function on `nimble` — the shared
+/// Registers one `atomic.<name>` native function on `atomic` — the shared
 /// primitive [`register`] builds every entry from, added when the list grew
 /// past the point where inlining each `CString`/`JS_NewCFunction2`/
 /// `JS_SetPropertyStr` triplet by hand was worth it.
 unsafe fn register_fn(
     ctx: *mut sys::JSContext,
-    nimble: sys::JSValue,
+    atomic: sys::JSValue,
     name: &str,
     func: sys::JSCFunction,
     arity: c_int,
 ) {
     let name_c = CString::new(name).expect("bridge function name must not contain NUL bytes");
     let f = sys::JS_NewCFunction2(ctx, func, name_c.as_ptr(), arity, sys::JS_CFUNC_GENERIC, 0);
-    sys::JS_SetPropertyStr(ctx, nimble, name_c.as_ptr(), f);
+    sys::JS_SetPropertyStr(ctx, atomic, name_c.as_ptr(), f);
 }
 
-/// Registers `globalThis.nimble = { addProfile(), setPaneCount(n), ... }` on
+/// Registers `globalThis.atomic = { addProfile(), setPaneCount(n), ... }` on
 /// `ctx`. Call once per `Context`, same convention every other native
 /// global in this workspace follows (`automation::cron::register`, etc.).
 pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     let global = sys::JS_GetGlobalObject(ctx);
-    let nimble = sys::JS_NewObject(ctx);
+    let atomic = sys::JS_NewObject(ctx);
 
-    register_fn(ctx, nimble, "addProfile", add_profile_fn, 0);
-    register_fn(ctx, nimble, "setPaneCount", set_pane_count_fn, 1);
-    register_fn(ctx, nimble, "switchWorkspace", switch_workspace_fn, 1);
-    register_fn(ctx, nimble, "createWorkspace", create_workspace_fn, 0);
-    register_fn(ctx, nimble, "setLocale", set_locale_fn, 1);
+    register_fn(ctx, atomic, "addProfile", add_profile_fn, 0);
+    register_fn(ctx, atomic, "setPaneCount", set_pane_count_fn, 1);
+    register_fn(ctx, atomic, "switchWorkspace", switch_workspace_fn, 1);
+    register_fn(ctx, atomic, "createWorkspace", create_workspace_fn, 0);
+    register_fn(ctx, atomic, "setLocale", set_locale_fn, 1);
     register_fn(
         ctx,
-        nimble,
+        atomic,
         "createProfileSubmit",
         create_profile_submit_fn,
         0,
     );
-    register_fn(ctx, nimble, "cancelAddProfile", cancel_add_profile_fn, 0);
-    register_fn(ctx, nimble, "stepMaxPanes", step_max_panes_fn, 1);
-    register_fn(ctx, nimble, "stepFpsCap", step_fps_cap_fn, 1);
-    register_fn(ctx, nimble, "setFpsCapEnabled", set_fps_cap_enabled_fn, 1);
-    register_fn(ctx, nimble, "setUseKeychain", set_use_keychain_fn, 1);
-    register_fn(ctx, nimble, "applyGpuAdapter", apply_gpu_adapter_fn, 1);
-    register_fn(ctx, nimble, "addCredential", add_credential_fn, 0);
-    register_fn(ctx, nimble, "removeCredential", remove_credential_fn, 1);
-    register_fn(ctx, nimble, "importHistory", import_history_fn, 0);
-    register_fn(ctx, nimble, "importBookmarks", import_bookmarks_fn, 0);
-    register_fn(ctx, nimble, "importCookies", import_cookies_fn, 0);
-    register_fn(ctx, nimble, "importPasswords", import_passwords_fn, 0);
-    register_fn(ctx, nimble, "closeSettings", close_settings_fn, 0);
+    register_fn(ctx, atomic, "cancelAddProfile", cancel_add_profile_fn, 0);
+    register_fn(ctx, atomic, "stepMaxPanes", step_max_panes_fn, 1);
+    register_fn(ctx, atomic, "stepFpsCap", step_fps_cap_fn, 1);
+    register_fn(ctx, atomic, "setFpsCapEnabled", set_fps_cap_enabled_fn, 1);
+    register_fn(ctx, atomic, "setUseKeychain", set_use_keychain_fn, 1);
+    register_fn(ctx, atomic, "applyGpuAdapter", apply_gpu_adapter_fn, 1);
+    register_fn(ctx, atomic, "addCredential", add_credential_fn, 0);
+    register_fn(ctx, atomic, "removeCredential", remove_credential_fn, 1);
+    register_fn(ctx, atomic, "importHistory", import_history_fn, 0);
+    register_fn(ctx, atomic, "importBookmarks", import_bookmarks_fn, 0);
+    register_fn(ctx, atomic, "importCookies", import_cookies_fn, 0);
+    register_fn(ctx, atomic, "importPasswords", import_passwords_fn, 0);
+    register_fn(ctx, atomic, "closeSettings", close_settings_fn, 0);
 
-    let nimble_name = CString::new("nimble").unwrap();
-    sys::JS_SetPropertyStr(ctx, global, nimble_name.as_ptr(), nimble);
+    let atomic_name = CString::new("atomic").unwrap();
+    sys::JS_SetPropertyStr(ctx, global, atomic_name.as_ptr(), atomic);
     sys::JS_FreeValue(ctx, global);
 }
 
@@ -383,8 +383,8 @@ pub(crate) fn push_download_submitted(ctx: *mut sys::JSContext, url: String) {
     push_action(ctx, ChromeAction::DownloadSubmitted(url));
 }
 
-/// Drains and returns every action `ctx`'s JS has queued via `nimble.*`
-/// since the last call — `NimbleApp::update` calls this once per frame and
+/// Drains and returns every action `ctx`'s JS has queued via `atomic.*`
+/// since the last call — `AtomicApp::update` calls this once per frame and
 /// dispatches each action into its own real methods (`panes::create_profile`,
 /// `panes::set_pane_count`), so a chrome-engine button click ends up doing
 /// exactly what the equivalent egui button does today.

@@ -7,11 +7,11 @@ $env:PATH += ";C:\Program Files\GitHub CLI"
 chcp 65001 | Out-Null
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-$projectDir = "E:\github\nimble"
+$projectDir = "E:\github\atomic"
 $workerPromptFile = "$projectDir\.opencode\worker-prompt.md"
 $reviewScript = "$projectDir\.opencode\review-pr.ps1"
 $branchName = "auto/" + (Get-Date -Format "yyyyMMdd-HHmmss") + "-$JobId"
-$worktreePath = "E:\github\nimble-wt-$JobId"
+$worktreePath = "E:\github\atomic-wt-$JobId"
 $maxAttempts = 3
 
 function Log($msg) {

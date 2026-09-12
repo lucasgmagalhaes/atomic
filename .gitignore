@@ -26,5 +26,5 @@ graphify-out/
 # shared_memory crate's Windows backing-file marker, dropped in the process's
 # cwd when a shell.exe launched from apps/shell/ actually spawns a profile
 # (see apps/shell/src/browser_view.rs's BrowserView::spawn_with_identity)
-nimble-profile-*
-nimble-shell-*
+atomic-profile-*
+atomic-shell-*

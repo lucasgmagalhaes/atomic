@@ -5,7 +5,7 @@ fn unique_name(tag: &str) -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    format!("nimble-ipc-test-{tag}-{nanos}")
+    format!("atomic-ipc-test-{tag}-{nanos}")
 }
 
 #[test]

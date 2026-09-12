@@ -3,9 +3,9 @@
 
 use shell::chrome_import;
 
-use super::NimbleApp;
+use super::AtomicApp;
 
-impl NimbleApp {
+impl AtomicApp {
     /// The Settings window's "Import History" button - opt-in, explicit,
     /// scoped to whatever pane is currently selected (never automatic,
     /// never every pane at once - see `chrome_import`'s own doc on why).

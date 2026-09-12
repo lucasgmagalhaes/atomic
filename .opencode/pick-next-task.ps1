@@ -1,5 +1,5 @@
 $env:PATH += ";C:\Program Files\GitHub CLI"
-$projectDir = "E:\github\nimble"
+$projectDir = "E:\github\atomic"
 $taskFile = "$projectDir\.opencode\NEXT_TASK.md"
 
 "## Task

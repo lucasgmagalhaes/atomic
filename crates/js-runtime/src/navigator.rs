@@ -72,16 +72,16 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
         ctx,
         navigator,
         "userAgent",
-        "Mozilla/5.0 (Nimble; like Gecko) Nimble/0.1.0",
+        "Mozilla/5.0 (Atomic; like Gecko) Atomic/0.1.0",
     );
     define_readonly_string(
         ctx,
         navigator,
         "appVersion",
-        "5.0 (Nimble; like Gecko) Nimble/0.1.0",
+        "5.0 (Atomic; like Gecko) Atomic/0.1.0",
     );
     define_readonly_string(ctx, navigator, "appName", "Netscape");
-    define_readonly_string(ctx, navigator, "vendor", "Nimble Labs");
+    define_readonly_string(ctx, navigator, "vendor", "Atomic Labs");
 
     // platform — the host OS
     let platform = match std::env::consts::OS {

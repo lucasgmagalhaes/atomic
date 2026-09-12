@@ -218,7 +218,7 @@ unsafe fn write_declaration(dom: *mut dom::Dom, id: dom::NodeId, name: &str, val
 }
 
 unsafe fn style_owner(ctx: *mut sys::JSContext, value: sys::JSValue) -> Option<dom::NodeId> {
-    let name = CString::new("__nimbleStyleOwner").unwrap();
+    let name = CString::new("__atomicStyleOwner").unwrap();
     let owner = sys::JS_GetPropertyStr(ctx, value, name.as_ptr());
     let id = crate::dom_bindings::node_id(ctx, owner);
     sys::JS_FreeValue(ctx, owner);
@@ -457,7 +457,7 @@ unsafe extern "C" fn node_style_get(
     sys::JS_SetPrototype(ctx, object, proto);
     sys::JS_FreeValue(ctx, proto);
 
-    let owner_name = CString::new("__nimbleStyleOwner").unwrap();
+    let owner_name = CString::new("__atomicStyleOwner").unwrap();
     sys::JS_SetPropertyStr(
         ctx,
         object,

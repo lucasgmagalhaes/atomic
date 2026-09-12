@@ -13,8 +13,8 @@ REM .bat with. Pass a second argument to point at a different folder
 REM instead.
 setlocal
 
-REM %~dp0 always ends with a trailing backslash (e.g. "E:\GitHub\nimble\").
-REM Left as-is, wrapping it in quotes ("E:\GitHub\nimble\") makes the
+REM %~dp0 always ends with a trailing backslash (e.g. "E:\GitHub\atomic\").
+REM Left as-is, wrapping it in quotes ("E:\GitHub\atomic\") makes the
 REM trailing backslash escape the closing quote once passed through to
 REM powershell.exe's own argument parsing, corrupting the path it
 REM receives - this strips it first so the quoted argument below is safe.

@@ -5,7 +5,7 @@ use shell::downloads::Downloads;
 
 fn temp_dir(name: &str) -> std::path::PathBuf {
     std::env::temp_dir()
-        .join("nimble-shell-downloads-test")
+        .join("atomic-shell-downloads-test")
         .join(name)
 }
 

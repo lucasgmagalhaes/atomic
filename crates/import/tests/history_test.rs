@@ -4,7 +4,7 @@
 use import::import_history;
 
 fn temp_path(name: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join("nimble-import-test").join(name)
+    std::env::temp_dir().join("atomic-import-test").join(name)
 }
 
 fn write_real_chrome_history_db(path: &std::path::Path) {

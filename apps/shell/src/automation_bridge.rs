@@ -1,9 +1,9 @@
 //! Builds an `automation::AutomationEngine` from a `workspace::WorkspaceManager`
 //! and however many live panes a caller hands it, and runs one script
-//! against it. Pulled out of `main.rs`'s `NimbleApp` deliberately: this
+//! against it. Pulled out of `main.rs`'s `AtomicApp` deliberately: this
 //! logic touches no `egui` type, so it's testable head-on (spawn real
 //! `BrowserView`s, run a real script, assert on the result) without
-//! driving the actual GUI window — `NimbleApp::run_automation_script` is a
+//! driving the actual GUI window — `AtomicApp::run_automation_script` is a
 //! thin wrapper around [`run_script`] plus storing the result for display.
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -44,7 +44,7 @@ pub fn scoped_panes<'p>(
 /// callbacks but the engine is dropped when this returns, so none of them
 /// ever fire. For a script whose scheduled callbacks need to keep firing
 /// across GUI frames, see `main.rs`'s persistent
-/// `NimbleApp::automation_engine` + `tick_automation_engine` instead - this
+/// `AtomicApp::automation_engine` + `tick_automation_engine` instead - this
 /// remains the right tool for a script that's genuinely one-shot (the
 /// context menu's "Run auto login," automation_bridge's own tests).
 ///

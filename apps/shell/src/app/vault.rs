@@ -2,9 +2,9 @@
 
 use shell::vault_ui;
 
-use super::NimbleApp;
+use super::AtomicApp;
 
-impl NimbleApp {
+impl AtomicApp {
     /// Opens the real on-disk vault (`vault_ui::open`) if it isn't open
     /// yet - lazy, so a session that never opens Settings never touches
     /// the filesystem for this. A failure (permissions, corrupted vault

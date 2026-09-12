@@ -8,8 +8,8 @@ fn navigator_user_agent_is_set() {
     assert!(result.is_ok());
     let ua = result.unwrap();
     assert!(
-        ua.contains("Nimble"),
-        "userAgent should contain 'Nimble': {ua}"
+        ua.contains("Atomic"),
+        "userAgent should contain 'Atomic': {ua}"
     );
 }
 

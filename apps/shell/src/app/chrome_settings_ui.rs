@@ -6,12 +6,12 @@
 //! "buttons list, active-highlighted" idiom instead of a dropdown (this
 //! engine's paint pipeline has no popup/`<select>` rendering yet).
 
-use super::NimbleApp;
+use super::AtomicApp;
 
 const CHROME_WIDTH: u32 = 380;
 const CHROME_HEIGHT: u32 = 520;
 
-impl NimbleApp {
+impl AtomicApp {
     pub(super) fn draw_chrome_settings_spike(&mut self, ctx: &egui::Context) {
         if !self.settings_open {
             return;

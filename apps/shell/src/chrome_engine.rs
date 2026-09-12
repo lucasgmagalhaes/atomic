@@ -1,4 +1,4 @@
-//! Spike: one piece of shell chrome (the toolbar) rendered by Nimble's own
+//! Spike: one piece of shell chrome (the toolbar) rendered by Atomic's own
 //! engine instead of egui — proves the Track B architecture (in-process
 //! engine instance, native JS bridge, GPU-buffer compositing) end to end
 //! before the rest of the shell's chrome migrates the same way. Deliberately
@@ -84,7 +84,7 @@ impl<'rt> ChromeEngine<'rt> {
     }
 
     /// Loads a fixed local HTML/CSS/JS bundle (no navigation, no network —
-    /// chrome is not a tab). Registers `globalThis.nimble.*`
+    /// chrome is not a tab). Registers `globalThis.atomic.*`
     /// (`chrome_bridge::register`) before running `js`, so the bundle's own
     /// script can wire button handlers immediately.
     fn new(runtime: &'rt Runtime, html: &str, css_text: &str, js: &str) -> Self {
@@ -124,7 +124,7 @@ impl<'rt> ChromeEngine<'rt> {
     /// today). Getting this check right matters more here than for a real
     /// page: `sync_toolbar_state`/`sync_downloads_history`'s `innerHTML`/
     /// `className` mutations are this chrome surface's *only* way to
-    /// reflect changed `NimbleApp` state, so a cache that never
+    /// reflect changed `AtomicApp` state, so a cache that never
     /// re-validates against `layout_ver` would render the very first frame
     /// forever regardless of what the sync calls do.
     fn layout(&self, width: u32) -> LayoutBox {
@@ -365,15 +365,15 @@ impl<'rt> ChromeEngine<'rt> {
         Some(dom.value(node))
     }
 
-    /// Drains and returns every `nimble.*` action this chrome surface's JS
-    /// queued since the last call — `NimbleApp::update` dispatches each one
+    /// Drains and returns every `atomic.*` action this chrome surface's JS
+    /// queued since the last call — `AtomicApp::update` dispatches each one
     /// into its own real methods.
     pub(crate) fn drain_actions(&self) -> Vec<ChromeAction> {
         chrome_bridge::drain_actions(self.ctx.as_raw())
     }
 
     /// Rewrites the toolbar bundle's `#workspaces`/`#locale` dynamic
-    /// regions to reflect current `NimbleApp` state — same "script mutates
+    /// regions to reflect current `AtomicApp` state — same "script mutates
     /// the DOM, next render picks it up" pattern a real page's own
     /// `setInterval` callback already relies on (see `Page::DEMO_SCRIPT`'s
     /// doc). `#toolbar`'s click listener is attached once at load time via
@@ -424,7 +424,7 @@ impl<'rt> ChromeEngine<'rt> {
     }
 
     /// Rewrites `#error`'s text — used by the add-profile modal to reflect
-    /// `NimbleApp::add_profile_error` every frame (safe to do every frame,
+    /// `AtomicApp::add_profile_error` every frame (safe to do every frame,
     /// unlike [`set_input_values`](Self::set_input_values): this is
     /// read-only display, never something the user is typing into).
     pub(crate) fn set_error_text(&self, text: &str) {
@@ -437,7 +437,7 @@ impl<'rt> ChromeEngine<'rt> {
     /// generalized to a surface with several independent dynamic regions
     /// instead of just one list. `adapters` are display labels in
     /// `render::list_adapters()`'s own order; `selected_adapter`/
-    /// `credential_keys`/`bookmarks` mirror `NimbleApp`'s own state
+    /// `credential_keys`/`bookmarks` mirror `AtomicApp`'s own state
     /// directly so the caller doesn't need to pre-format anything beyond
     /// what it already has.
     #[allow(clippy::too_many_arguments)]
@@ -555,7 +555,7 @@ impl<'rt> Drop for ChromeEngine<'rt> {
     /// for why `Runtime::drop` must evict its own registry entries first:
     /// without this, a later `Context` allocated at the same freed address
     /// could inherit a leftover queued action from this one. Currently
-    /// unreachable in practice (`NimbleApp` leaks every chrome `Runtime` via
+    /// unreachable in practice (`AtomicApp` leaks every chrome `Runtime` via
     /// `Box::leak`, so no `ChromeEngine` is ever actually dropped), but the
     /// bridge shouldn't rely on that staying true.
     fn drop(&mut self) {

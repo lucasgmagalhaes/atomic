@@ -5,7 +5,7 @@ fn temp_dir(tag: &str) -> std::path::PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    std::env::temp_dir().join(format!("nimble-idb-binding-test-{tag}-{nanos}"))
+    std::env::temp_dir().join(format!("atomic-idb-binding-test-{tag}-{nanos}"))
 }
 
 #[test]

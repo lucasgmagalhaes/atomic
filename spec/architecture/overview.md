@@ -2,7 +2,7 @@
 
 ## 1. Goals
 
-Nimble already contains a significant amount of functionality across:
+Atomic already contains a significant amount of functionality across:
 
 - JavaScript execution;
 - DOM;

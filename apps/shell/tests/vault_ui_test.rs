@@ -5,7 +5,7 @@ use shell::vault_ui;
 
 fn temp_dir(name: &str) -> std::path::PathBuf {
     std::env::temp_dir()
-        .join("nimble-shell-vault-test")
+        .join("atomic-shell-vault-test")
         .join(name)
 }
 
@@ -69,7 +69,7 @@ fn open_with_keychain_uses_a_distinct_file_from_the_plain_vault() {
     // Real Windows Credential Manager entry - clean it up so repeated test
     // runs don't accumulate stray credentials in the user's own store
     // (same convention as crates/security's own vault_keychain_test.rs).
-    let target = format!("nimble-vault:{}", dir.join("vault-keychain.enc").display());
+    let target = format!("atomic-vault:{}", dir.join("vault-keychain.enc").display());
     let _ = security::keychain::delete_credential(&target);
     let _ = std::fs::remove_dir_all(&dir);
 }

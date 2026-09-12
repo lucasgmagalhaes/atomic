@@ -375,7 +375,7 @@ unsafe extern "C" fn select_value_set(
 /// Own-property key `setCustomValidity` stashes the message under — kept
 /// on the JS wrapper object itself rather than in Rust-side state, so it
 /// follows object identity for free and dies with it.
-const CUSTOM_VALIDITY_KEY: &str = "__nimbleCustomValidity";
+const CUSTOM_VALIDITY_KEY: &str = "__atomicCustomValidity";
 
 /// Per-spec validity flags this engine can actually compute from DOM
 /// state: `valueMissing` (`required` + empty effective value), `tooShort`

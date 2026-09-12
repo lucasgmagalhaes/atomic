@@ -32,7 +32,7 @@ fn write_text_then_read_text_round_trips_through_the_real_os_clipboard() {
     ctx.eval(
         r#"
         globalThis.seen = null;
-        navigator.clipboard.writeText('nimble-clipboard-test-value')
+        navigator.clipboard.writeText('atomic-clipboard-test-value')
             .then(() => navigator.clipboard.readText())
             .then((t) => { seen = t; });
         "#,
@@ -51,7 +51,7 @@ fn write_text_then_read_text_round_trips_through_the_real_os_clipboard() {
     );
     assert_eq!(
         ctx.eval("seen", "<test>").unwrap(),
-        "nimble-clipboard-test-value"
+        "atomic-clipboard-test-value"
     );
 }
 

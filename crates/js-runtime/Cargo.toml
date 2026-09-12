@@ -20,3 +20,7 @@ criterion = "0.5"
 [[bench]]
 name = "hot_loop"
 harness = false
+
+[[bench]]
+name = "native_bench"
+harness = false

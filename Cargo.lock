@@ -1105,6 +1105,9 @@ dependencies = [
 [[package]]
 name = "css"
 version = "0.1.0"
+dependencies = [
+ "criterion",
+]
 
 [[package]]
 name = "ctr"
@@ -1248,6 +1251,9 @@ dependencies = [
 [[package]]
 name = "dom"
 version = "0.1.0"
+dependencies = [
+ "criterion",
+]
 
 [[package]]
 name = "downcast-rs"

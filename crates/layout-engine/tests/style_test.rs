@@ -243,6 +243,60 @@ fn box_shadow_without_a_color_is_not_set() {
 }
 
 #[test]
+fn z_index_defaults_to_auto() {
+    let sheet = parse_stylesheet("div { width: 10px; }");
+    let style = resolve_style(
+        &matching_declarations(&sheet, &[el("div")], 1024.0, 768.0),
+        16.0,
+        BLACK,
+    );
+    assert_eq!(style.z_index, None);
+}
+
+#[test]
+fn z_index_resolves_a_positive_integer() {
+    let sheet = parse_stylesheet("div { z-index: 5; }");
+    let style = resolve_style(
+        &matching_declarations(&sheet, &[el("div")], 1024.0, 768.0),
+        16.0,
+        BLACK,
+    );
+    assert_eq!(style.z_index, Some(5));
+}
+
+#[test]
+fn z_index_resolves_a_negative_integer() {
+    let sheet = parse_stylesheet("div { z-index: -3; }");
+    let style = resolve_style(
+        &matching_declarations(&sheet, &[el("div")], 1024.0, 768.0),
+        16.0,
+        BLACK,
+    );
+    assert_eq!(style.z_index, Some(-3));
+}
+
+#[test]
+fn z_index_auto_clears_a_previously_cascaded_value() {
+    let sheet = parse_stylesheet("div { z-index: 5; } #a { z-index: auto; }");
+    let style = resolve_style(
+        &matching_declarations(
+            &sheet,
+            &[ElementSnapshot {
+                tag: "div",
+                id: Some("a"),
+                classes: vec![],
+                ..Default::default()
+            }],
+            1024.0,
+            768.0,
+        ),
+        16.0,
+        BLACK,
+    );
+    assert_eq!(style.z_index, None);
+}
+
+#[test]
 fn opacity_defaults_to_fully_opaque() {
     let sheet = parse_stylesheet("div { width: 10px; }");
     let style = resolve_style(

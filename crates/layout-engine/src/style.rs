@@ -324,6 +324,13 @@ pub struct ComputedStyle {
     /// (opaque) is the initial value; values are clamped to `[0.0, 1.0]`
     /// at parse time, matching the spec's own out-of-range clamping.
     pub opacity: f64,
+    /// `None` is `z-index: auto`, the initial value — a box with `auto`
+    /// never itself establishes a stacking context (only `position !=
+    /// Static` *and* an explicit integer together do — see
+    /// `render::display_list`'s paint-order sort, which is the only
+    /// consumer of this field; layout/sizing never reads it). `Some(n)`
+    /// for any parsed integer, negative included.
+    pub z_index: Option<i32>,
 }
 
 impl ComputedStyle {
@@ -368,6 +375,7 @@ impl ComputedStyle {
                 a: 255,
             },
             opacity: 1.0,
+            z_index: None,
         }
     }
 }
@@ -755,6 +763,23 @@ fn apply_declaration(style: &mut ComputedStyle, decl: &Declaration) {
             if let Some(v) = value {
                 style.opacity = v.clamp(0.0, 1.0);
             }
+        }
+        "z-index" => {
+            style.z_index = match decl.value.first() {
+                Some(Token::Ident(v)) if v == "auto" => None,
+                // The lexer never folds a unary minus into `Number` (see
+                // its own `starts_ident` doc) - `-1` tokenizes as
+                // `Delim('-')` then `Number(1.0)`, so a negative z-index
+                // (a real, common value - see `render::display_list`'s
+                // paint-order sort) needs this two-token lookahead, unlike
+                // every other numeric property here.
+                Some(Token::Delim('-')) => match decl.value.get(1) {
+                    Some(Token::Number(n)) => Some(-(*n as i32)),
+                    _ => style.z_index,
+                },
+                Some(Token::Number(n)) => Some(*n as i32),
+                _ => style.z_index,
+            };
         }
         _ => {}
     }

@@ -30,7 +30,47 @@
 //! threads an accumulated `f64` multiplier alongside `clip`, updated to
 //! `parent_opacity * box_.style.opacity` at each box and applied to that
 //! box's own paint primitives' alpha before they're emitted.
-use layout_engine::{BorderStyle, Color, LayoutBox, Overflow, PositionedGlyph};
+use layout_engine::{BorderStyle, Color, LayoutBox, Overflow, Position, PositionedGlyph};
+
+/// Real paint-order sort for one stacking context's immediate `children` —
+/// see `layout_engine::ComputedStyle::z_index`'s own doc for what
+/// "establishes a stacking context" means here (`position != Static &&
+/// z_index.is_some()` — an explicit integer, not `auto`). Three
+/// stable-sorted buckets, painted in this order: stacking-context children
+/// with a negative z-index (most negative first, so it paints furthest
+/// back), then everything else in tree order (non-positioned content and
+/// `z-index: auto` positioned content aren't distinguished from each other
+/// this pass — real CSS gives the latter its own later paint step even
+/// without an explicit z-index; a documented, narrower scope cut, same
+/// spirit as this crate's other "real but not spec-exact" simplifications),
+/// then stacking-context children with a non-negative z-index (least
+/// positive first, so the highest value paints last/on top). Each
+/// `collect_*` walk in this module calls this once per level instead of
+/// iterating `box_.children` directly — the sort is inherently recursive
+/// through the walk itself (a nested stacking context's own children get
+/// reordered independently, inside its own recursive call), so nothing
+/// deeper than "sort my immediate children" is needed here.
+fn paint_order(children: &[LayoutBox]) -> Vec<&LayoutBox> {
+    let establishes_stacking_context =
+        |b: &LayoutBox| b.style.position != Position::Static && b.style.z_index.is_some();
+    let mut behind = Vec::new();
+    let mut normal = Vec::new();
+    let mut front = Vec::new();
+    for child in children {
+        if establishes_stacking_context(child) {
+            if child.style.z_index.unwrap() < 0 {
+                behind.push(child);
+            } else {
+                front.push(child);
+            }
+        } else {
+            normal.push(child);
+        }
+    }
+    behind.sort_by_key(|c| c.style.z_index.unwrap());
+    front.sort_by_key(|c| c.style.z_index.unwrap());
+    behind.into_iter().chain(normal).chain(front).collect()
+}
 
 /// Scales `color`'s alpha channel by `opacity` (`1.0` = unchanged) -
 /// shared by every paint primitive's opacity handling in this module.
@@ -165,7 +205,7 @@ fn collect(box_: &LayoutBox, out: &mut Vec<Rect>, clip: Option<ClipRect>, parent
     } else {
         clip
     };
-    for child in &box_.children {
+    for child in paint_order(&box_.children) {
         collect(child, out, child_clip, opacity);
     }
 }
@@ -324,7 +364,7 @@ fn collect_glyphs(
     } else {
         clip
     };
-    for child in &box_.children {
+    for child in paint_order(&box_.children) {
         collect_glyphs(child, out, child_clip, opacity);
     }
 }
@@ -388,7 +428,7 @@ fn collect_images(
     } else {
         clip
     };
-    for child in &box_.children {
+    for child in paint_order(&box_.children) {
         collect_images(child, out, child_clip, opacity);
     }
 }

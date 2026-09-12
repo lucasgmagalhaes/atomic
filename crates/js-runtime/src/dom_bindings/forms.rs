@@ -9,10 +9,101 @@ use std::os::raw::c_int;
 use quickjs_sys as sys;
 
 use super::collections::html_collection;
-use super::node_registry::{dom_opaque, node_id};
+use super::node_registry::{dom_opaque, node_class_id_for, node_id, node_object};
 use super::scroll_focus::element_scroll_noop;
 use super::selectors::{descendants_matching_tags, matching_by_tag};
 use super::util::{new_js_string, read_js_string, throw_type_error, Getter, Setter};
+
+/// A `<button>`/`<input>`'s real default click action, per spec: `<button>`
+/// defaults to `type="submit"` when the attribute is absent.
+enum ButtonAction {
+    Submit,
+    Reset,
+}
+
+fn default_button_action(dom: &dom::Dom, id: dom::NodeId) -> Option<ButtonAction> {
+    let node = dom.get(id)?;
+    let dom::NodeData::Element {
+        tag, attributes, ..
+    } = &node.data
+    else {
+        return None;
+    };
+    let type_attr = attributes.get("type").map(String::as_str);
+    match tag.as_str() {
+        "button" => match type_attr {
+            None | Some("submit") => Some(ButtonAction::Submit),
+            Some("reset") => Some(ButtonAction::Reset),
+            _ => None,
+        },
+        "input" => match type_attr {
+            Some("submit") => Some(ButtonAction::Submit),
+            Some("reset") => Some(ButtonAction::Reset),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Real default action for an unprevented `"click"` on a submit/reset
+/// button: per spec, it triggers its nearest ancestor `<form>`'s real
+/// `requestSubmit()`/`reset()` — previously neither ever ran on a real
+/// click, only when a script called `form.requestSubmit()`/`.reset()`
+/// itself. Called once per unprevented `"click"` from both
+/// `events::dispatch` and `events::dispatch_existing` — the two real
+/// tree-walking dispatch paths a click on an actual DOM element goes
+/// through (`dispatchEvent("click")` and `dispatchEvent(existingEvent)`
+/// respectively; `dispatch_event_object` is the third, non-tree-walking
+/// path used only for `window`/`document`-shaped targets, which can never
+/// be a button), mirroring how a real browser runs an element's default
+/// action once its event's bubble phase finishes uncanceled. Reaches the
+/// form's real native `form_reset`/`form_request_submit`
+/// functions directly (never `ctx.eval` — see `CLAUDE.md`'s own gotcha
+/// on re-entrant `JS_Eval` from inside a native callback) via the same
+/// `node_object`/`node_class_id_for` real per-`NodeId` JS-object identity
+/// `events::dispatch_at` itself already uses to build a listener's `this`.
+/// A silent no-op if `target` isn't a submit/reset button, or has no
+/// ancestor `<form>` at all (a real, spec-matching outcome — a submit
+/// button outside any form does nothing on click).
+pub(crate) unsafe fn run_default_click_action(ctx: *mut sys::JSContext, target: sys::JSValue) {
+    let Some(id) = node_id(ctx, target) else {
+        return;
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() {
+        return;
+    }
+    let Some(action) = default_button_action(&*dom, id) else {
+        return;
+    };
+
+    let mut current = (*dom).get(id).and_then(|n| n.parent);
+    let form_id = loop {
+        let Some(candidate) = current else {
+            return;
+        };
+        let is_form = matches!(
+            (*dom).get(candidate).map(|n| &n.data),
+            Some(dom::NodeData::Element { tag, .. }) if tag == "form"
+        );
+        if is_form {
+            break candidate;
+        }
+        current = (*dom).get(candidate).and_then(|n| n.parent);
+    };
+
+    let class_id = node_class_id_for(ctx, dom, form_id);
+    let form_obj = node_object(ctx, class_id, form_id);
+    match action {
+        ButtonAction::Submit => {
+            form_request_submit(ctx, form_obj, 0, std::ptr::null_mut());
+        }
+        ButtonAction::Reset => {
+            form_reset(ctx, form_obj, 0, std::ptr::null_mut());
+        }
+    }
+    sys::JS_FreeValue(ctx, form_obj);
+}
 
 /// Defines `HTMLFormElement`-specific properties: `elements` (an
 /// HTMLCollection of this form's controls), real `reset()`/`requestSubmit()`

@@ -61,6 +61,7 @@ mod scroll_focus;
 mod selectors;
 mod util;
 
+pub(crate) use forms::run_default_click_action;
 pub(crate) use node_registry::{cleanup, node_class_id_for, node_id, node_object, parent_node_id};
 
 /// Registers the `Node`/`Element`/`HTMLElement`/HTML-subclass interface

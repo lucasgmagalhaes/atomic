@@ -298,6 +298,13 @@ pub(crate) unsafe fn dispatch(ctx: *mut sys::JSContext, node: sys::JSValue, kind
         sys::JS_Throw(ctx, exception);
         return false;
     }
+    // Real default action (see `dom_bindings::run_default_click_action`'s
+    // own doc) - runs only when nothing canceled the event, same
+    // "preventDefault() suppresses the browser's own subsequent action"
+    // real semantics `canceled` already gates everything else on.
+    if !canceled && kind == "click" {
+        crate::dom_bindings::run_default_click_action(ctx, node);
+    }
     !canceled
 }
 
@@ -331,7 +338,13 @@ unsafe fn dispatch_existing(
         sys::JS_Throw(ctx, exception);
         return false;
     }
-    !(*state(ctx, event)).default_prevented
+    let event_state = state(ctx, event);
+    let canceled = (*event_state).default_prevented;
+    // Real default action - see `dispatch`'s own identical hook for why.
+    if !canceled && (*event_state).event_type == "click" {
+        crate::dom_bindings::run_default_click_action(ctx, node);
+    }
+    !canceled
 }
 
 unsafe extern "C" fn dispatch_event(

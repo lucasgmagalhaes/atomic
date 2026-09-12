@@ -14,7 +14,7 @@ use super::class_list::define_class_list;
 use super::collections::define_selector_methods;
 use super::content::{
     define_default_checked, define_default_value, define_inner_outer_html, define_node_value,
-    define_text_content, define_value,
+    define_selection_properties, define_text_content, define_value,
 };
 use super::dataset::define_dataset;
 use super::forms::{
@@ -68,6 +68,7 @@ unsafe fn ensure_node_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
     define_value(ctx, proto);
     define_default_value(ctx, proto);
     define_default_checked(ctx, proto);
+    define_selection_properties(ctx, proto);
     define_node_value(ctx, proto);
     define_validation_and_labels(ctx, proto);
     define_inner_outer_html(ctx, proto);

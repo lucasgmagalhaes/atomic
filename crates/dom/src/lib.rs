@@ -114,6 +114,16 @@ pub enum NodeData {
         /// no `<textarea>`-shaped fallback to disambiguate from "never
         /// set" the way `value` needs.
         checked: bool,
+        /// Real, independent text-cursor/selection range for `.value`
+        /// (`selectionStart`/`selectionEnd`/`selectionDirection`, the
+        /// `setSelectionRange` method's backing state) — `(0, 0, "none")`
+        /// until either a page script calls `setSelectionRange` or
+        /// `Dom::set_value` moves the cursor to the end of the new text
+        /// (matching a real `<input>`/`<textarea>` resetting its caret on
+        /// a fresh `.value =`). Present on every `Element` for the same
+        /// reason `value`/`checked` are: one generic `Node` JS class, not
+        /// a typed `HTMLInputElement`/`HTMLTextAreaElement` hierarchy.
+        selection: (usize, usize, String),
     },
     Text(String),
     Comment(String),

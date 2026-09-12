@@ -169,14 +169,61 @@ impl Dom {
     /// node.
     pub fn set_value(&mut self, id: NodeId, value: &str) {
         self.mark_dirty(DirtyFlags::DOM);
+        let len = value.chars().count();
         if let Some(Node {
-            data: NodeData::Element {
-                value: value_field, ..
-            },
+            data:
+                NodeData::Element {
+                    value: value_field,
+                    selection,
+                    ..
+                },
             ..
         }) = self.get_mut(id)
         {
             *value_field = Some(value.to_string());
+            // Real caret behavior: a fresh `.value =` moves the cursor to
+            // the end of the new text, same as a real `<input>`/
+            // `<textarea>` — matches `setSelectionRange`'s own clamping
+            // rule rather than leaving a stale range from the old value.
+            *selection = (len, len, "none".to_string());
+        }
+    }
+
+    /// Real `selectionStart`/`selectionEnd`/`selectionDirection` read side
+    /// — `(0, 0, "none")` for a non-`Element` node, matching
+    /// [`Dom::value`]'s own "permissive, returns the empty/default shape"
+    /// convention for a node this doesn't apply to.
+    pub fn selection_range(&self, id: NodeId) -> (usize, usize, String) {
+        match self.get(id).map(|n| &n.data) {
+            Some(NodeData::Element { selection, .. }) => selection.clone(),
+            _ => (0, 0, "none".to_string()),
+        }
+    }
+
+    /// Real `setSelectionRange(start, end, direction)` write side — clamps
+    /// both bounds to `[0, value.chars().count()]` (a real browser clamps
+    /// rather than throwing for an out-of-range index) and, per spec, if
+    /// `start > end` after clamping, collapses to `(end, end)` rather than
+    /// keeping an inverted range. `direction` is stored verbatim (real
+    /// values are `"forward"`/`"backward"`/`"none"`; anything else is
+    /// still accepted since this generic `Node` class doesn't validate
+    /// enum-shaped IDL strings). No-op on a non-`Element` node.
+    pub fn set_selection_range(&mut self, id: NodeId, start: usize, end: usize, direction: &str) {
+        self.mark_dirty(DirtyFlags::DOM);
+        let len = self.value(id).chars().count();
+        let start = start.min(len);
+        let end = end.min(len);
+        let (start, end) = if start > end {
+            (end, end)
+        } else {
+            (start, end)
+        };
+        if let Some(Node {
+            data: NodeData::Element { selection, .. },
+            ..
+        }) = self.get_mut(id)
+        {
+            *selection = (start, end, direction.to_string());
         }
     }
 

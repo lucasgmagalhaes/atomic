@@ -48,6 +48,7 @@ impl Dom {
             attributes: std::collections::HashMap::new(),
             value: None,
             checked: false,
+            selection: (0, 0, "none".to_string()),
         })
     }
 

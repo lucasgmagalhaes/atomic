@@ -1,0 +1,34 @@
+#toolbar {
+  display: flex;
+  align-items: center;
+  padding: 6px;
+}
+
+#label {
+  color: #cccccc;
+  margin-right: 8px;
+}
+
+button {
+  background: #2a2d38;
+  color: #eeeeee;
+  border: 1px solid #3d4152;
+  padding: 4px 10px;
+  margin-right: 6px;
+}
+
+button.ws-active {
+  background: #4a7dfc;
+  border: 1px solid #6f97fd;
+}
+
+/* Real :hover now (see ChromeEngine::update_hover) - a small proof rule
+   here; the full themed hover pass across every bundle is a separate,
+   later change, not this one. */
+button:hover {
+  background: #3a3e4d;
+}
+
+#workspaces {
+  margin-right: 12px;
+}

@@ -15,10 +15,14 @@ impl eframe::App for NimbleApp {
         self.tick_automation_engine();
 
         self.draw_toolbar(ctx);
+        self.draw_chrome_toolbar_spike(ctx);
         self.draw_automation_panel(ctx);
         self.draw_add_profile_modal(ctx);
+        self.draw_chrome_add_profile_spike(ctx);
         self.draw_settings_window(ctx);
+        self.draw_chrome_settings_spike(ctx);
         self.draw_downloads_history_panel(ctx);
+        self.draw_chrome_downloads_history_spike(ctx);
         self.draw_pane_grid(ctx);
     }
 }

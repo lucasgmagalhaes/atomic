@@ -2,6 +2,8 @@
 //! defined in [`app`] — see that module's doc for how it's split.
 
 mod app;
+mod chrome_bridge;
+mod chrome_engine;
 
 use app::NimbleApp;
 

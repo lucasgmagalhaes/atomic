@@ -1,0 +1,56 @@
+#settings {
+  padding: 10px;
+  color: #dddddd;
+}
+
+.section-title {
+  color: #999999;
+  margin: 10px 0 4px 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.row label {
+  width: 140px;
+  color: #aaaaaa;
+}
+
+.row input {
+  background: #1c1e26;
+  color: #eeeeee;
+  border: 1px solid #3d4152;
+  padding: 3px 6px;
+  margin-right: 6px;
+}
+
+button {
+  background: #2a2d38;
+  color: #eeeeee;
+  border: 1px solid #3d4152;
+  padding: 3px 8px;
+  margin-right: 4px;
+}
+
+button.active {
+  background: #4a7dfc;
+  border: 1px solid #6f97fd;
+}
+
+.error {
+  color: #ff6b6b;
+  margin: 4px 0;
+}
+
+#credential-list .row,
+#bookmark-list .row {
+  display: block;
+  padding: 2px 0;
+}
+
+.empty {
+  color: #777777;
+}

@@ -1,0 +1,45 @@
+#modal {
+  padding: 10px;
+  color: #dddddd;
+}
+
+.row {
+  display: flex;
+  margin-bottom: 8px;
+}
+
+.row label {
+  width: 90px;
+  color: #aaaaaa;
+}
+
+.row input {
+  flex: 1;
+  background: #1c1e26;
+  color: #eeeeee;
+  border: 1px solid #3d4152;
+  padding: 3px 6px;
+}
+
+#error {
+  color: #ff6b6b;
+  margin: 6px 0;
+}
+
+#buttons {
+  display: flex;
+  margin-top: 8px;
+}
+
+#buttons button {
+  background: #2a2d38;
+  color: #eeeeee;
+  border: 1px solid #3d4152;
+  padding: 4px 12px;
+  margin-right: 6px;
+}
+
+#create {
+  background: #4a7dfc;
+  border: 1px solid #6f97fd;
+}

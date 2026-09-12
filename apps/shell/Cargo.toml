@@ -16,3 +16,8 @@ security = { path = "../../crates/security" }
 import = { path = "../../crates/import" }
 render = { path = "../../crates/render" }
 storage = { path = "../../crates/storage" }
+dom = { path = "../../crates/dom" }
+html = { path = "../../crates/html" }
+css = { path = "../../crates/css" }
+layout-engine = { path = "../../crates/layout-engine" }
+quickjs-sys = { path = "../../crates/js-runtime/quickjs-sys" }

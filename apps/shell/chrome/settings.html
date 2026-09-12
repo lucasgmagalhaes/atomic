@@ -1,0 +1,49 @@
+<html>
+<head><style></style></head>
+<body>
+  <div id="settings">
+    <div class="section-title">Performance</div>
+    <div class="row"><label>Max live panes</label>
+      <button id="panes-minus">-</button>
+      <span id="panes-value">1</span>
+      <button id="panes-plus">+</button>
+    </div>
+    <div class="row"><label>Cap frame rate</label>
+      <button id="fps-cap-off">Off</button>
+      <button id="fps-cap-on">On</button>
+      <button id="fps-minus">-</button>
+      <span id="fps-value">-</span>
+      <button id="fps-plus">+</button>
+    </div>
+    <div id="error" class="error"></div>
+    <div class="section-title">GPU adapter</div>
+    <div id="adapter-list"></div>
+    <button id="apply-gpu">Apply (respawns all panes)</button>
+
+    <div class="section-title">Credentials</div>
+    <div class="row"><label>Use OS keychain</label>
+      <button id="keychain-off">Off</button>
+      <button id="keychain-on">On</button>
+    </div>
+    <div id="vault-error" class="error"></div>
+    <div class="row">
+      <input id="field-cred-key" type="text" placeholder="key" />
+      <input id="field-cred-value" type="text" placeholder="value" />
+      <button id="add-credential">Add</button>
+    </div>
+    <div id="credential-list"></div>
+
+    <div class="section-title">Import from Chrome</div>
+    <div class="row">
+      <button id="import-history">Import History</button>
+      <button id="import-bookmarks">Import Bookmarks</button>
+      <button id="import-cookies">Import Cookies</button>
+      <button id="import-passwords">Import Passwords</button>
+    </div>
+    <div id="import-result"></div>
+    <div id="bookmark-list"></div>
+
+    <button id="close-settings">Close</button>
+  </div>
+</body>
+</html>

@@ -1,0 +1,42 @@
+#panel {
+  padding: 8px;
+  color: #dddddd;
+}
+
+#download-row {
+  display: flex;
+  margin-bottom: 10px;
+}
+
+#download-url {
+  flex: 1;
+  background: #1c1e26;
+  color: #eeeeee;
+  border: 1px solid #3d4152;
+  padding: 4px 6px;
+  margin-right: 6px;
+}
+
+#download-submit {
+  background: #2a2d38;
+  color: #eeeeee;
+  border: 1px solid #3d4152;
+  padding: 4px 10px;
+}
+
+.section-label {
+  color: #999999;
+  margin-bottom: 4px;
+}
+
+#downloads-section {
+  margin-bottom: 12px;
+}
+
+.row {
+  padding: 2px 0;
+}
+
+.empty {
+  color: #777777;
+}

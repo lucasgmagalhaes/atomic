@@ -47,6 +47,7 @@ impl Dom {
             tag: tag.to_string(),
             attributes: std::collections::HashMap::new(),
             value: None,
+            checked: false,
         })
     }
 

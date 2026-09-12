@@ -82,19 +82,20 @@ unsafe extern "C" fn form_elements_get(
 /// Real `HTMLFormElement.reset()`: dispatches a cancelable `"reset"` event
 /// on the form first (per spec order) and, unless canceled, restores every
 /// `<input>`/`<textarea>` descendant's live `.value` to its `.defaultValue`
-/// (the `value` attribute — see `content::define_default_value`'s doc).
-/// Restoring goes straight through `dom::Dom::set_value`, not the JS
-/// `value` setter (`content::node_value_set`), so it does *not* fire an
-/// `"input"` event per control — matches real `reset()`, which only fires
-/// its own one `"reset"` event, not a cascade of `"input"`s.
+/// (the `value` attribute — see `content::define_default_value`'s doc),
+/// and every checkbox/radio `<input>`'s live `.checked` to its
+/// `.defaultChecked` (the `checked` attribute — see
+/// `content::define_default_checked`'s doc). Restoring goes straight
+/// through `dom::Dom::set_value`/`set_checked`, not the JS `value`/
+/// `checked` setters, so it does *not* fire an `"input"`/`"change"` event
+/// per control — matches real `reset()`, which only fires its own one
+/// `"reset"` event, not a cascade of others.
 ///
-/// Scope cut: `<select>`/checkbox/radio controls aren't touched. This
-/// engine's `.selected`/`.checked` (`attributes.rs`) are still simplified
-/// as *direct* reflection of the `selected`/`checked` attributes (a
-/// pre-existing deviation, not one this pass introduces) — so once script
-/// mutates either, the markup-authored default is already gone with
-/// nothing left to restore from. Giving those controls real independent
-/// default-state storage is a separate, larger follow-up.
+/// Scope cut: `<select>` isn't touched. Its `.selected`
+/// (`attributes.rs`'s `boolean_attribute_get`/`_set`) is still a direct
+/// reflection of the `selected` attribute with no independent
+/// `defaultSelected` storage per `<option>` to restore from — a real,
+/// separate follow-up (per-`<option>` state, not a single control's).
 unsafe extern "C" fn form_reset(
     ctx: *mut sys::JSContext,
     this_val: sys::JSValue,
@@ -112,11 +113,20 @@ unsafe extern "C" fn form_reset(
         return sys::js_undefined();
     }
     for control in descendants_matching_tags(&*dom, id, &["input", "textarea"]) {
-        let default = (*dom)
-            .attribute(control, "value")
-            .unwrap_or_default()
-            .to_string();
-        (*dom).set_value(control, &default);
+        let is_checkable = matches!(
+            (*dom).attribute(control, "type"),
+            Some("checkbox") | Some("radio")
+        );
+        if is_checkable {
+            let default_checked = (*dom).attribute(control, "checked").is_some();
+            (*dom).set_checked(control, default_checked);
+        } else {
+            let default = (*dom)
+                .attribute(control, "value")
+                .unwrap_or_default()
+                .to_string();
+            (*dom).set_value(control, &default);
+        }
     }
     sys::js_undefined()
 }

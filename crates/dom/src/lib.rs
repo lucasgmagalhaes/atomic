@@ -101,6 +101,19 @@ pub enum NodeData {
         /// is a documented deviation exposed generically rather than typed
         /// per element.
         value: Option<String>,
+        /// Real, independent `.checked` — mirrors `value`'s own doc: an
+        /// independently-mutable live property, not just a reflection of
+        /// the `checked` content attribute (that's `.defaultChecked`, see
+        /// `js_runtime::dom_bindings::content`). Always mirrored in from
+        /// `set_attribute`/`remove_attribute` when the `checked` attribute
+        /// changes, same "no dirty-value-flag tracking, matches this
+        /// engine's only real caller (html5ever's tree builder, before any
+        /// script runs)" simplification `value`'s own mirroring already
+        /// documents. `false` — not `Option`, unlike `value` — since a
+        /// boolean attribute's absence unambiguously means `false`, with
+        /// no `<textarea>`-shaped fallback to disambiguate from "never
+        /// set" the way `value` needs.
+        checked: bool,
     },
     Text(String),
     Comment(String),

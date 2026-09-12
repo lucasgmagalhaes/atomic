@@ -38,7 +38,7 @@ Read [architecture/performance.md](architecture/performance.md).
 11. `[ ]` Dirty style propagation (inherited vs non-inherited property changes).
 12. `[~]` DOM mutation batching — achieved as a side effect of `profile-worker`'s once-per-frame render loop (layout only runs when `render()`/`hit_test_at()` is called, not per mutation), not via an explicit `begin/end_mutation_batch` API. Fine for now; revisit if a caller ever needs layout mid-script-turn.
 13. `[ ]` Paint damage tracking (currently whole-frame repaint every render).
-14. `[ ]` JS↔Rust boundary benchmarks — no benchmark suite exists at all yet (see [performance.md §21](architecture/performance.md)).
+14. `[x]` JS↔Rust boundary benchmarks — done (2026-09-12): `crates/dom/benches/dom_bench.rs`, `crates/css/benches/css_bench.rs`, `crates/js-runtime/benches/native_bench.rs` cover [performance.md §21](architecture/performance.md)'s DOM/CSS/JS-native suites (`querySelector`/`innerHTML` excluded — not modeled at the `dom` crate's own level).
 
 ## P2 — High-Impact Compatibility
 

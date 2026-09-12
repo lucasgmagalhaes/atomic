@@ -152,6 +152,52 @@ pub(super) unsafe fn define_default_value(ctx: *mut sys::JSContext, proto: sys::
     );
 }
 
+unsafe extern "C" fn node_default_checked_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_bool(false);
+    };
+    let dom_ptr = dom_opaque(ctx);
+    sys::js_bool(!dom_ptr.is_null() && (*dom_ptr).attribute(id, "checked").is_some())
+}
+
+unsafe extern "C" fn node_default_checked_set(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    val: sys::JSValue,
+) -> sys::JSValue {
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_undefined();
+    };
+    let dom_ptr = dom_opaque(ctx);
+    if !dom_ptr.is_null() {
+        if sys::JS_ToBool(ctx, val) != 0 {
+            (*dom_ptr).set_attribute(id, "checked", "");
+        } else {
+            (*dom_ptr).remove_attribute(id, "checked");
+        }
+    }
+    sys::js_undefined()
+}
+
+/// Defines the `defaultChecked` accessor on `proto` — reflects the
+/// `checked` *content attribute* directly, same relationship
+/// [`define_default_value`]'s own doc describes between `defaultValue`
+/// and `value`: an untouched checkbox/radio's `.checked` starts equal to
+/// `.defaultChecked`, then diverges independently once either is set.
+/// `forms.rs`'s `form_reset` uses this to restore `.checked` on reset.
+pub(super) unsafe fn define_default_checked(ctx: *mut sys::JSContext, proto: sys::JSValue) {
+    define_getter_setter(
+        ctx,
+        proto,
+        "defaultChecked",
+        node_default_checked_get,
+        node_default_checked_set,
+    );
+}
+
 /// Real `Node.prototype.nodeValue` getter — per spec:
 /// - Text / Comment nodes: the text data
 /// - Document / DocumentFragment / Element: `null`

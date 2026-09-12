@@ -351,7 +351,12 @@ fn attributes_collection_is_stable_iterable_and_supports_get_named_item() {
 }
 
 #[test]
-fn form_and_anchor_specific_properties_reflect_boolean_and_href_attributes() {
+fn disabled_reflects_its_attribute_while_checked_is_independent() {
+    // `.disabled` is still a direct attribute reflection (real spec
+    // behavior for that IDL attribute); `.checked` is now independent of
+    // its content attribute, same relationship `.value`/`value` already
+    // has — setting `.checked` must NOT touch the `checked` attribute
+    // (that's `.defaultChecked`'s job, see `content::define_default_checked`).
     let mut d = dom::Dom::new();
     let root = d.root();
     let input = d.create_element("input");
@@ -379,7 +384,7 @@ fn form_and_anchor_specific_properties_reflect_boolean_and_href_attributes() {
         .unwrap();
     assert_eq!(
         result,
-        "false,false,true,true,true,false,false,https://example.com/"
+        "false,false,true,false,true,false,false,https://example.com/"
     );
 }
 

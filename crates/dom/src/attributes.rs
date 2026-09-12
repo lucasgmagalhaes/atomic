@@ -18,6 +18,7 @@ impl Dom {
                 NodeData::Element {
                     attributes,
                     value: value_field,
+                    checked: checked_field,
                     ..
                 },
             ..
@@ -33,6 +34,13 @@ impl Dom {
             // `html::sink`) always runs before any script does.
             if name == "value" {
                 *value_field = Some(value.to_string());
+            }
+            // Same mirroring for `.checked` — a boolean attribute's mere
+            // presence means `true` regardless of its value string (real
+            // HTML semantics for boolean attributes), so any `set_attribute`
+            // call for "checked" sets it, never reads `value`.
+            if name == "checked" {
+                *checked_field = true;
             }
         }
     }
@@ -55,6 +63,7 @@ impl Dom {
                 NodeData::Element {
                     attributes,
                     value: value_field,
+                    checked: checked_field,
                     ..
                 },
             ..
@@ -62,6 +71,9 @@ impl Dom {
         {
             if name == "value" {
                 *value_field = None;
+            }
+            if name == "checked" {
+                *checked_field = false;
             }
             return attributes.remove(name).is_some();
         }
@@ -165,6 +177,33 @@ impl Dom {
         }) = self.get_mut(id)
         {
             *value_field = Some(value.to_string());
+        }
+    }
+
+    /// Real, independent `.checked` read side — mirrors [`Dom::value`]'s
+    /// own doc. `false` for a non-`Element` node.
+    pub fn checked(&self, id: NodeId) -> bool {
+        matches!(
+            self.get(id).map(|n| &n.data),
+            Some(NodeData::Element { checked: true, .. })
+        )
+    }
+
+    /// Real `.checked =` write side — independent of the `checked`
+    /// attribute, same shape [`Dom::set_value`] already has for `.value`.
+    /// No-op on a non-`Element` node.
+    pub fn set_checked(&mut self, id: NodeId, checked: bool) {
+        self.mark_dirty(DirtyFlags::DOM);
+        if let Some(Node {
+            data:
+                NodeData::Element {
+                    checked: checked_field,
+                    ..
+                },
+            ..
+        }) = self.get_mut(id)
+        {
+            *checked_field = checked;
         }
     }
 

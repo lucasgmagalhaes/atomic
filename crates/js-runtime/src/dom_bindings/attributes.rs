@@ -184,18 +184,33 @@ unsafe fn boolean_attribute_set(
     sys::js_undefined()
 }
 
+/// Real, independent `.checked` — see `dom::Dom::checked`'s own doc for
+/// why this diverges from `boolean_attribute_get`'s attribute-reflection
+/// shape (which `.defaultChecked`, `content.rs`, uses instead).
 unsafe extern "C" fn node_checked_get(
     ctx: *mut sys::JSContext,
     this_val: sys::JSValue,
 ) -> sys::JSValue {
-    boolean_attribute_get(ctx, this_val, "checked")
+    let Some(id) = node_id(ctx, this_val) else {
+        return sys::js_bool(false);
+    };
+    let dom = dom_opaque(ctx);
+    sys::js_bool(!dom.is_null() && (*dom).checked(id))
 }
 unsafe extern "C" fn node_checked_set(
     ctx: *mut sys::JSContext,
     this_val: sys::JSValue,
     val: sys::JSValue,
 ) -> sys::JSValue {
-    boolean_attribute_set(ctx, this_val, val, "checked")
+    let Some(id) = node_id(ctx, this_val) else {
+        return throw_type_error(ctx, "attribute target must be a node");
+    };
+    let dom = dom_opaque(ctx);
+    if dom.is_null() || (*dom).get(id).is_none() {
+        return throw_type_error(ctx, "node is no longer attached to this document");
+    }
+    (*dom).set_checked(id, sys::JS_ToBool(ctx, val) != 0);
+    sys::js_undefined()
 }
 unsafe extern "C" fn node_disabled_get(
     ctx: *mut sys::JSContext,

@@ -76,17 +76,37 @@ pub(crate) struct Page<'rt> {
     /// the exact inputs it was computed from. `layout()` reuses it
     /// (a clone — far cheaper than re-running `build_box_tree_with_viewport`
     /// + text shaping/flex resolution + `layout_block` from scratch) when
-    /// none of `width`/`dom.layout_version()`/`adopted_stylesheet_version()`
-    /// have changed since. `RefCell` because `layout()` is called from
-    /// both `&self` methods (`content_height`, `hit_test_at`) and `&mut
-    /// self` ones (`render`) — a shared cache needs interior mutability
-    /// either way. `None` before the first `layout()` call.
+    /// none of `width`/`dom.layout_version()`/`dom.style_version()`/
+    /// `adopted_stylesheet_version()` have changed since. `RefCell` because
+    /// `layout()` is called from both `&self` methods (`content_height`,
+    /// `hit_test_at`) and `&mut self` ones (`render`) — a shared cache
+    /// needs interior mutability either way. `None` before the first
+    /// `layout()` call.
+    ///
+    /// This is also this engine's real "computed style cache"
+    /// (`ROADMAP.md` P1 item 10, `architecture/performance.md` §14.2's
+    /// `(node, stylesheet_version, parent_style_version) -> ComputedStyle`
+    /// shape) — every `LayoutBox` embeds its own resolved `ComputedStyle`,
+    /// so reusing the cached tree *is* reusing cached computed styles,
+    /// not a separate structure. `getComputedStyle`
+    /// (`js_runtime::computed_style`) reads from whatever `render()` last
+    /// pushed via `collect_computed_styles`, which comes straight from
+    /// this cache.
     layout_cache: RefCell<Option<LayoutCache>>,
 }
 
 struct LayoutCache {
     width: u32,
     height: u32,
+    /// `dom::Dom::style_version()` at the time this tree was built — a
+    /// `:hover`/`:focus` change (`Dom::set_hovered`/`focus`/`blur`) bumps
+    /// this without bumping `layout_version` (see `dom::Dom::style_version`'s
+    /// own doc), so it must be a separate cache key: without it, a click
+    /// that only focuses an element (nothing else layout-affecting) would
+    /// keep returning the stale pre-focus tree — a real bug this field
+    /// closes, proven by `crates/profile/tests/profile_test.rs`'s
+    /// `clicking_to_focus_an_input_updates_its_real_computed_focus_style`.
+    style_ver: u64,
     layout_ver: u64,
     adopted_version: u64,
     tree: LayoutBox,
@@ -239,6 +259,12 @@ impl<'rt> Page<'rt> {
         // more precise than `mutation_count()`, which bumps on every
         // mutation including attribute-only changes that don't affect layout.
         let layout_ver = dom.layout_version();
+        // `:hover`/`:focus` change which CSS rules match without ever
+        // setting the LAYOUT dirty flag (see `dom::Dom::style_version`'s
+        // own doc) - `layout_ver` alone can't see that, so this is a
+        // separate, required cache key (see `LayoutCache::style_ver`'s
+        // own doc for the real bug this closes).
+        let style_ver = dom.style_version();
         // Real `document.adoptedStyleSheets` mutation support (see
         // `js_runtime::cssom_stylesheet`): a script's `insertRule`/
         // `deleteRule` doesn't bump `dom.mutation_count()` (it touches a
@@ -250,6 +276,7 @@ impl<'rt> Page<'rt> {
             if cached.width == width
                 && cached.height == height
                 && cached.layout_ver == layout_ver
+                && cached.style_ver == style_ver
                 && cached.adopted_version == adopted_version
             {
                 return Some(cached.tree.clone());
@@ -278,6 +305,7 @@ impl<'rt> Page<'rt> {
             width,
             height,
             layout_ver,
+            style_ver,
             adopted_version,
             tree: tree.clone(),
         });

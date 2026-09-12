@@ -91,6 +91,18 @@ impl NimbleApp {
                     }
                 }
 
+                // Real live :hover — same one-frame-latency tradeoff
+                // `chrome_toolbar_ui.rs` documents for its own hover wiring.
+                let hover_local = response
+                    .hover_pos()
+                    .map(|pos| pos - response.rect.min)
+                    .unwrap_or(egui::Vec2::new(-1.0, -1.0));
+                self.chrome_downloads_history.update_hover(
+                    width,
+                    hover_local.x as f64,
+                    hover_local.y as f64,
+                );
+
                 for action in self.chrome_downloads_history.drain_actions() {
                     // This surface never actually queues one of these
                     // itself (the submit path above handles it directly,

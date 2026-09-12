@@ -202,6 +202,7 @@ impl<'rt> Context<'rt> {
             scroll_y: 0.0,
             viewport_width: 0.0,
             viewport_height: 0.0,
+            pending_navigation: None,
         });
         let raw = state.as_mut() as *mut host_state::HostState as *mut std::os::raw::c_void;
         unsafe {
@@ -484,6 +485,25 @@ impl<'rt> Context<'rt> {
                 Vec::new()
             } else {
                 std::mem::take(&mut (*state).console_messages)
+            }
+        }
+    }
+
+    /// Drains and returns this page's pending `<a href>` click-navigation
+    /// request, if any — see `host_state::HostState::pending_navigation`'s
+    /// own doc. A host calls this after any command that could dispatch a
+    /// real click (`CLICK`/`CLICK_AT`/`EVAL`) and, if `Some`, is expected to
+    /// actually navigate there (fetch, replace the page, reset scroll/
+    /// focus) - this method only reports the request, it doesn't perform
+    /// any navigation itself (this crate has no fetch/host-process layer to
+    /// do that with). `None` on a plain [`Context::new`].
+    pub fn take_pending_navigation(&self) -> Option<String> {
+        unsafe {
+            let state = host_state::get(self.ptr);
+            if state.is_null() {
+                None
+            } else {
+                (*state).pending_navigation.take()
             }
         }
     }

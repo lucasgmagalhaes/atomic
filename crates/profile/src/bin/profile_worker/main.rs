@@ -188,6 +188,61 @@ const FRAME_INTERVAL: Duration = Duration::from_nanos(1_000_000_000 / TARGET_FPS
 /// out-of-range offset observes the corrected value on its very next read
 /// — the host is authoritative, script only requests, same split a real
 /// compositor-driven scroll has.
+/// Checks for and performs a pending `<a href>` click-navigation request
+/// (see `js_runtime::Context::take_pending_navigation`'s own doc) — called
+/// after any command that could dispatch a real click (`CLICK`/`CLICK_AT`/
+/// `EVAL`). This *is* a real navigation, same `fire_before_unload` gate,
+/// `load_source`, and focus/scroll reset `NAVIGATE`'s own handler already
+/// uses — just host-invisible in the sense that no explicit `NAVIGATE`
+/// command triggered it, only an in-page click. A silent no-op if nothing
+/// was requested, the href doesn't resolve to a real `http(s)` URL (see
+/// `page_source::resolve_url`), or `beforeunload` cancels it — the click
+/// itself already succeeded/replied by the time this runs; it only affects
+/// whether a *subsequent* published frame shows a new page.
+#[allow(clippy::too_many_arguments)]
+fn navigate_if_requested<'rt>(
+    page: &mut page::Page<'rt>,
+    current_source: &mut PageSource,
+    runtime: &'rt Runtime,
+    storage_root: &std::path::Path,
+    proxy: Option<&net::ProxyConfig>,
+    dns_server: Option<std::net::SocketAddr>,
+    width: u32,
+    height: u32,
+    renderer: &GpuRenderer,
+    writer: &mut ipc::FrameWriter,
+    focused_id: &mut Option<String>,
+    scroll_top: &mut f64,
+) {
+    let Some(href) = page.ctx.take_pending_navigation() else {
+        return;
+    };
+    let base_url = match &*current_source {
+        PageSource::Demo => None,
+        PageSource::Url(url) => Some(url.as_str()),
+    };
+    let Some(resolved) = page_source::resolve_url(base_url, &href) else {
+        return;
+    };
+    if !page.ctx.fire_before_unload() {
+        return;
+    }
+    *current_source = PageSource::Url(resolved);
+    let (loaded, _error) = load_source(
+        runtime,
+        current_source,
+        width as f64,
+        storage_root,
+        proxy,
+        dns_server,
+    );
+    *page = loaded;
+    *focused_id = None;
+    *scroll_top = 0.0;
+    sync_scroll(page, width, height, scroll_top);
+    writer.publish(&page.render(renderer, width, height, *scroll_top));
+}
+
 fn sync_scroll(page: &mut page::Page, width: u32, height: u32, scroll_top: &mut f64) {
     let requested = page.ctx.scroll_y();
     let max_scroll = (page.content_height(width, height) - height as f64).max(0.0);
@@ -371,6 +426,20 @@ fn main() {
                 let result = dispatch_click(&page.ctx, rest.trim());
                 sync_scroll(&mut page, width, height, &mut scroll_top);
                 writer.publish(&page.render(&renderer, width, height, scroll_top));
+                navigate_if_requested(
+                    &mut page,
+                    &mut current_source,
+                    &runtime,
+                    &storage_root,
+                    proxy.as_ref(),
+                    dns_server,
+                    width,
+                    height,
+                    &renderer,
+                    &mut writer,
+                    &mut focused_id,
+                    &mut scroll_top,
+                );
                 match result {
                     Ok(()) => {
                         let _ = writeln!(stdout, "CLICKED");
@@ -391,6 +460,20 @@ fn main() {
                         let result = dispatch_click_at(&mut page, width, height, x, y, scroll_top);
                         sync_scroll(&mut page, width, height, &mut scroll_top);
                         writer.publish(&page.render(&renderer, width, height, scroll_top));
+                        navigate_if_requested(
+                            &mut page,
+                            &mut current_source,
+                            &runtime,
+                            &storage_root,
+                            proxy.as_ref(),
+                            dns_server,
+                            width,
+                            height,
+                            &renderer,
+                            &mut writer,
+                            &mut focused_id,
+                            &mut scroll_top,
+                        );
                         match result {
                             Ok(focus) => {
                                 focused_id = focus;
@@ -538,6 +621,20 @@ fn main() {
                     let result = page.ctx.eval(script, "<pane eval>");
                     sync_scroll(&mut page, width, height, &mut scroll_top);
                     writer.publish(&page.render(&renderer, width, height, scroll_top));
+                    navigate_if_requested(
+                        &mut page,
+                        &mut current_source,
+                        &runtime,
+                        &storage_root,
+                        proxy.as_ref(),
+                        dns_server,
+                        width,
+                        height,
+                        &renderer,
+                        &mut writer,
+                        &mut focused_id,
+                        &mut scroll_top,
+                    );
                     match result {
                         Ok(value) => {
                             let _ = writeln!(stdout, "EVALUATED {}", value.replace('\n', " "));

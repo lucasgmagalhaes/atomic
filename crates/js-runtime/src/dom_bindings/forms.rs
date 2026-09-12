@@ -45,11 +45,13 @@ fn default_button_action(dom: &dom::Dom, id: dom::NodeId) -> Option<ButtonAction
     }
 }
 
-/// Real default action for an unprevented `"click"` on a submit/reset
-/// button: per spec, it triggers its nearest ancestor `<form>`'s real
-/// `requestSubmit()`/`reset()` — previously neither ever ran on a real
-/// click, only when a script called `form.requestSubmit()`/`.reset()`
-/// itself. Called once per unprevented `"click"` from both
+/// Real default action for an unprevented `"click"`: on a real `<a href>`,
+/// requests navigation (see `host_state::HostState::pending_navigation`'s
+/// own doc); on a submit/reset button, triggers its nearest ancestor
+/// `<form>`'s real `requestSubmit()`/`reset()` — previously neither ever
+/// ran on a real click, only when a script called
+/// `form.requestSubmit()`/`.reset()` itself. Called once per unprevented
+/// `"click"` from both
 /// `events::dispatch` and `events::dispatch_existing` — the two real
 /// tree-walking dispatch paths a click on an actual DOM element goes
 /// through (`dispatchEvent("click")` and `dispatchEvent(existingEvent)`
@@ -73,6 +75,27 @@ pub(crate) unsafe fn run_default_click_action(ctx: *mut sys::JSContext, target: 
     if dom.is_null() {
         return;
     }
+
+    // Real `<a href>` default click action: requests navigation (see
+    // `host_state::HostState::pending_navigation`'s own doc for why this
+    // engine can only *request* it, not perform it — no fetch/host-process
+    // layer reachable from here) rather than triggering a form. Checked
+    // first since an anchor is never also a submit/reset control.
+    if let Some(dom::NodeData::Element {
+        tag, attributes, ..
+    }) = (*dom).get(id).map(|n| &n.data)
+    {
+        if tag == "a" {
+            if let Some(href) = attributes.get("href").filter(|h| !h.is_empty()) {
+                let state = crate::host_state::get(ctx);
+                if !state.is_null() {
+                    (*state).pending_navigation = Some(href.clone());
+                }
+            }
+            return;
+        }
+    }
+
     let Some(action) = default_button_action(&*dom, id) else {
         return;
     };

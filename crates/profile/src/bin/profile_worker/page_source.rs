@@ -248,7 +248,7 @@ pub(crate) fn load_images(
 /// result (e.g. `data:`), a malformed href, or a relative href with no
 /// `base_url` to resolve against (the built-in demo page has no URL of
 /// its own).
-fn resolve_url(base_url: Option<&str>, href: &str) -> Option<String> {
+pub(crate) fn resolve_url(base_url: Option<&str>, href: &str) -> Option<String> {
     let resolved = match base_url {
         Some(base) => url::Url::parse(base).ok()?.join(href).ok()?,
         None => url::Url::parse(href).ok()?,

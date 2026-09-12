@@ -108,6 +108,16 @@ pub(crate) struct HostState {
     /// `set_viewport_size`, same degrade-gracefully pattern as `url`.
     pub viewport_width: f64,
     pub viewport_height: f64,
+    /// Real `<a href>` default-click-action navigation request — set by
+    /// `dom_bindings::run_default_click_action` when an unprevented click
+    /// lands on a real anchor with a non-empty `href`, drained wholesale by
+    /// `Context::take_pending_navigation` (same "host computes/consumes it,
+    /// this field just carries it" shape `console_messages` already has).
+    /// A host (`profile-worker`) that never checks this after a command
+    /// that could dispatch a click just never navigates on an in-page
+    /// anchor click — real, honest degrade, not a crash, matching every
+    /// other field's own convention here.
+    pub pending_navigation: Option<String>,
 }
 
 /// Reads the `HostState` behind `ctx`'s opaque slot, or null if unset

@@ -437,6 +437,41 @@ fn navigate_applies_a_real_style_block_extracted_from_the_fetched_page() {
 }
 
 #[test]
+fn clicking_a_real_anchor_navigates_to_its_href() {
+    let dest_addr = serve_html_once(r#"<div id="marker">arrived</div>"#);
+    let dest_url = format!("http://{dest_addr}/dest");
+    let start_html = format!(r#"<a id="link" href="{dest_url}">go</a>"#);
+    let start_addr = serve_html_once(&start_html);
+    let start_url = format!("http://{start_addr}/");
+
+    let name = unique_shmem_name("anchor-nav");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let result = profile
+        .navigate(&start_url)
+        .expect("protocol should not fail");
+    assert!(result.is_ok(), "navigate should succeed: {result:?}");
+
+    let click_result = profile.click("#link").expect("protocol should not fail");
+    assert!(
+        click_result.is_ok(),
+        "click should succeed: {click_result:?}"
+    );
+
+    let marker = profile
+        .evaluate("document.getElementById('marker') ? document.getElementById('marker').textContent : 'missing'")
+        .expect("protocol should not fail")
+        .expect("script must not throw");
+    assert_eq!(
+        marker, "arrived",
+        "clicking the anchor should have navigated to its real href"
+    );
+
+    profile.quit();
+}
+
+#[test]
 fn navigate_fetches_and_runs_a_real_external_script() {
     let script_addr =
         serve_html_once("document.getElementById('box').textContent = 'ran-from-external';");

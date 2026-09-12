@@ -21,6 +21,12 @@
 //! before every paint) — a page requesting an out-of-range offset here
 //! just sees it corrected on the next read, same "host is authoritative,
 //! script requests" split real compositor-driven scrolling has.
+//!
+//! Also real `innerWidth`/`innerHeight` (`ROADMAP.md` P3 item 23): one-way
+//! reads of `host_state::HostState::viewport_width`/`viewport_height`, set
+//! by `Context::set_viewport_size` whenever a host lays a page out against
+//! a real size. No setter — real `window.innerWidth`/`innerHeight` are
+//! spec-read-only.
 use quickjs_sys as sys;
 use std::ffi::CString;
 use std::os::raw::c_int;
@@ -113,6 +119,32 @@ unsafe extern "C" fn window_scroll_y_get(
     sys::js_float64(get_scroll_y(ctx))
 }
 
+unsafe extern "C" fn window_inner_width_get(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+) -> sys::JSValue {
+    let state = crate::host_state::get(ctx);
+    let width = if state.is_null() {
+        0.0
+    } else {
+        (*state).viewport_width
+    };
+    sys::js_float64(width)
+}
+
+unsafe extern "C" fn window_inner_height_get(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+) -> sys::JSValue {
+    let state = crate::host_state::get(ctx);
+    let height = if state.is_null() {
+        0.0
+    } else {
+        (*state).viewport_height
+    };
+    sys::js_float64(height)
+}
+
 unsafe extern "C" fn window_scroll_to(
     ctx: *mut sys::JSContext,
     _this_val: sys::JSValue,
@@ -152,6 +184,13 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     define_getter(ctx, global, "pageXOffset", window_scroll_x_get as Getter);
     define_getter(ctx, global, "scrollY", window_scroll_y_get as Getter);
     define_getter(ctx, global, "pageYOffset", window_scroll_y_get as Getter);
+    define_getter(ctx, global, "innerWidth", window_inner_width_get as Getter);
+    define_getter(
+        ctx,
+        global,
+        "innerHeight",
+        window_inner_height_get as Getter,
+    );
     for name in ["scroll", "scrollTo"] {
         define_method(ctx, global, name, window_scroll_to, 2);
     }

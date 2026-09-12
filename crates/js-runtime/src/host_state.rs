@@ -98,6 +98,16 @@ pub(crate) struct HostState {
     /// horizontal scroll modeled — `scrollX`/`pageXOffset` always read `0`,
     /// matching `layout-engine`'s own "no horizontal overflow" scope.
     pub scroll_y: f64,
+    /// Real viewport size — backs `window.innerWidth`/`innerHeight` (see
+    /// `crate::window`). One-way, unlike `scroll_y`: only the host writes
+    /// it (`Context::set_viewport_size`, called whenever the host lays a
+    /// page out against a real width/height — `profile-worker`'s initial
+    /// spawn size and, once wired, its `RESIZE` command); no JS-facing
+    /// setter exists because the real properties are spec-read-only.
+    /// `0.0` on a plain `Context::new`/`with_dom` that never calls
+    /// `set_viewport_size`, same degrade-gracefully pattern as `url`.
+    pub viewport_width: f64,
+    pub viewport_height: f64,
 }
 
 /// Reads the `HostState` behind `ctx`'s opaque slot, or null if unset

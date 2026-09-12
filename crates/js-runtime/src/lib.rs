@@ -200,6 +200,8 @@ impl<'rt> Context<'rt> {
             console_messages: Vec::new(),
             permissions_policy: None,
             scroll_y: 0.0,
+            viewport_width: 0.0,
+            viewport_height: 0.0,
         });
         let raw = state.as_mut() as *mut host_state::HostState as *mut std::os::raw::c_void;
         unsafe {
@@ -506,6 +508,38 @@ impl<'rt> Context<'rt> {
     /// (no host state to read from).
     pub fn scroll_y(&self) -> f64 {
         self._host_state.as_ref().map(|s| s.scroll_y).unwrap_or(0.0)
+    }
+
+    /// Sets the real viewport size backing `window.innerWidth`/
+    /// `innerHeight` (see `crate::window` and
+    /// `host_state::HostState::viewport_width`'s own doc). One-way, unlike
+    /// [`Context::set_scroll_y`]: called by the host whenever it lays a
+    /// page out against a real size (initial spawn, or a live resize),
+    /// with no JS-facing setter since the real properties are
+    /// spec-read-only. No-op on a plain [`Context::new`].
+    pub fn set_viewport_size(&mut self, width: f64, height: f64) {
+        if let Some(state) = self._host_state.as_mut() {
+            state.viewport_width = width;
+            state.viewport_height = height;
+        }
+    }
+
+    /// Reads the real viewport width — see [`Context::set_viewport_size`]'s
+    /// doc. `0.0` on a plain [`Context::new`] (no host state to read from).
+    pub fn viewport_width(&self) -> f64 {
+        self._host_state
+            .as_ref()
+            .map(|s| s.viewport_width)
+            .unwrap_or(0.0)
+    }
+
+    /// Reads the real viewport height — see [`Context::set_viewport_size`]'s
+    /// doc.
+    pub fn viewport_height(&self) -> f64 {
+        self._host_state
+            .as_ref()
+            .map(|s| s.viewport_height)
+            .unwrap_or(0.0)
     }
 
     /// Replaces every real layout rect (`getBoundingClientRect`/

@@ -162,6 +162,9 @@ pub enum MediaFeature {
     MinWidth(f64),
     MaxWidth(f64),
     Width(f64),
+    MinHeight(f64),
+    MaxHeight(f64),
+    Height(f64),
 }
 
 /// A parsed `@media` condition: an optional media-type gate plus a set of
@@ -177,12 +180,15 @@ pub struct MediaQuery {
 }
 
 impl MediaQuery {
-    pub fn matches(&self, viewport_width: f64) -> bool {
+    pub fn matches(&self, viewport_width: f64, viewport_height: f64) -> bool {
         self.type_matches
             && self.features.iter().all(|f| match f {
                 MediaFeature::MinWidth(w) => viewport_width >= *w,
                 MediaFeature::MaxWidth(w) => viewport_width <= *w,
                 MediaFeature::Width(w) => (viewport_width - w).abs() < 0.001,
+                MediaFeature::MinHeight(h) => viewport_height >= *h,
+                MediaFeature::MaxHeight(h) => viewport_height <= *h,
+                MediaFeature::Height(h) => (viewport_height - h).abs() < 0.001,
             })
     }
 }
@@ -486,6 +492,9 @@ impl<'a> Parser<'a> {
                         "min-width" => features.push(MediaFeature::MinWidth(value)),
                         "max-width" => features.push(MediaFeature::MaxWidth(value)),
                         "width" => features.push(MediaFeature::Width(value)),
+                        "min-height" => features.push(MediaFeature::MinHeight(value)),
+                        "max-height" => features.push(MediaFeature::MaxHeight(value)),
+                        "height" => features.push(MediaFeature::Height(value)),
                         _ => {}
                     }
                 }

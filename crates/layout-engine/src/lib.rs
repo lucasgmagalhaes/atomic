@@ -19,5 +19,5 @@ pub use text::{
 };
 pub use tree::{
     apply_image_sizes, build_box_tree, build_box_tree_with_viewport, Dimensions, InlineSpanSource,
-    LayoutBox, ResolvedBorder, DEFAULT_VIEWPORT_WIDTH,
+    LayoutBox, ResolvedBorder, DEFAULT_VIEWPORT_HEIGHT, DEFAULT_VIEWPORT_WIDTH,
 };

@@ -64,7 +64,7 @@ fn matching_declarations_orders_by_specificity_then_source() {
          #main { color: green; }",
     );
     let chain = vec![el("div", Some("main"), &["item"])];
-    let matches = matching_declarations(&sheet, &chain, 1024.0);
+    let matches = matching_declarations(&sheet, &chain, 1024.0, 768.0);
 
     assert_eq!(matches.len(), 3);
     // Lowest specificity first: type (0,0,1), class (0,1,0), id (1,0,0).
@@ -80,7 +80,7 @@ fn matching_declarations_orders_by_specificity_then_source() {
 fn matching_declarations_uses_source_order_as_tiebreak() {
     let sheet = parse_stylesheet(".a { color: red; } .b { color: blue; }");
     let chain = vec![el("div", None, &["a", "b"])];
-    let matches = matching_declarations(&sheet, &chain, 1024.0);
+    let matches = matching_declarations(&sheet, &chain, 1024.0, 768.0);
     assert_eq!(matches.len(), 2);
     assert_eq!(matches[0].source_order, 0);
     assert_eq!(matches[1].source_order, 1);
@@ -90,6 +90,6 @@ fn matching_declarations_uses_source_order_as_tiebreak() {
 fn non_matching_rules_are_excluded() {
     let sheet = parse_stylesheet("div {} span {}");
     let chain = vec![el("div", None, &[])];
-    let matches = matching_declarations(&sheet, &chain, 1024.0);
+    let matches = matching_declarations(&sheet, &chain, 1024.0, 768.0);
     assert_eq!(matches.len(), 1);
 }

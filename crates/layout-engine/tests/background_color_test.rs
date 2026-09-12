@@ -10,7 +10,7 @@ fn style_for(css_text: &str) -> layout_engine::ComputedStyle {
         ..Default::default()
     }];
     resolve_style(
-        &matching_declarations(&sheet, &chain, 1024.0),
+        &matching_declarations(&sheet, &chain, 1024.0, 768.0),
         16.0,
         Color {
             r: 0,

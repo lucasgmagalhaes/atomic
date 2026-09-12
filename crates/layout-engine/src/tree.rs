@@ -140,6 +140,7 @@ fn resolve_element_style<'a>(
     attributes: &std::collections::HashMap<String, String>,
     sheet: &Stylesheet,
     viewport_width: f64,
+    viewport_height: f64,
     chain: &mut Vec<ElementSnapshot<'a>>,
     parent_font_size: f64,
     parent_color: Color,
@@ -147,7 +148,7 @@ fn resolve_element_style<'a>(
     let _ = (tag, attributes); // already folded into build_element_snapshot's own dom lookup
     chain.push(build_element_snapshot(dom, node));
     resolve_style(
-        &matching_declarations(sheet, chain, viewport_width),
+        &matching_declarations(sheet, chain, viewport_width, viewport_height),
         parent_font_size,
         parent_color,
     )
@@ -236,6 +237,7 @@ fn collect_inline_spans<'a>(
     node: NodeId,
     sheet: &Stylesheet,
     viewport_width: f64,
+    viewport_height: f64,
     chain: &mut Vec<ElementSnapshot<'a>>,
     parent_font_size: f64,
     parent_color: Color,
@@ -266,6 +268,7 @@ fn collect_inline_spans<'a>(
                 attributes,
                 sheet,
                 viewport_width,
+                viewport_height,
                 chain,
                 parent_font_size,
                 parent_color,
@@ -277,6 +280,7 @@ fn collect_inline_spans<'a>(
                         child,
                         sheet,
                         viewport_width,
+                        viewport_height,
                         chain,
                         style.font_size,
                         style.color,
@@ -302,6 +306,7 @@ fn is_inline_level<'a>(
     node: NodeId,
     sheet: &Stylesheet,
     viewport_width: f64,
+    viewport_height: f64,
     chain: &mut Vec<ElementSnapshot<'a>>,
     parent_font_size: f64,
     parent_color: Color,
@@ -321,6 +326,7 @@ fn is_inline_level<'a>(
                 attributes,
                 sheet,
                 viewport_width,
+                viewport_height,
                 chain,
                 parent_font_size,
                 parent_color,
@@ -344,6 +350,7 @@ fn build_children<'a>(
     child_ids: &[NodeId],
     sheet: &Stylesheet,
     viewport_width: f64,
+    viewport_height: f64,
     chain: &mut Vec<ElementSnapshot<'a>>,
     parent_font_size: f64,
     parent_color: Color,
@@ -364,6 +371,7 @@ fn build_children<'a>(
                     run[0],
                     sheet,
                     viewport_width,
+                    viewport_height,
                     chain,
                     parent_font_size,
                     parent_color,
@@ -383,6 +391,7 @@ fn build_children<'a>(
                 id,
                 sheet,
                 viewport_width,
+                viewport_height,
                 chain,
                 parent_font_size,
                 parent_color,
@@ -422,6 +431,7 @@ fn build_children<'a>(
             child,
             sheet,
             viewport_width,
+            viewport_height,
             chain,
             parent_font_size,
             parent_color,
@@ -434,6 +444,7 @@ fn build_children<'a>(
                 child,
                 sheet,
                 viewport_width,
+                viewport_height,
                 chain,
                 parent_font_size,
                 parent_color,
@@ -452,6 +463,7 @@ fn build<'a>(
     node: NodeId,
     sheet: &Stylesheet,
     viewport_width: f64,
+    viewport_height: f64,
     chain: &mut Vec<ElementSnapshot<'a>>,
     parent_font_size: f64,
     parent_color: Color,
@@ -487,7 +499,7 @@ fn build<'a>(
 
     chain.push(build_element_snapshot(dom, node));
     let style = resolve_style(
-        &matching_declarations(sheet, chain, viewport_width),
+        &matching_declarations(sheet, chain, viewport_width, viewport_height),
         parent_font_size,
         parent_color,
     );
@@ -500,6 +512,7 @@ fn build<'a>(
             &n.children,
             sheet,
             viewport_width,
+            viewport_height,
             chain,
             style.font_size,
             style.color,
@@ -530,19 +543,32 @@ fn build<'a>(
 /// supplied a real one. Prefer [`build_box_tree_with_viewport`] whenever
 /// the caller has a real viewport width on hand.
 pub const DEFAULT_VIEWPORT_WIDTH: f64 = 1280.0;
+/// Paired default for [`build_box_tree`] — see [`DEFAULT_VIEWPORT_WIDTH`]'s
+/// own doc; an arbitrary but plausible desktop-viewport height for any
+/// `@media (min-height: ...)`/`(max-height: ...)` rule when the caller
+/// hasn't supplied a real one.
+pub const DEFAULT_VIEWPORT_HEIGHT: f64 = 800.0;
 
 pub fn build_box_tree(dom: &Dom, node: NodeId, sheet: &Stylesheet) -> Option<LayoutBox> {
-    build_box_tree_with_viewport(dom, node, sheet, DEFAULT_VIEWPORT_WIDTH)
+    build_box_tree_with_viewport(
+        dom,
+        node,
+        sheet,
+        DEFAULT_VIEWPORT_WIDTH,
+        DEFAULT_VIEWPORT_HEIGHT,
+    )
 }
 
 /// Same as [`build_box_tree`], but resolves any `@media (min-width: ...)`/
-/// `(max-width: ...)` conditions in `sheet` against a real `viewport_width`
-/// instead of the arbitrary default.
+/// `(max-width: ...)`/`(min-height: ...)`/`(max-height: ...)` conditions in
+/// `sheet` against a real `viewport_width`/`viewport_height` instead of the
+/// arbitrary defaults.
 pub fn build_box_tree_with_viewport(
     dom: &Dom,
     node: NodeId,
     sheet: &Stylesheet,
     viewport_width: f64,
+    viewport_height: f64,
 ) -> Option<LayoutBox> {
     let mut chain = Vec::new();
     let initial = ComputedStyle::initial();
@@ -551,6 +577,7 @@ pub fn build_box_tree_with_viewport(
         node,
         sheet,
         viewport_width,
+        viewport_height,
         &mut chain,
         initial.font_size,
         initial.color,

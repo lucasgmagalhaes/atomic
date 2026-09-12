@@ -142,8 +142,20 @@ impl<'rt> ChromeEngine<'rt> {
                 return cached.tree.clone();
             }
         }
-        let mut tree = build_box_tree_with_viewport(dom, self.root, &self.sheet, width as f64)
-            .expect("chrome bundle's HTML always produces a box tree");
+        // `layout_engine::DEFAULT_VIEWPORT_HEIGHT`, not this surface's own
+        // fixed `CHROME_HEIGHT` constant: `ChromeEngine::layout` only
+        // takes `width` (see this method's own cache key) - no chrome
+        // bundle uses a height-based `@media` rule today, so plumbing the
+        // real per-surface height through here has no observable effect
+        // yet and isn't worth the ripple until one does.
+        let mut tree = build_box_tree_with_viewport(
+            dom,
+            self.root,
+            &self.sheet,
+            width as f64,
+            layout_engine::DEFAULT_VIEWPORT_HEIGHT,
+        )
+        .expect("chrome bundle's HTML always produces a box tree");
         layout_block(&mut tree, width as f64, 0.0, 0.0);
         *self.layout_cache.borrow_mut() = Some(LayoutCache {
             width,

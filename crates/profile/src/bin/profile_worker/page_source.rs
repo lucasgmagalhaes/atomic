@@ -233,7 +233,11 @@ fn merge_stylesheet_text(
         let should_fetch = import
             .media
             .as_ref()
-            .map(|m| m.matches(viewport_width))
+            // `DEFAULT_VIEWPORT_HEIGHT` placeholder — see the same note on
+            // `Page::layout`'s own call into `build_box_tree_with_viewport`
+            // in `page.rs`; this function isn't threaded a real height
+            // either today.
+            .map(|m| m.matches(viewport_width, layout_engine::DEFAULT_VIEWPORT_HEIGHT))
             .unwrap_or(true);
         if !should_fetch {
             continue;

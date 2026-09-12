@@ -21,7 +21,7 @@ fn el(tag: &str) -> ElementSnapshot<'_> {
 fn border_radius_defaults_to_zero() {
     let sheet = parse_stylesheet("div { width: 10px; }");
     let style = resolve_style(
-        &matching_declarations(&sheet, &[el("div")], 1024.0),
+        &matching_declarations(&sheet, &[el("div")], 1024.0, 768.0),
         16.0,
         BLACK,
     );
@@ -32,7 +32,7 @@ fn border_radius_defaults_to_zero() {
 fn border_radius_length_value_is_stored() {
     let sheet = parse_stylesheet("div { border-radius: 12px; }");
     let style = resolve_style(
-        &matching_declarations(&sheet, &[el("div")], 1024.0),
+        &matching_declarations(&sheet, &[el("div")], 1024.0, 768.0),
         16.0,
         BLACK,
     );
@@ -52,6 +52,7 @@ fn border_radius_zero_clears_a_previously_cascaded_value() {
                 ..Default::default()
             }],
             1024.0,
+            768.0,
         ),
         16.0,
         BLACK,

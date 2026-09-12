@@ -12,9 +12,52 @@ fn media_min_width_rule_only_applies_at_or_above_the_breakpoint() {
     let sheet = parse_stylesheet("@media (min-width: 600px) { div { color: red; } }");
     let chain = [el("div")];
 
-    assert!(matching_declarations(&sheet, &chain, 599.0).is_empty());
-    assert_eq!(matching_declarations(&sheet, &chain, 600.0).len(), 1);
-    assert_eq!(matching_declarations(&sheet, &chain, 1200.0).len(), 1);
+    assert!(matching_declarations(&sheet, &chain, 599.0, 768.0).is_empty());
+    assert_eq!(matching_declarations(&sheet, &chain, 600.0, 768.0).len(), 1);
+    assert_eq!(
+        matching_declarations(&sheet, &chain, 1200.0, 768.0).len(),
+        1
+    );
+}
+
+#[test]
+fn media_min_height_rule_only_applies_at_or_above_the_breakpoint() {
+    let sheet = parse_stylesheet("@media (min-height: 600px) { div { color: red; } }");
+    let chain = [el("div")];
+
+    assert!(matching_declarations(&sheet, &chain, 1024.0, 599.0).is_empty());
+    assert_eq!(
+        matching_declarations(&sheet, &chain, 1024.0, 600.0).len(),
+        1
+    );
+    assert_eq!(
+        matching_declarations(&sheet, &chain, 1024.0, 1200.0).len(),
+        1
+    );
+}
+
+#[test]
+fn media_max_height_rule_only_applies_at_or_below_the_breakpoint() {
+    let sheet = parse_stylesheet("@media (max-height: 600px) { div { color: blue; } }");
+    let chain = [el("div")];
+
+    assert_eq!(
+        matching_declarations(&sheet, &chain, 1024.0, 600.0).len(),
+        1
+    );
+    assert!(matching_declarations(&sheet, &chain, 1024.0, 601.0).is_empty());
+}
+
+#[test]
+fn media_exact_height_rule_only_applies_at_the_exact_value() {
+    let sheet = parse_stylesheet("@media (height: 768px) { div { color: green; } }");
+    let chain = [el("div")];
+
+    assert_eq!(
+        matching_declarations(&sheet, &chain, 1024.0, 768.0).len(),
+        1
+    );
+    assert!(matching_declarations(&sheet, &chain, 1024.0, 767.0).is_empty());
 }
 
 #[test]
@@ -22,8 +65,8 @@ fn media_max_width_rule_only_applies_at_or_below_the_breakpoint() {
     let sheet = parse_stylesheet("@media (max-width: 600px) { div { color: blue; } }");
     let chain = [el("div")];
 
-    assert_eq!(matching_declarations(&sheet, &chain, 600.0).len(), 1);
-    assert!(matching_declarations(&sheet, &chain, 601.0).is_empty());
+    assert_eq!(matching_declarations(&sheet, &chain, 600.0, 768.0).len(), 1);
+    assert!(matching_declarations(&sheet, &chain, 601.0, 768.0).is_empty());
 }
 
 #[test]
@@ -33,10 +76,10 @@ fn media_query_combines_min_and_max_with_and() {
     );
     let chain = [el("div")];
 
-    assert!(matching_declarations(&sheet, &chain, 399.0).is_empty());
-    assert_eq!(matching_declarations(&sheet, &chain, 400.0).len(), 1);
-    assert_eq!(matching_declarations(&sheet, &chain, 800.0).len(), 1);
-    assert!(matching_declarations(&sheet, &chain, 801.0).is_empty());
+    assert!(matching_declarations(&sheet, &chain, 399.0, 768.0).is_empty());
+    assert_eq!(matching_declarations(&sheet, &chain, 400.0, 768.0).len(), 1);
+    assert_eq!(matching_declarations(&sheet, &chain, 800.0, 768.0).len(), 1);
+    assert!(matching_declarations(&sheet, &chain, 801.0, 768.0).is_empty());
 }
 
 #[test]
@@ -46,10 +89,13 @@ fn media_type_screen_and_all_match_but_print_never_does() {
     let print = parse_stylesheet("@media print { div { color: red; } }");
     let chain = [el("div")];
 
-    assert_eq!(matching_declarations(&screen, &chain, 1024.0).len(), 1);
-    assert_eq!(matching_declarations(&all, &chain, 1024.0).len(), 1);
+    assert_eq!(
+        matching_declarations(&screen, &chain, 1024.0, 768.0).len(),
+        1
+    );
+    assert_eq!(matching_declarations(&all, &chain, 1024.0, 768.0).len(), 1);
     assert!(
-        matching_declarations(&print, &chain, 1024.0).is_empty(),
+        matching_declarations(&print, &chain, 1024.0, 768.0).is_empty(),
         "this engine never renders print, so @media print should never match"
     );
 }
@@ -62,7 +108,7 @@ fn rules_outside_any_media_block_are_unaffected() {
     let chain = [el("div")];
 
     // Only the unconditional rule should match at a narrow viewport.
-    assert_eq!(matching_declarations(&sheet, &chain, 100.0).len(), 1);
+    assert_eq!(matching_declarations(&sheet, &chain, 100.0, 768.0).len(), 1);
 }
 
 #[test]
@@ -85,8 +131,8 @@ fn import_with_a_trailing_media_query_is_collected() {
     let sheet = parse_stylesheet(r#"@import "wide.css" screen and (min-width: 600px);"#);
     assert_eq!(sheet.imports.len(), 1);
     let media = sheet.imports[0].media.as_ref().unwrap();
-    assert!(media.matches(600.0));
-    assert!(!media.matches(599.0));
+    assert!(media.matches(600.0, 768.0));
+    assert!(!media.matches(599.0, 768.0));
 }
 
 #[test]

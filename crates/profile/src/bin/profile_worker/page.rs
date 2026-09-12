@@ -259,7 +259,19 @@ impl<'rt> Page<'rt> {
             merged.rules.extend(parse_stylesheet(&adopted_text).rules);
             std::borrow::Cow::Owned(merged)
         };
-        let mut tree = build_box_tree_with_viewport(dom, self.html_el, &sheet, width as f64)?;
+        // `DEFAULT_VIEWPORT_HEIGHT` here, not the real per-process height:
+        // `Page::layout` isn't threaded a height today (only `width`, see
+        // this method's own cache key) - real height-aware `@media
+        // (min-height: ...)` for profile pages waits on the live `RESIZE`
+        // work (`ROADMAP.md` P3 item 23's other half), which is what
+        // actually needs to plumb a real height in here.
+        let mut tree = build_box_tree_with_viewport(
+            dom,
+            self.html_el,
+            &sheet,
+            width as f64,
+            layout_engine::DEFAULT_VIEWPORT_HEIGHT,
+        )?;
         apply_image_sizes(dom, &mut tree, &self.images);
         layout_block(&mut tree, width as f64, 0.0, 0.0);
 

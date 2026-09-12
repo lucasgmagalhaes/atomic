@@ -21,7 +21,7 @@ fn el(tag: &str) -> ElementSnapshot<'_> {
 fn resolves_to_initial_values_when_nothing_matches() {
     let sheet = parse_stylesheet("span { color: red; }");
     let chain = vec![el("div")];
-    let matched = matching_declarations(&sheet, &chain, 1024.0);
+    let matched = matching_declarations(&sheet, &chain, 1024.0, 768.0);
     let style = resolve_style(&matched, 16.0, BLACK);
 
     assert_eq!(style.display, Display::Block);
@@ -34,7 +34,7 @@ fn resolves_to_initial_values_when_nothing_matches() {
 fn resolves_width_height_and_display() {
     let sheet = parse_stylesheet("div { width: 100px; height: 50%; display: inline; }");
     let chain = vec![el("div")];
-    let matched = matching_declarations(&sheet, &chain, 1024.0);
+    let matched = matching_declarations(&sheet, &chain, 1024.0, 768.0);
     let style = resolve_style(&matched, 16.0, BLACK);
 
     assert_eq!(style.width, Length::Px(100.0));
@@ -46,7 +46,7 @@ fn resolves_width_height_and_display() {
 fn resolves_margin_shorthand_one_value() {
     let sheet = parse_stylesheet("div { margin: 10px; }");
     let style = resolve_style(
-        &matching_declarations(&sheet, &[el("div")], 1024.0),
+        &matching_declarations(&sheet, &[el("div")], 1024.0, 768.0),
         16.0,
         BLACK,
     );
@@ -60,7 +60,7 @@ fn resolves_margin_shorthand_one_value() {
 fn resolves_margin_shorthand_four_values() {
     let sheet = parse_stylesheet("div { margin: 1px 2px 3px 4px; }");
     let style = resolve_style(
-        &matching_declarations(&sheet, &[el("div")], 1024.0),
+        &matching_declarations(&sheet, &[el("div")], 1024.0, 768.0),
         16.0,
         BLACK,
     );
@@ -74,7 +74,7 @@ fn resolves_margin_shorthand_four_values() {
 fn longhand_overrides_shorthand_when_cascaded_later() {
     let sheet = parse_stylesheet("div { margin: 10px; margin-left: 99px; }");
     let style = resolve_style(
-        &matching_declarations(&sheet, &[el("div")], 1024.0),
+        &matching_declarations(&sheet, &[el("div")], 1024.0, 768.0),
         16.0,
         BLACK,
     );
@@ -91,7 +91,11 @@ fn higher_specificity_wins_the_cascade() {
         classes: vec![],
         ..Default::default()
     }];
-    let style = resolve_style(&matching_declarations(&sheet, &chain, 1024.0), 16.0, BLACK);
+    let style = resolve_style(
+        &matching_declarations(&sheet, &chain, 1024.0, 768.0),
+        16.0,
+        BLACK,
+    );
     assert_eq!(style.width, Length::Px(20.0));
 }
 
@@ -99,7 +103,7 @@ fn higher_specificity_wins_the_cascade() {
 fn unitless_zero_is_a_valid_length() {
     let sheet = parse_stylesheet("div { margin: 0; }");
     let style = resolve_style(
-        &matching_declarations(&sheet, &[el("div")], 1024.0),
+        &matching_declarations(&sheet, &[el("div")], 1024.0, 768.0),
         16.0,
         BLACK,
     );
@@ -110,7 +114,7 @@ fn unitless_zero_is_a_valid_length() {
 fn overflow_defaults_to_visible() {
     let sheet = parse_stylesheet("div { width: 10px; }");
     let style = resolve_style(
-        &matching_declarations(&sheet, &[el("div")], 1024.0),
+        &matching_declarations(&sheet, &[el("div")], 1024.0, 768.0),
         16.0,
         BLACK,
     );
@@ -122,7 +126,7 @@ fn overflow_hidden_auto_and_scroll_all_resolve_to_hidden() {
     for value in ["hidden", "auto", "scroll"] {
         let sheet = parse_stylesheet(&format!("div {{ overflow: {value}; }}"));
         let style = resolve_style(
-            &matching_declarations(&sheet, &[el("div")], 1024.0),
+            &matching_declarations(&sheet, &[el("div")], 1024.0, 768.0),
             16.0,
             BLACK,
         );
@@ -138,7 +142,7 @@ fn overflow_hidden_auto_and_scroll_all_resolve_to_hidden() {
 fn overflow_visible_resolves_to_visible() {
     let sheet = parse_stylesheet("div { overflow: visible; }");
     let style = resolve_style(
-        &matching_declarations(&sheet, &[el("div")], 1024.0),
+        &matching_declarations(&sheet, &[el("div")], 1024.0, 768.0),
         16.0,
         BLACK,
     );
@@ -149,7 +153,7 @@ fn overflow_visible_resolves_to_visible() {
 fn box_shadow_defaults_to_none() {
     let sheet = parse_stylesheet("div { width: 10px; }");
     let style = resolve_style(
-        &matching_declarations(&sheet, &[el("div")], 1024.0),
+        &matching_declarations(&sheet, &[el("div")], 1024.0, 768.0),
         16.0,
         BLACK,
     );
@@ -160,7 +164,7 @@ fn box_shadow_defaults_to_none() {
 fn box_shadow_two_value_form_is_offset_only_with_a_color() {
     let sheet = parse_stylesheet("div { box-shadow: 5px 10px red; }");
     let style = resolve_style(
-        &matching_declarations(&sheet, &[el("div")], 1024.0),
+        &matching_declarations(&sheet, &[el("div")], 1024.0, 768.0),
         16.0,
         BLACK,
     );
@@ -186,7 +190,7 @@ fn box_shadow_four_value_form_skips_blur_and_keeps_spread() {
     // is parsed (so it isn't mistaken for spread) but not stored.
     let sheet = parse_stylesheet("div { box-shadow: 2px 3px 10px 4px #00ff00; }");
     let style = resolve_style(
-        &matching_declarations(&sheet, &[el("div")], 1024.0),
+        &matching_declarations(&sheet, &[el("div")], 1024.0, 768.0),
         16.0,
         BLACK,
     );
@@ -219,6 +223,7 @@ fn box_shadow_none_clears_a_previously_cascaded_shadow() {
                 ..Default::default()
             }],
             1024.0,
+            768.0,
         ),
         16.0,
         BLACK,
@@ -230,7 +235,7 @@ fn box_shadow_none_clears_a_previously_cascaded_shadow() {
 fn box_shadow_without_a_color_is_not_set() {
     let sheet = parse_stylesheet("div { box-shadow: 5px 5px; }");
     let style = resolve_style(
-        &matching_declarations(&sheet, &[el("div")], 1024.0),
+        &matching_declarations(&sheet, &[el("div")], 1024.0, 768.0),
         16.0,
         BLACK,
     );
@@ -241,7 +246,7 @@ fn box_shadow_without_a_color_is_not_set() {
 fn opacity_defaults_to_fully_opaque() {
     let sheet = parse_stylesheet("div { width: 10px; }");
     let style = resolve_style(
-        &matching_declarations(&sheet, &[el("div")], 1024.0),
+        &matching_declarations(&sheet, &[el("div")], 1024.0, 768.0),
         16.0,
         BLACK,
     );
@@ -252,7 +257,7 @@ fn opacity_defaults_to_fully_opaque() {
 fn opacity_resolves_a_plain_number() {
     let sheet = parse_stylesheet("div { opacity: 0.5; }");
     let style = resolve_style(
-        &matching_declarations(&sheet, &[el("div")], 1024.0),
+        &matching_declarations(&sheet, &[el("div")], 1024.0, 768.0),
         16.0,
         BLACK,
     );
@@ -263,7 +268,7 @@ fn opacity_resolves_a_plain_number() {
 fn opacity_resolves_a_percentage() {
     let sheet = parse_stylesheet("div { opacity: 25%; }");
     let style = resolve_style(
-        &matching_declarations(&sheet, &[el("div")], 1024.0),
+        &matching_declarations(&sheet, &[el("div")], 1024.0, 768.0),
         16.0,
         BLACK,
     );
@@ -280,7 +285,7 @@ fn opacity_above_one_is_clamped_to_one() {
     // the first place for this property today.
     let sheet = parse_stylesheet("div { opacity: 2; }");
     let style = resolve_style(
-        &matching_declarations(&sheet, &[el("div")], 1024.0),
+        &matching_declarations(&sheet, &[el("div")], 1024.0, 768.0),
         16.0,
         BLACK,
     );
@@ -288,7 +293,7 @@ fn opacity_above_one_is_clamped_to_one() {
 
     let sheet = parse_stylesheet("div { opacity: 150%; }");
     let style = resolve_style(
-        &matching_declarations(&sheet, &[el("div")], 1024.0),
+        &matching_declarations(&sheet, &[el("div")], 1024.0, 768.0),
         16.0,
         BLACK,
     );

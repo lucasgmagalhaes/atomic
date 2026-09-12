@@ -172,21 +172,22 @@ pub struct MatchedDeclarations<'a> {
 }
 
 /// Every declaration block whose selector matches `chain` *and* whose
-/// `@media` condition (if any) matches `viewport_width`, ordered
-/// lowest-to-highest cascade priority (specificity, then source order) —
-/// apply in this order and let later ones overwrite earlier ones per
-/// property to get the correct cascaded result. A rule inside an `@media`
-/// block that doesn't match `viewport_width` is skipped before selector
-/// matching even runs, same as a real engine's media-query gate.
+/// `@media` condition (if any) matches `viewport_width`/`viewport_height`,
+/// ordered lowest-to-highest cascade priority (specificity, then source
+/// order) — apply in this order and let later ones overwrite earlier ones
+/// per property to get the correct cascaded result. A rule inside an
+/// `@media` block that doesn't match is skipped before selector matching
+/// even runs, same as a real engine's media-query gate.
 pub fn matching_declarations<'a>(
     sheet: &'a Stylesheet,
     chain: &[ElementSnapshot],
     viewport_width: f64,
+    viewport_height: f64,
 ) -> Vec<MatchedDeclarations<'a>> {
     let mut matches = Vec::new();
     for (order, rule) in sheet.rules.iter().enumerate() {
         if let Some(media) = &rule.media {
-            if !media.matches(viewport_width) {
+            if !media.matches(viewport_width, viewport_height) {
                 continue;
             }
         }

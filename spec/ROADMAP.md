@@ -33,7 +33,7 @@ Read [architecture/primitives.md](architecture/primitives.md) for all of these.
 Read [architecture/performance.md](architecture/performance.md).
 
 8. `[ ]` String interning / Atoms for tags, attributes, CSS properties.
-9. `[ ]` Selector matching cache.
+9. `[x]` Selector matching cache — done (2026-09-12): `css::SelectorIndex`/`build_selector_index`/`matching_declarations_indexed` bucket every selector by its rightmost compound's most selective simple selector (id > class > tag > universal catch-all) — the same rule-set bucketing real browser engines use — so an element only checks its own id/class/tag buckets instead of the whole stylesheet. `layout_engine::tree` builds one index per `build_box_tree` call and threads it through every internal recursive helper, replacing `matching_declarations` with the indexed call. `crates/css/benches/css_bench.rs`'s new comparison shows ~5.5x/~23x speedups at 100/500 rules. See [matrix/css-layout.md](matrix/css-layout.md).
 10. `[~]` Computed style cache — `getComputedStyle` exists (point-in-time snapshot, correct but not cached/incremental); the layout cache (P0 item 3) covers layout, not style specifically.
 11. `[ ]` Dirty style propagation (inherited vs non-inherited property changes).
 12. `[~]` DOM mutation batching — achieved as a side effect of `profile-worker`'s once-per-frame render loop (layout only runs when `render()`/`hit_test_at()` is called, not per mutation), not via an explicit `begin/end_mutation_batch` API. Fine for now; revisit if a caller ever needs layout mid-script-turn.

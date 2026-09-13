@@ -133,6 +133,7 @@ impl<'rt> Page<'rt> {
             sheet,
             images,
             layout_cache: std::cell::RefCell::new(None),
+            paint_cache: std::cell::RefCell::new(None),
         }
     }
 }

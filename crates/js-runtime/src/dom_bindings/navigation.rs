@@ -119,7 +119,8 @@ unsafe extern "C" fn node_type_get(
             dom::NodeData::Element { .. } => 1.0,
             dom::NodeData::Text(_) => 3.0,
             dom::NodeData::Comment(_) => 8.0,
-            dom::NodeData::DocumentFragment => 11.0,
+            // Real spec: ShadowRoot extends DocumentFragment, same nodeType.
+            dom::NodeData::DocumentFragment | dom::NodeData::ShadowRoot { .. } => 11.0,
         })
     };
     value.map(sys::js_float64).unwrap_or_else(sys::js_undefined)
@@ -141,7 +142,9 @@ unsafe extern "C" fn node_name_get(
             dom::NodeData::Element { tag, .. } => tag.to_ascii_uppercase(),
             dom::NodeData::Text(_) => "#text".to_owned(),
             dom::NodeData::Comment(_) => "#comment".to_owned(),
-            dom::NodeData::DocumentFragment => "#document-fragment".to_owned(),
+            dom::NodeData::DocumentFragment | dom::NodeData::ShadowRoot { .. } => {
+                "#document-fragment".to_owned()
+            }
         })
     };
     name.map(|name| new_js_string(ctx, &name))

@@ -24,6 +24,7 @@ mod hover;
 mod mutation;
 mod query;
 mod serialize;
+mod shadow;
 
 /// Classifies which subsystems need recomputation after a DOM mutation.
 /// Each flag corresponds to a downstream consumer that can skip work when
@@ -132,10 +133,39 @@ pub enum NodeData {
         /// `set_attribute`/`remove_attribute` when the `selected`
         /// attribute changes, same as `checked`.
         selected: bool,
+        /// This element's attached shadow root, if any (`ROADMAP.md` item
+        /// 38) — `Some` after a real `attachShadow()` call, `None`
+        /// otherwise and on every freshly created/cloned element (real
+        /// spec: cloning a host does not clone its shadow tree). The
+        /// `ShadowRoot` node itself lives in the same arena, `.parent`-
+        /// linked to this element (so `is_connected`/`contains` walk
+        /// through it naturally), but is deliberately *not* pushed into
+        /// this element's own `children` — a real light-DOM traversal
+        /// (`childNodes`/`children`) never sees a shadow root. See
+        /// [`Dom::attach_shadow`].
+        shadow_root: Option<NodeId>,
     },
     Text(String),
     Comment(String),
     DocumentFragment,
+    /// A real shadow root (`ROADMAP.md` item 38) — see
+    /// [`Dom::attach_shadow`]. Scope cut: no render/layout integration
+    /// (this engine's `layout-engine` walks light-DOM `children` only, so
+    /// a shadow tree's content doesn't visually replace its host's), no
+    /// `<slot>` content projection, and `mode: Closed` only hides
+    /// `.shadowRoot` from script — nothing in this crate enforces the
+    /// stronger "unreachable except via a reference captured at
+    /// `attachShadow` time" isolation a real closed shadow root has,
+    /// since no API here would let a caller reach it another way anyway.
+    ShadowRoot {
+        mode: ShadowRootMode,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShadowRootMode {
+    Open,
+    Closed,
 }
 
 #[derive(Debug, Clone)]

@@ -283,6 +283,16 @@ impl<'rt> Context<'rt> {
         unsafe { window_registry::open_window(self.ptr) }
     }
 
+    /// The child window an `<iframe>` (`id`) exposes via `.contentWindow`
+    /// (`ROADMAP.md` item 35) — opens one on first call, same as the
+    /// JS-facing getter, and returns the same `WindowId` on every later
+    /// call for the same `id`. A host/test-facing Rust-level entry point
+    /// alongside the JS one, same shape [`Context::open_window`] already
+    /// has for `window.open()`.
+    pub fn window_id_for_iframe(&self, id: dom::NodeId) -> window_registry::WindowId {
+        unsafe { window_registry::window_for_iframe(self.ptr, id) }
+    }
+
     /// Sends `js_expr`'s evaluated result (cloned via the same
     /// context-independent `storage::value::Value` bridge `structuredClone`
     /// uses) to window `to`'s inbox, delivered on that window's own
@@ -384,8 +394,9 @@ impl<'rt> Context<'rt> {
 
 impl Drop for Context<'_> {
     fn drop(&mut self) {
+        unsafe { window_registry::close_children_of(self.ptr) };
+        unsafe { window_registry::cleanup_remote_window_cache(self.ptr) };
         if let Some(id) = self.window_id() {
-            unsafe { window_registry::close_children_of(self.ptr) };
             window_registry::unregister(id);
         }
         module_loader::cleanup(self.ptr);

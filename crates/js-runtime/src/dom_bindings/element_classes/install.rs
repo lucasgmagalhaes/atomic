@@ -6,8 +6,8 @@ use quickjs_sys as sys;
 
 use crate::dom_bindings::node_registry::{
     ELEMENT_CLASS_KIND, HTML_ANCHOR_CLASS_KIND, HTML_BUTTON_CLASS_KIND, HTML_CANVAS_CLASS_KIND,
-    HTML_ELEMENT_CLASS_KIND, HTML_FORM_CLASS_KIND, HTML_IMAGE_CLASS_KIND, HTML_INPUT_CLASS_KIND,
-    HTML_SELECT_CLASS_KIND, NODE_CLASS_KIND,
+    HTML_ELEMENT_CLASS_KIND, HTML_FORM_CLASS_KIND, HTML_IFRAME_CLASS_KIND, HTML_IMAGE_CLASS_KIND,
+    HTML_INPUT_CLASS_KIND, HTML_SELECT_CLASS_KIND, NODE_CLASS_KIND,
 };
 
 use super::classes::{
@@ -16,7 +16,8 @@ use super::classes::{
 use super::constructors::{
     element_constructor, expose_constructor, html_anchor_constructor, html_button_constructor,
     html_canvas_constructor, html_element_constructor, html_form_constructor,
-    html_image_constructor, html_input_constructor, html_select_constructor, node_constructor,
+    html_iframe_constructor, html_image_constructor, html_input_constructor,
+    html_select_constructor, node_constructor,
 };
 
 /// Registers the whole `Node`/`Element`/`HTMLElement`/HTML-subclass
@@ -35,6 +36,7 @@ pub(in crate::dom_bindings) unsafe fn install_classes(ctx: *mut sys::JSContext) 
     ensure_html_subclass(ctx, HTML_CANVAS_CLASS_KIND);
     ensure_html_subclass(ctx, HTML_FORM_CLASS_KIND);
     ensure_html_subclass(ctx, HTML_SELECT_CLASS_KIND);
+    ensure_html_subclass(ctx, HTML_IFRAME_CLASS_KIND);
 
     let rt = sys::JS_GetRuntime(ctx);
     let node_class_id = crate::class_registry::class_id_for(rt, NODE_CLASS_KIND);
@@ -86,6 +88,10 @@ pub(in crate::dom_bindings) unsafe fn install_classes(ctx: *mut sys::JSContext) 
         (
             HTML_SELECT_CLASS_KIND,
             html_select_constructor as sys::JSCFunction,
+        ),
+        (
+            HTML_IFRAME_CLASS_KIND,
+            html_iframe_constructor as sys::JSCFunction,
         ),
     ] {
         let class_id = crate::class_registry::class_id_for(rt, kind);

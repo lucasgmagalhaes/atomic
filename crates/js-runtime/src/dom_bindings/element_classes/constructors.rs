@@ -125,6 +125,15 @@ pub(super) unsafe extern "C" fn html_select_constructor(
     this_val
 }
 
+pub(super) unsafe extern "C" fn html_iframe_constructor(
+    _ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    _argc: std::os::raw::c_int,
+    _argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    this_val
+}
+
 /// Also used by `node_registry::node_object` to build the actual JS object
 /// for a real `dom::NodeId` once identity-cache lookup misses.
 pub(in crate::dom_bindings) unsafe fn make_node_object(

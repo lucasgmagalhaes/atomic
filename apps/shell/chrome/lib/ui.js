@@ -78,6 +78,77 @@ const Label = tag('label');
 // here, real behavior comes from `onClick` like every other component.
 const Link = tag('a');
 
+// Headings, text/typography, and semantic containers — plain `El`
+// wrappers, no special behavior. This engine has no default user-agent
+// stylesheet (no built-in block/inline/list-item per tag), so these carry
+// zero layout meaning of their own until a bundle's CSS styles them; they
+// exist for naming/semantics and CSS-selector targeting (`h1 {}`, `pre
+// {}`, ...), same as any of these tags would in a real page.
+const P = tag('p');
+const H1 = tag('h1');
+const H2 = tag('h2');
+const H3 = tag('h3');
+const H4 = tag('h4');
+const H5 = tag('h5');
+const H6 = tag('h6');
+const Strong = tag('strong');
+const Em = tag('em');
+const Small = tag('small');
+const Pre = tag('pre');
+const Code = tag('code');
+const Section = tag('section');
+const Header = tag('header');
+const Footer = tag('footer');
+const Nav = tag('nav');
+const Article = tag('article');
+const Aside = tag('aside');
+const Main = tag('main');
+
+// Lists.
+const Ul = tag('ul');
+const Ol = tag('ol');
+const Li = tag('li');
+
+// Tables.
+const Table = tag('table');
+const Thead = tag('thead');
+const Tbody = tag('tbody');
+const Tr = tag('tr');
+const Td = tag('td');
+const Th = tag('th');
+
+// Form-adjacent tags without their own component logic (unlike `Button`/
+// `Input`, which need id/active-class or self-closing handling) —
+// `Select`/`Option` and `Textarea` still go through `El` like any other
+// tag; `HTMLSelectElement`'s real `.value`/`.selectedIndex` (see the DOM
+// capability matrix) work the same whether the `<option>`s were built by
+// hand or through this wrapper.
+const Select = tag('select');
+const Option = tag('option');
+const Textarea = tag('textarea');
+const Fieldset = tag('fieldset');
+const Legend = tag('legend');
+
+// Void elements — no children, same shape `<input>`/`<img>` always have.
+function Br(props) {
+    return El('br', props || {});
+}
+
+function Hr(props) {
+    return El('hr', props || {});
+}
+
+// `HTMLImageElement` has its own DOM subclass (see the DOM capability
+// matrix) but no special construction needs here beyond being void.
+function Img(props) {
+    return El('img', props || {});
+}
+
+// `HTMLCanvasElement` has its own DOM subclass too — kept as a plain
+// variadic wrapper (not void) since a `<canvas>` can carry fallback
+// content children, same as a real page's markup.
+const Canvas = tag('canvas');
+
 // Self-closing — no children param, same shape `<input>` always has.
 function Input(props) {
     return El('input', props || {});

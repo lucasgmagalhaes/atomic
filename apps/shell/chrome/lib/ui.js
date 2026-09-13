@@ -49,6 +49,33 @@ function Row(props, children) {
     return El('div', { id: props && props.id, className: 'row' }, children);
 }
 
+// Plain-tag wrappers — thin `El` aliases so a bundle reads `Div(...)`/
+// `Span(...)`/`Label(...)`/`Link(...)` instead of `El('div', ...)` etc.
+// `props` is optional on all of them (defaults to `{}`), matching how a
+// bundle typically calls them with no attributes, just children.
+function Div(props, children) {
+    return El('div', props || {}, children);
+}
+
+function Span(props, children) {
+    return El('span', props || {}, children);
+}
+
+function Label(props, children) {
+    return El('label', props || {}, children);
+}
+
+// Self-closing — no `children` param, same shape `<input>` always has.
+function Input(props) {
+    return El('input', props || {}, []);
+}
+
+// Chrome surfaces don't navigate (no tabs, no history) — `href` is cosmetic
+// here, real behavior comes from `onClick` like every other component.
+function Link(props, children) {
+    return El('a', props || {}, children);
+}
+
 // An on/off button pair sharing one boolean — the `fps-cap-off`/`-on` and
 // `keychain-off`/`-on` pattern `settings.js` used to hand-roll twice.
 function Toggle(props) {
@@ -64,10 +91,9 @@ function Toggle(props) {
 // used to build as escaped HTML strings.
 function List(props) {
     if (!props.items.length) {
-        return El('span', { className: 'empty' }, [props.emptyText]);
+        return Span({ className: 'empty' }, [props.emptyText]);
     }
-    return El(
-        'div',
+    return Div(
         {},
         props.items.map((item, i) => props.renderItem(item, i))
     );

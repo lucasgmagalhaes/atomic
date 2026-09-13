@@ -5,7 +5,7 @@
 use css::{matching_declarations_indexed, ElementSnapshot, SelectorIndex, Stylesheet};
 use dom::{Dom, NodeData, NodeId};
 
-use crate::style::{resolve_style, Color, ComputedStyle};
+use crate::style::{apply_inline_declarations, resolve_style, Color, ComputedStyle};
 
 /// Tags a real browser's UA stylesheet gives `display: none` unconditionally
 /// (their content is metadata/source text, never part of the rendered
@@ -51,13 +51,17 @@ pub(super) fn resolve_element_style<'a>(
     parent_font_size: f64,
     parent_color: Color,
 ) -> ComputedStyle {
-    let _ = (tag, attributes); // already folded into build_element_snapshot's own dom lookup
+    let _ = tag; // already folded into build_element_snapshot's own dom lookup
     chain.push(build_element_snapshot(dom, node));
-    resolve_style(
+    let mut style = resolve_style(
         &matching_declarations_indexed(index, sheet, chain, viewport_width, viewport_height),
         parent_font_size,
         parent_color,
-    )
+    );
+    if let Some(inline) = attributes.get("style") {
+        apply_inline_declarations(&mut style, &css::parse_inline_style(inline));
+    }
+    style
 }
 
 /// Real sibling/attribute data for `node`'s own [`ElementSnapshot`] entry

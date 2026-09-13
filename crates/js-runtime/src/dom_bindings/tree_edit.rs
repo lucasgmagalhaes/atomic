@@ -34,6 +34,7 @@ pub(super) unsafe extern "C" fn node_append_child(
         return throw_type_error(ctx, "cannot append an ancestor into its descendant");
     }
     (*dom).append_child(parent, child);
+    crate::custom_elements::maybe_connected(ctx, dom, child);
     sys::JS_DupValue(ctx, child_value)
 }
 
@@ -71,6 +72,7 @@ pub(super) unsafe extern "C" fn node_insert_before(
         return throw_type_error(ctx, "cannot insert an ancestor into its descendant");
     }
     (*dom).insert_before(reference_node, new_node);
+    crate::custom_elements::maybe_connected(ctx, dom, new_node);
     sys::JS_DupValue(ctx, new_value)
 }
 
@@ -92,7 +94,9 @@ pub(super) unsafe extern "C" fn node_remove(
         // cached JS wrapper, own listeners intact) and stays reattachable
         // — only unlinked from its parent, not freed. See spec/architecture/
         // primitives.md §4.1; a real `remove()` never destroys the node.
+        let was_connected = (*dom).is_connected(id);
         (*dom).remove_from_parent(id);
+        crate::custom_elements::maybe_disconnected(ctx, dom, id, was_connected);
     }
     sys::js_undefined()
 }
@@ -122,7 +126,9 @@ pub(super) unsafe extern "C" fn node_remove_child(
     }
     // Non-destructive: `child` remains a valid, reattachable node (same
     // identity, same listeners) — see `node_remove`'s comment above.
+    let was_connected = (*dom).is_connected(child);
     (*dom).remove_from_parent(child);
+    crate::custom_elements::maybe_disconnected(ctx, dom, child, was_connected);
     sys::JS_DupValue(ctx, child_value)
 }
 
@@ -253,6 +259,9 @@ pub(super) unsafe extern "C" fn node_replace_child(
     if !old_child_is_member {
         return throw_type_error(ctx, "old child is not a child of this parent");
     }
+    let old_was_connected = (*dom).is_connected(old_child);
     (*dom).replace_child(parent, new_child, old_child);
+    crate::custom_elements::maybe_disconnected(ctx, dom, old_child, old_was_connected);
+    crate::custom_elements::maybe_connected(ctx, dom, new_child);
     sys::JS_DupValue(ctx, old_value)
 }

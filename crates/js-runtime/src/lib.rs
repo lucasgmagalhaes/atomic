@@ -17,6 +17,7 @@ mod crypto;
 mod csp;
 mod css_style;
 mod cssom_stylesheet;
+mod custom_elements;
 mod document;
 mod document_cookie;
 mod dom_bindings;

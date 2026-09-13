@@ -50,6 +50,7 @@ impl Dom {
             checked: false,
             selection: (0, 0, "none".to_string()),
             selected: false,
+            shadow_root: None,
         })
     }
 

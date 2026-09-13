@@ -53,7 +53,7 @@ impl Dom {
                 out.push_str(tag);
                 out.push('>');
             }
-            NodeData::Document | NodeData::DocumentFragment => {
+            NodeData::Document | NodeData::DocumentFragment | NodeData::ShadowRoot { .. } => {
                 for &child in &node.children {
                     self.serialize_into(child, out);
                 }

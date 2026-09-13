@@ -67,6 +67,7 @@ mod node_registry;
 mod scroll_focus;
 mod select;
 mod selectors;
+mod shadow;
 mod tree_edit;
 mod util;
 mod validity;

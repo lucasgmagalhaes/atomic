@@ -76,7 +76,14 @@ pub(super) fn collect_inline_spans<'a>(
             }
             chain.pop();
         }
-        NodeData::Comment(_) | NodeData::Document | NodeData::DocumentFragment => {}
+        // A shadow root is never a light-DOM child that ordinary layout
+        // walks into (see `dom::NodeData::ShadowRoot`'s own scope-cut
+        // doc: no render integration yet), grouped with the other
+        // structural/non-visible node kinds this pass already skips.
+        NodeData::Comment(_)
+        | NodeData::Document
+        | NodeData::DocumentFragment
+        | NodeData::ShadowRoot { .. } => {}
     }
 }
 

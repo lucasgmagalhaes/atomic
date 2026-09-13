@@ -23,6 +23,7 @@ use crate::dom_bindings::node_registry::{
 };
 use crate::dom_bindings::scroll_focus::{define_focus_methods, define_scroll_methods};
 use crate::dom_bindings::select::define_select_properties;
+use crate::dom_bindings::shadow::{define_attach_shadow, define_shadow_root_properties};
 use crate::dom_bindings::validity::define_validation_and_labels;
 
 unsafe extern "C" fn node_finalizer(rt: *mut sys::JSRuntime, val: sys::JSValue) {
@@ -72,6 +73,7 @@ pub(super) unsafe fn ensure_node_class(ctx: *mut sys::JSContext) -> sys::JSClass
     define_focus_methods(ctx, proto);
     define_mutation_methods(ctx, proto);
     define_selector_methods(ctx, proto);
+    define_shadow_root_properties(ctx, proto);
     crate::events::define_event_target(ctx, proto);
     sys::JS_SetClassProto(ctx, class_id, proto);
 
@@ -102,6 +104,7 @@ pub(super) unsafe fn ensure_element_class(ctx: *mut sys::JSContext) -> sys::JSCl
     sys::JS_SetPrototype(ctx, proto, node_proto);
     sys::JS_FreeValue(ctx, node_proto);
     define_scroll_methods(ctx, proto);
+    define_attach_shadow(ctx, proto);
     sys::JS_SetClassProto(ctx, class_id, proto);
 
     class_id

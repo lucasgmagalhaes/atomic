@@ -136,6 +136,26 @@ impl Dom {
                 }
                 self.create_text("")
             }
+            // A shadow root isn't clonable via a real host's cloneNode
+            // (it's excluded from `children`, so recursing into a host's
+            // own children never reaches it) — only reachable if a
+            // caller directly clones the shadow root node itself. Same
+            // structural-clone shape as `DocumentFragment`, preserving
+            // `mode`, detached (no host) until a caller attaches it.
+            NodeData::ShadowRoot { mode } => {
+                let new_id = self.insert(NodeData::ShadowRoot { mode });
+                if deep {
+                    let children = self
+                        .get(node)
+                        .map(|n| n.children.clone())
+                        .unwrap_or_default();
+                    for child in children {
+                        let cloned_child = self.clone_node(child, true);
+                        self.append_child(new_id, cloned_child);
+                    }
+                }
+                new_id
+            }
         }
     }
 
@@ -194,6 +214,14 @@ impl Dom {
                 } else {
                     self.create_text("")
                 }
+            }
+            NodeData::ShadowRoot { mode } => {
+                let new_id = self.insert(NodeData::ShadowRoot { mode: *mode });
+                for &child in &src.children {
+                    let cloned_child = self.adopt(other, child);
+                    self.append_child(new_id, cloned_child);
+                }
+                new_id
             }
         }
     }

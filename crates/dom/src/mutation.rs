@@ -44,7 +44,7 @@ impl Dom {
 
     pub fn create_element(&mut self, tag: &str) -> NodeId {
         self.insert(NodeData::Element {
-            tag: tag.to_string(),
+            tag: atoms::Atom::new(tag),
             attributes: std::collections::HashMap::new(),
             value: None,
             checked: false,

@@ -89,7 +89,7 @@ pub struct NodeId {
 pub enum NodeData {
     Document,
     Element {
-        tag: String,
+        tag: atoms::Atom,
         attributes: HashMap<String, String>,
         /// Real, independently-mutable form value — `Some` once either the
         /// `value` attribute or `Dom::set_value`/JS `.value =` has touched

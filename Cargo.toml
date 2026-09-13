@@ -3,7 +3,7 @@ resolver = "2"
 members = [
     "apps/shell",
     "crates/net", "crates/html", "crates/css", "crates/layout-engine",
-    "crates/dom", "crates/js-runtime", "crates/js-runtime/quickjs-sys",
+    "crates/atoms", "crates/dom", "crates/js-runtime", "crates/js-runtime/quickjs-sys",
     "crates/render", "crates/webgl", "crates/storage", "crates/workers",
     "crates/platform-apis", "crates/profile", "crates/ipc", "crates/security",
     "crates/automation", "crates/import", "crates/image_decode",

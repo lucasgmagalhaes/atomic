@@ -37,14 +37,23 @@ mod sync;
 /// `var()` support.
 const THEME_CSS: &str = include_str!("../../chrome/lib/theme.css");
 
-/// Shared component kit (`El`, `Button`, `Row`, `Toggle`, `List`) evaluated
-/// into every chrome bundle's JS context before its own script runs, so a
-/// bundle's top-level code can call `Button(...)`/`List(...)` immediately.
-/// Plain function composition over the engine's real DOM API
-/// (`createElement`/`setAttribute`/`addEventListener`) — no template
-/// parser, no build step, same "static string, `ctx.eval`" mechanism the
-/// bundle scripts themselves already use.
+/// Shared component kit (`El`, `Button`, `Row`, `Toggle`, `List`, and every
+/// other tag wrapper) evaluated into every chrome bundle's JS context
+/// before its own script runs, so a bundle's top-level code can call
+/// `Button(...)`/`List(...)` immediately. Plain function composition over
+/// the engine's real DOM API (`createElement`/`setAttribute`/
+/// `addEventListener`) — no template parser, no build step, same "static
+/// string, `ctx.eval`" mechanism the bundle scripts themselves already use.
 const UI_JS: &str = include_str!("../../chrome/lib/ui.js");
+
+/// The one HTML shell every chrome surface shares — just `<div id="root">`.
+/// A bundle's own JS builds its entire tree into `#root` at load time
+/// (`mount('root', Toolbar())`, etc.) instead of the markup living in a
+/// bundle-specific `.html` file; each surface still gets its own `Context`/
+/// `Dom` instance (see `new` below), so reusing this one string across all
+/// four is safe — there's no cross-surface id collision risk despite every
+/// surface's JS targeting the same `#root`.
+const ROOT_HTML: &str = include_str!("../../chrome/root.html");
 
 /// One loaded chrome surface (e.g. the toolbar): its DOM root, stylesheet,
 /// and the JS context driving it, plus a cached box tree so `render` and
@@ -79,44 +88,43 @@ struct LayoutCache {
 }
 
 impl<'rt> ChromeEngine<'rt> {
-    /// The toolbar spike's bundle — `apps/shell/chrome/toolbar.{html,css,js}`.
+    /// The toolbar component —
+    /// `apps/shell/chrome/components/toolbar/toolbar.{css,js}`.
     pub(crate) fn new_toolbar(runtime: &'rt Runtime) -> Self {
         Self::new(
             runtime,
-            include_str!("../../chrome/toolbar.html"),
-            include_str!("../../chrome/toolbar.css"),
-            include_str!("../../chrome/toolbar.js"),
+            include_str!("../../chrome/components/toolbar/toolbar.css"),
+            include_str!("../../chrome/components/toolbar/toolbar.js"),
         )
     }
 
-    /// The Settings window's bundle —
-    /// `apps/shell/chrome/settings.{html,css,js}`.
+    /// The Settings window's component —
+    /// `apps/shell/chrome/components/settings/settings.{css,js}`.
     pub(crate) fn new_settings(runtime: &'rt Runtime) -> Self {
         Self::new(
             runtime,
-            include_str!("../../chrome/settings.html"),
-            include_str!("../../chrome/settings.css"),
-            include_str!("../../chrome/settings.js"),
+            include_str!("../../chrome/components/settings/settings.css"),
+            include_str!("../../chrome/components/settings/settings.js"),
         )
     }
 
-    /// The downloads/history panel's bundle —
-    /// `apps/shell/chrome/downloads_history.{html,css,js}`.
+    /// The downloads/history panel's component —
+    /// `apps/shell/chrome/components/downloads_history/downloads_history.{css,js}`.
     pub(crate) fn new_downloads_history(runtime: &'rt Runtime) -> Self {
         Self::new(
             runtime,
-            include_str!("../../chrome/downloads_history.html"),
-            include_str!("../../chrome/downloads_history.css"),
-            include_str!("../../chrome/downloads_history.js"),
+            include_str!("../../chrome/components/downloads_history/downloads_history.css"),
+            include_str!("../../chrome/components/downloads_history/downloads_history.js"),
         )
     }
 
-    /// Loads a fixed local HTML/CSS/JS bundle (no navigation, no network —
-    /// chrome is not a tab). Registers `globalThis.atomic.*`
-    /// (`chrome_bridge::register`) before running `js`, so the bundle's own
-    /// script can wire button handlers immediately.
-    fn new(runtime: &'rt Runtime, html: &str, css_text: &str, js: &str) -> Self {
-        let (dom, root) = html::parse_to_html_element(html);
+    /// Loads `ROOT_HTML` (the same shared `<div id="root">` shell every
+    /// surface uses) plus this component's own CSS/JS (no navigation, no
+    /// network — chrome is not a tab). Registers `globalThis.atomic.*`
+    /// (`chrome_bridge::register`) before running `js`, so the component's
+    /// own script can build its tree and wire button handlers immediately.
+    fn new(runtime: &'rt Runtime, css_text: &str, js: &str) -> Self {
+        let (dom, root) = html::parse_to_html_element(ROOT_HTML);
         let combined_css = format!("{THEME_CSS}\n{css_text}");
         let sheet = parse_stylesheet(&combined_css);
         let ctx = Context::with_dom(runtime, dom);
@@ -125,8 +133,8 @@ impl<'rt> ChromeEngine<'rt> {
         }
         ctx.eval(UI_JS, "chrome-lib-ui.js")
             .expect("shared chrome UI kit is static and must not fail to eval");
-        ctx.eval(js, "chrome-toolbar.js")
-            .expect("chrome bundle script is static and must not fail to eval");
+        ctx.eval(js, "chrome-component.js")
+            .expect("chrome component script is static and must not fail to eval");
         ctx.dispatch_lifecycle_events();
         ChromeEngine {
             ctx,
@@ -137,14 +145,13 @@ impl<'rt> ChromeEngine<'rt> {
         }
     }
 
-    /// The Add Profile modal's bundle —
-    /// `apps/shell/chrome/add_profile.{html,css,js}`.
+    /// The Add Profile modal's component —
+    /// `apps/shell/chrome/components/add_profile/add_profile.{css,js}`.
     pub(crate) fn new_add_profile(runtime: &'rt Runtime) -> Self {
         Self::new(
             runtime,
-            include_str!("../../chrome/add_profile.html"),
-            include_str!("../../chrome/add_profile.css"),
-            include_str!("../../chrome/add_profile.js"),
+            include_str!("../../chrome/components/add_profile/add_profile.css"),
+            include_str!("../../chrome/components/add_profile/add_profile.js"),
         )
     }
 

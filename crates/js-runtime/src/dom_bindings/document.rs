@@ -108,6 +108,14 @@ pub(super) unsafe fn install(ctx: *mut sys::JSContext) {
         ),
         ("importNode", document_import_node as sys::JSCFunction),
         ("adoptNode", document_adopt_node as sys::JSCFunction),
+        (
+            "createRange",
+            crate::selection::document_create_range as sys::JSCFunction,
+        ),
+        (
+            "getSelection",
+            crate::selection::get_selection as sys::JSCFunction,
+        ),
     ] {
         let name = CString::new(name).unwrap();
         let value =

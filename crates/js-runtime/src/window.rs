@@ -193,6 +193,13 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     alias(ctx, global, "parent");
     crate::events::define_simple_event_target(ctx, global);
 
+    define_method(
+        ctx,
+        global,
+        "getSelection",
+        crate::selection::get_selection,
+        0,
+    );
     define_getter(ctx, global, "scrollX", window_scroll_x_get as Getter);
     define_getter(ctx, global, "pageXOffset", window_scroll_x_get as Getter);
     define_getter(ctx, global, "scrollY", window_scroll_y_get as Getter);

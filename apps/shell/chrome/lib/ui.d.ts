@@ -32,6 +32,12 @@ interface ElementProps {
  */
 type Child = string | number | Node | false | null | undefined | Child[];
 
+/** Shape shared by every plain-tag wrapper (`Div`, `P`, `Ul`, ...): optional `props`, variadic children. */
+type PlainTag<E> = (propsOrChild?: ElementProps | Child, ...children: Child[]) => E;
+
+/** Shape shared by every void-element wrapper (`Br`, `Hr`, `Img`): props only, no children. */
+type VoidTag<E> = (props?: ElementProps) => E;
+
 declare global {
   /**
    * The primitive every component below wraps: `document.createElement(tag)`
@@ -69,6 +75,65 @@ declare global {
    * every other component.
    */
   function Link(propsOrChild?: ElementProps | Child, ...children: Child[]): HTMLAnchorElement;
+
+  // Headings, text/typography, and semantic containers — no default
+  // block/inline/list-item styling of their own (this engine has no
+  // user-agent stylesheet), just naming/semantics and CSS-selector
+  // targeting like they'd carry in a real page.
+  const P: PlainTag<HTMLParagraphElement>;
+  const H1: PlainTag<HTMLHeadingElement>;
+  const H2: PlainTag<HTMLHeadingElement>;
+  const H3: PlainTag<HTMLHeadingElement>;
+  const H4: PlainTag<HTMLHeadingElement>;
+  const H5: PlainTag<HTMLHeadingElement>;
+  const H6: PlainTag<HTMLHeadingElement>;
+  const Strong: PlainTag<HTMLElement>;
+  const Em: PlainTag<HTMLElement>;
+  const Small: PlainTag<HTMLElement>;
+  const Pre: PlainTag<HTMLPreElement>;
+  const Code: PlainTag<HTMLElement>;
+  const Section: PlainTag<HTMLElement>;
+  const Header: PlainTag<HTMLElement>;
+  const Footer: PlainTag<HTMLElement>;
+  const Nav: PlainTag<HTMLElement>;
+  const Article: PlainTag<HTMLElement>;
+  const Aside: PlainTag<HTMLElement>;
+  const Main: PlainTag<HTMLElement>;
+
+  // Lists.
+  const Ul: PlainTag<HTMLUListElement>;
+  const Ol: PlainTag<HTMLOListElement>;
+  const Li: PlainTag<HTMLLIElement>;
+
+  // Tables.
+  const Table: PlainTag<HTMLTableElement>;
+  const Thead: PlainTag<HTMLElement>;
+  const Tbody: PlainTag<HTMLElement>;
+  const Tr: PlainTag<HTMLTableRowElement>;
+  const Td: PlainTag<HTMLTableCellElement>;
+  const Th: PlainTag<HTMLTableCellElement>;
+
+  // Form-adjacent tags with no special component logic — `Select`'s real
+  // `.value`/`.selectedIndex` (see the DOM capability matrix) work the
+  // same whether the `<option>`s were built by hand or through `Option`.
+  const Select: PlainTag<HTMLSelectElement>;
+  const Option: PlainTag<HTMLOptionElement>;
+  const Textarea: PlainTag<HTMLTextAreaElement>;
+  const Fieldset: PlainTag<HTMLFieldSetElement>;
+  const Legend: PlainTag<HTMLLegendElement>;
+
+  /** Void — no children parameter. */
+  const Br: VoidTag<HTMLBRElement>;
+  /** Void — no children parameter. */
+  const Hr: VoidTag<HTMLHRElement>;
+  /** Void — no children parameter. `HTMLImageElement` has its own DOM subclass (see the DOM capability matrix). */
+  const Img: VoidTag<HTMLImageElement>;
+
+  /**
+   * `HTMLCanvasElement` has its own DOM subclass too — kept variadic
+   * (not void) since a `<canvas>` can carry fallback content children.
+   */
+  const Canvas: PlainTag<HTMLCanvasElement>;
 
   /** An on/off `Button` pair sharing one boolean state. */
   function Toggle(props: {

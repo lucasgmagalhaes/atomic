@@ -2,6 +2,7 @@ pub mod canvas;
 pub mod display_list;
 pub mod gpu;
 pub mod image;
+pub mod layer;
 pub mod text;
 
 pub use canvas::Canvas2D;
@@ -10,4 +11,5 @@ pub use display_list::{
 };
 pub use gpu::{list_adapters, AdapterDeviceType, AdapterInfo, GpuRenderer};
 pub use image::composite_images;
+pub use layer::{Layer, LayerCacheKey};
 pub use text::composite_glyphs;

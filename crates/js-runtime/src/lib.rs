@@ -33,6 +33,7 @@ mod layout_measurement;
 mod local_storage_bindings;
 mod location;
 mod message_channel;
+mod module_loader;
 mod mutation_observer;
 mod navigator;
 mod notifications;
@@ -55,5 +56,6 @@ mod runtime;
 
 pub use context::Context;
 pub use layout_measurement::Rect;
+pub use module_loader::ModuleStatus;
 pub use runtime::{ensure_external_class, external_class_id, EvalError, Runtime};
 pub use window_registry::WindowId;

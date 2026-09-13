@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+dom = { path = "../dom" }
 image_decode = { path = "../image_decode" }
 layout-engine = { path = "../layout-engine" }
 wgpu = "0.20"
@@ -12,4 +13,3 @@ pollster = "1.0"
 
 [dev-dependencies]
 css = { path = "../css" }
-dom = { path = "../dom" }

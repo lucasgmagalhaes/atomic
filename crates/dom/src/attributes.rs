@@ -53,6 +53,7 @@ impl Dom {
             is_element = true;
         }
         if is_element {
+            self.push_style_invalidation(id, true);
             self.push_mutation_record(
                 id,
                 MutationRecordKind::Attributes {
@@ -102,6 +103,7 @@ impl Dom {
         }
         let existed = old_value.is_some();
         if existed {
+            self.push_style_invalidation(id, true);
             self.push_mutation_record(
                 id,
                 MutationRecordKind::Attributes {

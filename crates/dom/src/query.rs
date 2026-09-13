@@ -1,4 +1,4 @@
-use crate::{DirtyFlags, Dom, MutationRecord, Node, NodeId};
+use crate::{DirtyFlags, Dom, MutationRecord, Node, NodeId, StyleInvalidation};
 
 impl Dom {
     /// See the `mutations` field's own doc — a caller compares two
@@ -41,6 +41,16 @@ impl Dom {
     /// for anything JS-observable.
     pub fn take_mutation_records(&mut self) -> Vec<MutationRecord> {
         std::mem::take(&mut self.mutation_records)
+    }
+
+    /// Returns every [`StyleInvalidation`] queued since the last call and
+    /// empties the queue — same drain-and-reset shape as
+    /// [`Dom::drain_dirty`]/[`Dom::take_mutation_records`]. A consumer
+    /// (`layout-engine`'s future incremental restyle pass, ROADMAP item 27)
+    /// calls this once per style pass to know exactly which subtrees need
+    /// re-cascading instead of rebuilding every computed style.
+    pub fn drain_style_invalidations(&mut self) -> Vec<StyleInvalidation> {
+        std::mem::take(&mut self.style_invalidations)
     }
 
     /// Version counter that increments only when layout-relevant

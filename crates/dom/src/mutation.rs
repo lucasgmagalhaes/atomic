@@ -70,6 +70,7 @@ impl Dom {
         let old_parent = self.get(child).and_then(|n| n.parent);
         self.detach(child);
         if let Some(old_parent) = old_parent {
+            self.push_style_invalidation(old_parent, true);
             self.push_mutation_record(
                 old_parent,
                 MutationRecordKind::ChildList {
@@ -84,6 +85,7 @@ impl Dom {
         if let Some(node) = self.get_mut(parent) {
             node.children.push(child);
         }
+        self.push_style_invalidation(parent, true);
         self.push_mutation_record(
             parent,
             MutationRecordKind::ChildList {
@@ -111,6 +113,7 @@ impl Dom {
         let old_parent = self.get(new_node).and_then(|n| n.parent);
         self.detach(new_node);
         if let Some(old_parent) = old_parent {
+            self.push_style_invalidation(old_parent, true);
             self.push_mutation_record(
                 old_parent,
                 MutationRecordKind::ChildList {
@@ -130,6 +133,7 @@ impl Dom {
                 .unwrap_or(node.children.len());
             node.children.insert(pos, new_node);
         }
+        self.push_style_invalidation(parent, true);
         self.push_mutation_record(
             parent,
             MutationRecordKind::ChildList {
@@ -148,6 +152,7 @@ impl Dom {
         let old_parent = self.get(child).and_then(|n| n.parent);
         self.detach(child);
         if let Some(old_parent) = old_parent {
+            self.push_style_invalidation(old_parent, true);
             self.push_mutation_record(
                 old_parent,
                 MutationRecordKind::ChildList {
@@ -184,6 +189,7 @@ impl Dom {
         }
         self.detach(id);
         if let Some(old_parent) = old_parent {
+            self.push_style_invalidation(old_parent, true);
             self.push_mutation_record(
                 old_parent,
                 MutationRecordKind::ChildList {
@@ -233,6 +239,7 @@ impl Dom {
         self.detach(old_child);
         if let Some(new_child_old_parent) = new_child_old_parent {
             if new_child_old_parent != parent {
+                self.push_style_invalidation(new_child_old_parent, true);
                 self.push_mutation_record(
                     new_child_old_parent,
                     MutationRecordKind::ChildList {
@@ -249,6 +256,7 @@ impl Dom {
         if let Some(node) = self.get_mut(new_child) {
             node.parent = Some(parent);
         }
+        self.push_style_invalidation(parent, true);
         self.push_mutation_record(
             parent,
             MutationRecordKind::ChildList {

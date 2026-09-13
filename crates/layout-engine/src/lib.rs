@@ -1,4 +1,5 @@
 pub mod flex;
+pub mod grid;
 pub mod hit_test;
 pub mod layout;
 pub mod style;
@@ -8,10 +9,12 @@ pub mod tree;
 pub use hit_test::hit_test;
 
 pub use flex::layout_flex_children;
+pub use grid::layout_grid_children;
 pub use layout::layout_block;
 pub use style::{
     resolve_style, AlignItems, BorderStyle, BoxShadow, Clear, Color, ComputedStyle, Display,
-    EdgeSizes, FlexDirection, Float, JustifyContent, Length, Overflow, Position,
+    EdgeSizes, FlexDirection, Float, GridTrackSize, GridTracks, JustifyContent, Length, Overflow,
+    Position,
 };
 pub use text::{
     layout_inline, layout_text, rasterize_glyph, GlyphBitmap, InlineSpan, PositionedGlyph,

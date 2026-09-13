@@ -95,7 +95,66 @@ pub enum Display {
     Block,
     Inline,
     Flex,
+    Grid,
     None,
+}
+
+/// One track's size in a `grid-template-columns`/`grid-template-rows`
+/// list (`ROADMAP.md` item 34). Scoped to the two units real pages
+/// overwhelmingly use for a fixed track list: `Px` (an absolute size) and
+/// `Fr` (a share of the space left over after every `Px` track is
+/// subtracted — see `crate::grid`'s own doc for exactly how that's
+/// distributed). `minmax()`, `auto`, `%`, `repeat()`, and named lines are
+/// not modeled — a real, narrower-than-spec scope cut, same shape
+/// `flex.rs`'s own module doc already documents for flex's missing
+/// `flex-wrap`/`order`/`gap`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GridTrackSize {
+    Px(f64),
+    Fr(f64),
+}
+
+/// Max tracks a `grid-template-columns`/`grid-template-rows` list can
+/// hold. A fixed-capacity array, not a `Vec` — `ComputedStyle` is `Copy`
+/// (embedded by value in every `LayoutBox`, copied around freely by
+/// `layout`/`flex`/`tree`), and a `Vec` field would force it to
+/// `Clone`-only, rippling into every one of those existing copy sites.
+/// 16 tracks is far beyond what a real page's grid typically declares —
+/// a real, honest capacity cap, not a silent truncation nobody would
+/// notice (extra tracks past this are simply dropped, same "declared but
+/// unsupported, not pretended" convention this crate already uses for
+/// e.g. `border-radius`'s one-value-for-all-corners scope cut).
+pub const MAX_GRID_TRACKS: usize = 16;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GridTracks {
+    sizes: [GridTrackSize; MAX_GRID_TRACKS],
+    len: u8,
+}
+
+impl GridTracks {
+    pub const EMPTY: Self = GridTracks {
+        sizes: [GridTrackSize::Px(0.0); MAX_GRID_TRACKS],
+        len: 0,
+    };
+
+    pub fn from_iter_capped(iter: impl Iterator<Item = GridTrackSize>) -> Self {
+        let mut sizes = [GridTrackSize::Px(0.0); MAX_GRID_TRACKS];
+        let mut len = 0u8;
+        for (i, t) in iter.enumerate().take(MAX_GRID_TRACKS) {
+            sizes[i] = t;
+            len = (i + 1) as u8;
+        }
+        GridTracks { sizes, len }
+    }
+
+    pub fn as_slice(&self) -> &[GridTrackSize] {
+        &self.sizes[..self.len as usize]
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
 }
 
 /// `Fixed`/`Sticky` aren't modeled — see `layout::layout_children`'s own

@@ -10,9 +10,20 @@ use super::property_parsers::{
     parse_edge_shorthand, parse_length,
 };
 use super::types::{
-    AlignItems, BorderStyle, Clear, Color, Display, FlexDirection, Float, JustifyContent, Overflow,
-    Position,
+    AlignItems, BorderStyle, Clear, Color, Display, FlexDirection, Float, GridTrackSize,
+    GridTracks, JustifyContent, Overflow, Position,
 };
+
+/// Parses one `grid-template-columns`/`grid-template-rows` track token —
+/// `px` lengths and `fr` shares only, see [`GridTrackSize`]'s own doc.
+fn parse_track_size(token: &Token) -> Option<GridTrackSize> {
+    match token {
+        Token::Dimension(n, unit) if unit == "px" => Some(GridTrackSize::Px(*n)),
+        Token::Dimension(n, unit) if unit.eq_ignore_ascii_case("fr") => Some(GridTrackSize::Fr(*n)),
+        Token::Number(n) if *n == 0.0 => Some(GridTrackSize::Px(0.0)),
+        _ => None,
+    }
+}
 
 pub(super) fn apply_declaration(style: &mut ComputedStyle, decl: &Declaration) {
     match decl.name.as_str() {
@@ -22,9 +33,26 @@ pub(super) fn apply_declaration(style: &mut ComputedStyle, decl: &Declaration) {
                     "block" => Display::Block,
                     "inline" => Display::Inline,
                     "flex" => Display::Flex,
+                    "grid" => Display::Grid,
                     "none" => Display::None,
                     _ => return,
                 };
+            }
+        }
+        "grid-template-columns" => {
+            let tracks: Vec<GridTrackSize> =
+                decl.value.iter().filter_map(parse_track_size).collect();
+            // All-or-nothing, same convention `parse_edge_shorthand` already
+            // uses: a value with one bad track is invalid as a whole.
+            if tracks.len() == decl.value.len() && !tracks.is_empty() {
+                style.grid_template_columns = GridTracks::from_iter_capped(tracks.into_iter());
+            }
+        }
+        "grid-template-rows" => {
+            let tracks: Vec<GridTrackSize> =
+                decl.value.iter().filter_map(parse_track_size).collect();
+            if tracks.len() == decl.value.len() && !tracks.is_empty() {
+                style.grid_template_rows = GridTracks::from_iter_capped(tracks.into_iter());
             }
         }
         "flex-direction" => {

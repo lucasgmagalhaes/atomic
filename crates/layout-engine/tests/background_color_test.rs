@@ -84,6 +84,48 @@ fn parses_hex_rgb_shorthand_expanding_each_digit() {
 }
 
 #[test]
+fn parses_an_extended_css4_named_color() {
+    let style = style_for("div { background-color: cornflowerblue; }");
+    assert_eq!(
+        style.background_color,
+        Color {
+            r: 100,
+            g: 149,
+            b: 237,
+            a: 255
+        }
+    );
+}
+
+#[test]
+fn parses_rebeccapurple() {
+    let style = style_for("div { background-color: rebeccapurple; }");
+    assert_eq!(
+        style.background_color,
+        Color {
+            r: 102,
+            g: 51,
+            b: 153,
+            a: 255
+        }
+    );
+}
+
+#[test]
+fn named_colors_are_case_insensitive() {
+    let style = style_for("div { background-color: CornflowerBlue; }");
+    assert_eq!(
+        style.background_color,
+        Color {
+            r: 100,
+            g: 149,
+            b: 237,
+            a: 255
+        }
+    );
+}
+
+#[test]
 fn invalid_color_falls_back_to_previous_value() {
     let style = style_for("div { background-color: red; background-color: not-a-color; }");
     assert_eq!(

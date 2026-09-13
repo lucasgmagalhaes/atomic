@@ -1,8 +1,21 @@
-//! `window` — this engine has exactly one browsing context (no iframes
-//! anywhere in `dom`), so `window` is simply an alias for the global object
-//! itself, matching how a real top-level `window` *is* `globalThis` in its
-//! own realm. `self`/`top`/`parent` all alias the same object too, since
-//! there is no frame tree to point them at anything else.
+//! `window` — `window` is simply an alias for the global object itself,
+//! matching how a real top-level `window` *is* `globalThis` in its own
+//! realm. `self`/`top`/`parent` all alias the same object too — correct
+//! for every window this crate can create (`window.open()` only ever
+//! makes a new *top-level* browsing context, never an embedded frame —
+//! see `window_registry`'s own doc for why `iframe` isn't modeled), so a
+//! window is always its own `top`/`parent` here, exactly like a real
+//! top-level window/tab is.
+//!
+//! Real `window.open()`/`RemoteWindow` (`ROADMAP.md` items 36/37): opens
+//! a genuinely independent second `JSContext` (own global object, own
+//! blank `dom::Dom`) via `window_registry::open_window`, returning a
+//! `RemoteWindow` — a plain object (same "no native quickjs class" shape
+//! `abort_controller`/`message_channel` already use) carrying the new
+//! window's id and real `postMessage(data)`/`close()` methods. The
+//! opened window's own `opener` points back the same way. See
+//! `window_registry`'s own module doc for the cross-`JSContext` message
+//! delivery mechanism and the `iframe` scope cut.
 //!
 //! Also the real document-level scroll surface (`ROADMAP.md` P3 item 22):
 //! `scrollY`/`pageYOffset` read, and `scroll`/`scrollTo`/`scrollBy` write,
@@ -195,6 +208,7 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
         define_method(ctx, global, name, window_scroll_to, 2);
     }
     define_method(ctx, global, "scrollBy", window_scroll_by, 2);
+    define_method(ctx, global, "open", window_open, 1);
 
     sys::JS_FreeValue(ctx, global);
 
@@ -210,4 +224,20 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     let document = crate::document::get_or_create(ctx);
     crate::events::define_simple_event_target(ctx, document);
     sys::JS_FreeValue(ctx, document);
+}
+
+/// Real `window.open(url)` — `url` is accepted but not fetched/navigated
+/// (see `window_registry::open_window`'s own doc for the scope cut).
+/// `window_registry::open_window` itself sets the new window's `opener`
+/// (a `RemoteWindow` pointing back at the caller), so it's set
+/// consistently whether a window was opened via this JS-facing global or
+/// directly via `Context::open_window` (the Rust-level entry point).
+unsafe extern "C" fn window_open(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let new_id = crate::window_registry::open_window(ctx);
+    crate::window_registry::make_remote_window(ctx, new_id)
 }

@@ -67,6 +67,60 @@ impl<'rt> Context<'rt> {
         Ok(owned)
     }
 
+    /// [`Context::eval`]'s core, parameterized over a raw `JSContext`
+    /// pointer instead of `self` — lets [`Context::eval_in_window`]
+    /// reuse it against a dynamically-opened window's `JSContext`, which
+    /// has no safe `Context` wrapper of its own (see
+    /// `window_registry`'s own doc for why). Deliberately narrower than
+    /// [`Context::eval`]: no time-budget enforcement and no uncaught-error
+    /// console/`"error"`-event reporting — this is a host/test-facing
+    /// debugging hook into another realm, not the main script-execution
+    /// path, so those side effects (scoped to `self` elsewhere) aren't
+    /// worth threading through for a second context.
+    pub(crate) unsafe fn eval_raw(
+        ptr: *mut sys::JSContext,
+        code: &str,
+        filename: &str,
+    ) -> Result<String, EvalError> {
+        let code_c = CString::new(code).expect("script source must not contain NUL bytes");
+        let filename_c = CString::new(filename).expect("filename must not contain NUL bytes");
+        let result = sys::JS_Eval(
+            ptr,
+            code_c.as_ptr(),
+            code_c.as_bytes().len(),
+            filename_c.as_ptr(),
+            sys::JS_EVAL_TYPE_GLOBAL,
+        );
+        if sys::js_is_exception(&result) {
+            sys::JS_FreeValue(ptr, result);
+            let exception = sys::JS_GetException(ptr);
+            let text = if exception.tag == sys::JS_TAG_NULL {
+                "script raised an exception".to_string()
+            } else {
+                let mut len: usize = 0;
+                let c_str_ptr = sys::JS_ToCStringLen2(ptr, &mut len, exception, false);
+                sys::JS_FreeValue(ptr, exception);
+                if c_str_ptr.is_null() {
+                    "script raised an exception".to_string()
+                } else {
+                    let t = CStr::from_ptr(c_str_ptr).to_string_lossy().into_owned();
+                    sys::JS_FreeCString(ptr, c_str_ptr);
+                    t
+                }
+            };
+            return Err(EvalError(text));
+        }
+        let mut len: usize = 0;
+        let c_str_ptr = sys::JS_ToCStringLen2(ptr, &mut len, result, false);
+        sys::JS_FreeValue(ptr, result);
+        if c_str_ptr.is_null() {
+            return Err(EvalError("failed to stringify result".to_string()));
+        }
+        let owned = CStr::from_ptr(c_str_ptr).to_string_lossy().into_owned();
+        sys::JS_FreeCString(ptr, c_str_ptr);
+        Ok(owned)
+    }
+
     /// Pulls the pending exception off the context and stringifies it:
     /// `Error` instances render through their own `toString`
     /// ("SyntaxError: unexpected token"), thrown strings/primitives come

@@ -34,22 +34,30 @@ fn a_message_sent_to_another_window_is_delivered_on_its_own_pump() {
     let ctx2 = Context::with_dom(&rt2, dom::Dom::new());
     let id2 = ctx2.window_id().unwrap();
 
+    ctx2.eval(
+        "globalThis.received = null; \
+         window.addEventListener('message', (e) => { globalThis.received = e.data; });",
+        "<test>",
+    )
+    .unwrap();
+
     let sent = ctx1.send_cross_window_message(id2, "({ a: 1, b: 'x' })");
     assert!(sent, "sending to a live window must succeed");
 
     // Not delivered until ctx2 pumps — matches every other "no real event
     // loop, a host pumps explicitly" primitive in this crate.
-    let before_pump = ctx2
-        .eval("globalThis.__crossWindowInbox", "<test>")
-        .unwrap();
-    assert_eq!(before_pump, "undefined");
+    let before_pump = ctx2.eval("globalThis.received", "<test>").unwrap();
+    assert_eq!(before_pump, "null");
 
     ctx2.run_pending_timers();
 
+    // Real "message" event delivery (ROADMAP.md item 37's own JS-facing
+    // completion, see window_registry.rs's own doc) — not the internal
+    // test-only array Stage 3 originally used.
     let delivered = ctx2
-        .eval("JSON.stringify(globalThis.__crossWindowInbox)", "<test>")
-        .expect("reading the inbox should not throw");
-    assert_eq!(delivered, "[{\"a\":1,\"b\":\"x\"}]");
+        .eval("JSON.stringify(globalThis.received)", "<test>")
+        .expect("reading the received value should not throw");
+    assert_eq!(delivered, "{\"a\":1,\"b\":\"x\"}");
 }
 
 #[test]

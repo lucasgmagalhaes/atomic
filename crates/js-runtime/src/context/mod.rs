@@ -40,9 +40,9 @@ use crate::{
     abort_controller, blob, clipboard, computed_style, console, crypto, cssom_stylesheet,
     document_cookie, dom_bindings, event_subclasses, events, fetch, fetch_async, form_data,
     history, host_state, indexed_db_bindings, local_storage_bindings, location, message_channel,
-    mutation_observer, navigator, notifications, page_visibility, performance, request_response,
-    screen, script_limits, timers, trusted_types, url_bindings, value_bridge, web_audio, window,
-    window_registry,
+    module_loader, mutation_observer, navigator, notifications, page_visibility, performance,
+    request_response, screen, script_limits, timers, trusted_types, url_bindings, value_bridge,
+    web_audio, window, window_registry,
 };
 
 impl<'rt> Context<'rt> {
@@ -176,7 +176,31 @@ impl<'rt> Context<'rt> {
                 + mutation_observer::pump(self.ptr)
                 + message_channel::pump(self.ptr)
                 + window_delivered
+                + module_loader::pump(self.ptr)
         }
+    }
+
+    /// Resolves an `import`/dynamic-`import()` specifier against
+    /// `base_url` — real relative/absolute URL resolution (`ROADMAP.md`
+    /// item 19's resolver half). See `module_loader`'s own doc for the
+    /// scope cut: no import maps yet, so a bare specifier with no scheme
+    /// can't resolve.
+    pub fn resolve_module_specifier(&self, base_url: &str, specifier: &str) -> Option<String> {
+        module_loader::resolve_specifier(base_url, specifier)
+    }
+
+    /// Starts (or reuses, if already cached/in-flight) a background fetch
+    /// of `resolved_url`'s source text — see `module_loader`'s own doc.
+    /// Delivered the next time [`Context::run_pending_timers`] pumps.
+    pub fn load_module(&self, resolved_url: &str) {
+        module_loader::load(self.ptr, resolved_url);
+    }
+
+    /// Real module-fetch cache read side — `None` if [`Context::
+    /// load_module`] was never called for `resolved_url` on this
+    /// `Context`.
+    pub fn module_status(&self, resolved_url: &str) -> Option<module_loader::ModuleStatus> {
+        module_loader::status(self.ptr, resolved_url)
     }
 
     /// This context's window identity (`ROADMAP.md` items 35-37) — `None`
@@ -293,6 +317,7 @@ impl Drop for Context<'_> {
         if let Some(id) = self.window_id() {
             window_registry::unregister(id);
         }
+        module_loader::cleanup(self.ptr);
         unsafe {
             script_limits::cleanup(self.ptr);
             timers::cleanup(self.ptr);

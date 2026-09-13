@@ -39,9 +39,9 @@ pub struct Context<'rt> {
 use crate::{
     abort_controller, blob, clipboard, computed_style, console, crypto, cssom_stylesheet,
     document_cookie, dom_bindings, event_subclasses, events, fetch, fetch_async, form_data,
-    history, host_state, indexed_db_bindings, local_storage_bindings, location, mutation_observer,
-    navigator, notifications, page_visibility, performance, request_response, screen,
-    script_limits, timers, trusted_types, url_bindings, value_bridge, web_audio, window,
+    history, host_state, indexed_db_bindings, local_storage_bindings, location, message_channel,
+    mutation_observer, navigator, notifications, page_visibility, performance, request_response,
+    screen, script_limits, timers, trusted_types, url_bindings, value_bridge, web_audio, window,
 };
 
 impl<'rt> Context<'rt> {
@@ -75,6 +75,7 @@ impl<'rt> Context<'rt> {
             window::register(ptr);
             location::register(ptr);
             history::register(ptr);
+            message_channel::register(ptr);
             mutation_observer::register(ptr);
             screen::register(ptr);
             value_bridge::register(ptr);
@@ -162,7 +163,10 @@ impl<'rt> Context<'rt> {
     /// explicitly. Returns how many callbacks/jobs ran in total.
     pub fn run_pending_timers(&self) -> usize {
         unsafe {
-            timers::pump(self.ptr) + fetch_async::pump(self.ptr) + mutation_observer::pump(self.ptr)
+            timers::pump(self.ptr)
+                + fetch_async::pump(self.ptr)
+                + mutation_observer::pump(self.ptr)
+                + message_channel::pump(self.ptr)
         }
     }
 
@@ -241,6 +245,7 @@ impl Drop for Context<'_> {
             timers::cleanup(self.ptr);
             fetch_async::cleanup(self.ptr);
             mutation_observer::cleanup(self.ptr);
+            message_channel::cleanup(self.ptr);
             blob::cleanup(self.ptr);
             notifications::cleanup(self.ptr);
             dom_bindings::cleanup(self.ptr);

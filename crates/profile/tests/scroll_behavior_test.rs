@@ -182,6 +182,74 @@ fn reload_resets_scroll_to_the_top() {
 }
 
 #[test]
+fn a_real_overflow_auto_containers_scrolltop_shifts_only_its_own_content() {
+    // `ROADMAP.md` item 22: an arbitrary `overflow: auto`/`hidden`
+    // container's own real scroll state, distinct from the whole-document
+    // scroll every other test in this file exercises. `#box` (50px tall,
+    // clipped) stacks two 50px children - only 50px of its real 100px
+    // content is visible at a time. `#outside` sits below the box and
+    // must stay untouched by scrolling *inside* it.
+    let html = r#"<style>
+        #box { position: absolute; left: 0px; top: 0px; width: 100px; height: 50px; overflow: hidden; }
+        #a { background-color: #ff0000; width: 100px; height: 50px; }
+        #b { background-color: #0000ff; width: 100px; height: 50px; }
+        #outside { position: absolute; left: 0px; top: 60px; width: 100px; height: 20px; background-color: #ffffff; }
+    </style>
+    <div id="box"><div id="a"></div><div id="b"></div></div>
+    <div id="outside"></div>"#;
+    let addr = serve_html_once(html);
+    let page_url = format!("http://{addr}/");
+
+    let name = unique_shmem_name("element-scroll-top");
+    let mut profile = Profile::spawn(worker_path(), &name, 100, 100).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let result = profile
+        .navigate(&page_url)
+        .expect("protocol should not fail");
+    assert!(result.is_ok(), "navigate should succeed: {result:?}");
+
+    let before = profile.latest_frame().unwrap();
+    assert_eq!(
+        &before[0..4],
+        &[255, 0, 0, 255],
+        "the unscrolled container should show #a (red) first, got {:?}",
+        &before[0..4]
+    );
+    let outside_before = pixel_at(&before, 100, 0, 60);
+    assert_eq!(outside_before, [255, 255, 255, 255]);
+
+    let eval_result = profile
+        .evaluate("document.getElementById('box').scrollTop = 50")
+        .expect("protocol should not fail");
+    assert!(
+        eval_result.is_ok(),
+        "setting scrollTop should not throw: {eval_result:?}"
+    );
+
+    let after = profile.latest_frame().unwrap();
+    assert_eq!(
+        &after[0..4],
+        &[0, 0, 255, 255],
+        "scrolling the box down by #a's own height should bring #b (blue) into view, got {:?}",
+        &after[0..4]
+    );
+    let outside_after = pixel_at(&after, 100, 0, 60);
+    assert_eq!(
+        outside_after,
+        [255, 255, 255, 255],
+        "content outside the scrolled container must stay exactly where it was"
+    );
+
+    profile.quit();
+}
+
+fn pixel_at(frame: &[u8], width: u32, x: u32, y: u32) -> [u8; 4] {
+    let idx = ((y * width + x) * 4) as usize;
+    [frame[idx], frame[idx + 1], frame[idx + 2], frame[idx + 3]]
+}
+
+#[test]
 fn click_at_hit_tests_against_the_scrolled_document_not_the_pre_scroll_one() {
     let html = r#"<style>#a { background-color: #ff0000; width: 100px; height: 150px; } #b { background-color: #0000ff; width: 100px; height: 150px; }</style><div id="a"></div><div id="b"></div>"#;
     let addr = serve_html_once(html);

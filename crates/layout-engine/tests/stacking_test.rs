@@ -16,6 +16,7 @@ fn box_with(node: dom::NodeId, style: ComputedStyle, children: Vec<LayoutBox>) -
         inline_spans: None,
         glyphs: Vec::new(),
         image: None,
+        scroll_offset: (0.0, 0.0),
     }
 }
 

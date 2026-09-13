@@ -63,12 +63,21 @@ fn collect_images(
             opacity,
         });
     }
-    let child_clip = if box_.style.overflow == Overflow::Hidden {
-        Some(tighten_clip(box_, clip, translate))
+    let (child_clip, child_translate) = if box_.style.overflow == Overflow::Hidden {
+        // Real per-element scroll (`ROADMAP.md` item 22) - see
+        // `rects.rs`'s own `collect` for the full rationale; same shift,
+        // applied to images instead of background rects.
+        (
+            Some(tighten_clip(box_, clip, translate)),
+            (
+                translate.0 - box_.scroll_offset.0,
+                translate.1 - box_.scroll_offset.1,
+            ),
+        )
     } else {
-        clip
+        (clip, translate)
     };
     for child in paint_order(&box_.children) {
-        collect_images(child, out, child_clip, opacity, translate);
+        collect_images(child, out, child_clip, opacity, child_translate);
     }
 }

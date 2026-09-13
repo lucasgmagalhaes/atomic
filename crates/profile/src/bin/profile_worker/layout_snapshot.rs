@@ -39,6 +39,36 @@ pub(crate) fn collect_layout_rects(tree: &LayoutBox) -> HashMap<NodeId, LayoutMe
     out
 }
 
+/// Flattens a laid-out `LayoutBox` tree into a `NodeId -> (content_width,
+/// content_height)` map for `Context::set_scroll_extents` — the real
+/// `scrollWidth`/`scrollHeight` source data (`ROADMAP.md` item 22). Each
+/// box's own value is the bounding extent of its *children*, relative to
+/// its own origin (`max(child.x + child.width)`/`max(child.y +
+/// child.height)` across all children) — a box with no children reads
+/// `(0.0, 0.0)` here (`js_runtime::layout_measurement`'s own
+/// `scroll_extent_for` floors this against `clientWidth`/`clientHeight`,
+/// so a childless box's real `scrollWidth`/`scrollHeight` still comes out
+/// correct without this walk needing to know the box's own size).
+pub(crate) fn collect_scroll_extents(tree: &LayoutBox) -> HashMap<NodeId, (f64, f64)> {
+    fn walk(box_: &LayoutBox, out: &mut HashMap<NodeId, (f64, f64)>) {
+        let mut max_x: f64 = 0.0;
+        let mut max_y: f64 = 0.0;
+        for child in &box_.children {
+            let child_right = (child.dimensions.x - box_.dimensions.x) + child.dimensions.width;
+            let child_bottom = (child.dimensions.y - box_.dimensions.y) + child.dimensions.height;
+            max_x = max_x.max(child_right);
+            max_y = max_y.max(child_bottom);
+        }
+        out.insert(box_.node, (max_x, max_y));
+        for child in &box_.children {
+            walk(child, out);
+        }
+    }
+    let mut out = HashMap::new();
+    walk(tree, &mut out);
+    out
+}
+
 /// Formats one `layout_engine::Length` the way real CSS would serialize a
 /// resolved value: `px` for a resolved pixel length, `auto` for `Auto`, and
 /// a plain percent string for `Percent` (real `getComputedStyle` resolves

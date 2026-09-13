@@ -16,7 +16,9 @@ use render::{
     Rect,
 };
 
-use crate::layout_snapshot::{collect_computed_styles, collect_layout_rects};
+use crate::layout_snapshot::{
+    collect_computed_styles, collect_layout_rects, collect_scroll_extents,
+};
 
 use super::{LayerCacheEntry, LayoutCache, Page, PaintCache};
 
@@ -197,6 +199,7 @@ impl<'rt> Page<'rt> {
             .expect("parsed HTML always produces a box");
         self.ctx.set_layout_rects(collect_layout_rects(&tree));
         self.ctx.set_computed_styles(collect_computed_styles(&tree));
+        self.ctx.set_scroll_extents(collect_scroll_extents(&tree));
         let offset = scroll_top as f32;
         let shift_clip =
             |clip: Option<ClipRect>, dy: f32| clip.map(|c| ClipRect { y: c.y - dy, ..c });

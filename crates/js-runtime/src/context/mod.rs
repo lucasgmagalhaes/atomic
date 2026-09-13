@@ -118,6 +118,7 @@ pub(crate) fn build_host_state(dom: dom::Dom) -> Box<host_state::HostState> {
         url: None,
         layout_rects: std::collections::HashMap::new(),
         computed_styles: std::collections::HashMap::new(),
+        scroll_extents: std::collections::HashMap::new(),
         csp: Vec::new(),
         trusted_type_policy_names: Vec::new(),
         console_messages: Vec::new(),

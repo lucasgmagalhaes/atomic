@@ -58,6 +58,14 @@ pub(crate) struct HostState {
     /// `set_computed_styles`) reads as an empty style, same
     /// degrade-gracefully pattern as `layout_rects`/`url`.
     pub computed_styles: HashMap<dom::NodeId, HashMap<String, String>>,
+    /// Real per-element scroll extent (`ROADMAP.md` item 22) — each
+    /// entry is a `(content_width, content_height)` pair, the real
+    /// `scrollWidth`/`scrollHeight` source data, pushed in wholesale by
+    /// `Context::set_scroll_extents` (see `crate::layout_measurement`)
+    /// alongside `layout_rects`/`computed_styles`. A node absent here
+    /// reads as its own `clientWidth`/`clientHeight` (a container whose
+    /// content doesn't overflow it), same degrade-gracefully pattern.
+    pub scroll_extents: HashMap<dom::NodeId, (f64, f64)>,
     /// Raw `Content-Security-Policy` policy texts, each checked by
     /// `crate::csp::is_connect_allowed` before `fetch`/`fetchSync`/
     /// `XMLHttpRequest` send a request — a request must be allowed by

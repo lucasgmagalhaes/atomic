@@ -75,13 +75,27 @@ fn collect(
     if box_.style.border_style != BorderStyle::None && box_.style.border_color.a > 0 {
         push_border_rects(box_, out, clip, opacity, translate);
     }
-    let child_clip = if box_.style.overflow == Overflow::Hidden {
-        Some(tighten_clip(box_, clip, translate))
+    let (child_clip, child_translate) = if box_.style.overflow == Overflow::Hidden {
+        (
+            Some(tighten_clip(box_, clip, translate)),
+            // Real per-element scroll (`ROADMAP.md` item 22): a scrolled
+            // container's own background/border/shadow (already painted
+            // above at the un-shifted `translate`) stay fixed; only its
+            // *children* shift, by the negative of its own scroll offset
+            // - matches `profile-worker`'s whole-document `y - scroll_top`
+            // shift, just applied per element instead of once for the
+            // page. Still clipped to the container's own (un-shifted)
+            // border box via `child_clip` above.
+            (
+                translate.0 - box_.scroll_offset.0,
+                translate.1 - box_.scroll_offset.1,
+            ),
+        )
     } else {
-        clip
+        (clip, translate)
     };
     for child in paint_order(&box_.children) {
-        collect(child, out, child_clip, opacity, translate);
+        collect(child, out, child_clip, opacity, child_translate);
     }
 }
 

@@ -33,7 +33,7 @@ pub struct Rect {
     pub height: f64,
 }
 
-unsafe fn rect_for(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> Rect {
+pub(crate) unsafe fn rect_for(ctx: *mut sys::JSContext, this_val: sys::JSValue) -> Rect {
     let Some(id) = crate::dom_bindings::node_id(ctx, this_val) else {
         return Rect::default();
     };
@@ -108,6 +108,49 @@ unsafe extern "C" fn client_height_get(
     sys::js_float64(rect_for(ctx, this_val).height)
 }
 
+/// Real `scrollWidth`/`scrollHeight` (`ROADMAP.md` item 22) - the box's
+/// own real content extent, pushed by `Context::set_scroll_extents`. A
+/// container's scrollable extent is never smaller than its own visible
+/// box, so this floors at the matching `clientWidth`/`clientHeight` (a
+/// node absent from `scroll_extents` - never laid out, or a host that
+/// never calls `set_scroll_extents` - falls back to that same value,
+/// matching a real non-overflowing element's `scrollHeight === clientHeight`).
+pub(crate) unsafe fn scroll_extent_for(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> (f64, f64) {
+    let client = rect_for(ctx, this_val);
+    let Some(id) = crate::dom_bindings::node_id(ctx, this_val) else {
+        return (client.width, client.height);
+    };
+    let state = crate::host_state::get(ctx);
+    if state.is_null() {
+        return (client.width, client.height);
+    }
+    let (content_width, content_height) = (*state)
+        .scroll_extents
+        .get(&id)
+        .copied()
+        .unwrap_or((client.width, client.height));
+    (
+        content_width.max(client.width),
+        content_height.max(client.height),
+    )
+}
+
+unsafe extern "C" fn scroll_width_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    sys::js_float64(scroll_extent_for(ctx, this_val).0)
+}
+unsafe extern "C" fn scroll_height_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    sys::js_float64(scroll_extent_for(ctx, this_val).1)
+}
+
 unsafe fn define_readonly(
     ctx: *mut sys::JSContext,
     proto: sys::JSValue,
@@ -154,6 +197,8 @@ pub(crate) unsafe fn define_layout_measurement(ctx: *mut sys::JSContext, proto: 
         ("offsetLeft", offset_left_get as Getter),
         ("clientWidth", client_width_get as Getter),
         ("clientHeight", client_height_get as Getter),
+        ("scrollWidth", scroll_width_get as Getter),
+        ("scrollHeight", scroll_height_get as Getter),
     ] {
         define_readonly(ctx, proto, name, getter);
     }

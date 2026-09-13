@@ -97,6 +97,7 @@ fn build_children<'a>(
                 inline_spans: Some(spans),
                 glyphs: Vec::new(),
                 image: None,
+                scroll_offset: (0.0, 0.0),
             });
         }
     };
@@ -167,6 +168,7 @@ pub(super) fn build<'a>(
             inline_spans: None,
             glyphs: Vec::new(),
             image: None,
+            scroll_offset: (0.0, 0.0),
         });
     }
 
@@ -225,5 +227,6 @@ pub(super) fn build<'a>(
         inline_spans: None,
         glyphs: Vec::new(),
         image: None,
+        scroll_offset: dom.element_scroll_offset(node),
     })
 }

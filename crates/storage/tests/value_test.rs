@@ -106,6 +106,41 @@ fn accessors_narrow_to_the_right_variant() {
 }
 
 #[test]
+fn round_trips_bytes_including_empty_and_non_utf8() {
+    for value in [
+        Value::Bytes(vec![]),
+        Value::Bytes(vec![0, 1, 2, 255, 254, 253]),
+        Value::Bytes((0u8..=255).collect()),
+    ] {
+        let wire = value.to_wire();
+        assert_eq!(
+            Value::parse(&wire).unwrap(),
+            value,
+            "failed to round-trip {wire:?}"
+        );
+    }
+}
+
+#[test]
+fn bytes_round_trip_nested_inside_arrays_and_objects() {
+    let value = Value::Object(vec![
+        ("blob".to_string(), Value::Bytes(vec![1, 2, 3])),
+        (
+            "list".to_string(),
+            Value::Array(vec![Value::Bytes(vec![9, 9]), Value::Null]),
+        ),
+    ]);
+    let wire = value.to_wire();
+    assert_eq!(Value::parse(&wire).unwrap(), value);
+}
+
+#[test]
+fn as_bytes_narrows_to_the_bytes_variant() {
+    assert_eq!(Value::Bytes(vec![1, 2]).as_bytes(), Some(&[1u8, 2][..]));
+    assert_eq!(Value::from("not bytes").as_bytes(), None);
+}
+
+#[test]
 fn clone_deep_produces_an_independent_copy() {
     let original = Value::Array(vec![Value::from(1.0)]);
     let mut cloned = original.clone_deep();

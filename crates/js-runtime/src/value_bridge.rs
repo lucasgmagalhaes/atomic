@@ -19,15 +19,24 @@
 //! that module's own previously-documented "kept by reference, not
 //! cloned" deviation).
 //!
-//! Deviations from a true structured clone: no `Date`/`Map`/`Set`/typed
-//! arrays/`RegExp` (functions, symbols, and anything else outside
-//! null/undefined/bool/number/string/array/plain-object collapses to
-//! `Value::Null` — matches `storage::value::Value`'s own scope, this
-//! module doesn't invent variants that type can't hold), and no cycle
-//! detection (a JS object referencing itself would recurse forever here;
-//! real structured clone handles cycles, this doesn't — same scope cut
-//! this module already carried before `structuredClone` existed as a
-//! global, not a new one introduced for it).
+//! A real `Uint8Array` (`ROADMAP.md` item 32) round-trips as itself now —
+//! `js_to_storage_value` recognizes it via `JS_GetUint8Array` (the same
+//! narrow-scope check `crypto.rs`'s `getRandomValues` already uses)
+//! before falling through to the array/object walk, and
+//! `storage_value_to_js` rebuilds a real independent copy via
+//! `JS_NewUint8ArrayCopy`. Not a bare `ArrayBuffer` with no view, and not
+//! any other `TypedArray` kind (`Int32Array`/`Float64Array`/etc.) —
+//! same scope cut `storage::value::Value`'s own doc documents.
+//!
+//! Deviations from a true structured clone: no `Date`/`Map`/`Set`/
+//! `RegExp` (functions, symbols, and anything else outside
+//! null/undefined/bool/number/string/array/plain-object/`Uint8Array`
+//! collapses to `Value::Null` — matches `storage::value::Value`'s own
+//! scope, this module doesn't invent variants that type can't hold), and
+//! no cycle detection (a JS object referencing itself would recurse
+//! forever here; real structured clone handles cycles, this doesn't —
+//! same scope cut this module already carried before `structuredClone`
+//! existed as a global, not a new one introduced for it).
 use std::ffi::CString;
 use std::os::raw::c_int;
 
@@ -112,10 +121,30 @@ pub(crate) unsafe fn js_to_storage_value(ctx: *mut sys::JSContext, val: sys::JSV
             .map(Value::String)
             .unwrap_or(Value::Null),
         sys::JS_TAG_OBJECT => {
-            if sys::JS_IsArray(val) {
-                js_array_to_value(ctx, val)
+            let mut size: usize = 0;
+            let ptr = sys::JS_GetUint8Array(ctx, &mut size, val);
+            if !ptr.is_null() {
+                // Real `Uint8Array` (`ROADMAP.md` item 32) - borrowed
+                // pointer per `JS_GetUint8Array`'s own doc, copied into an
+                // owned `Vec` before returning (same "clone reads, keeps
+                // nothing borrowed" contract every other arm here has).
+                Value::Bytes(std::slice::from_raw_parts(ptr, size).to_vec())
             } else {
-                js_object_to_value(ctx, val)
+                // `JS_GetUint8Array` throws a real `TypeError` for *any*
+                // non-typed-array object (confirmed against quickjs-ng's
+                // own `get_typed_array` helper) - this call runs on every
+                // plain object/array walked here, so that exception must
+                // be taken and dropped now, or it would sit pending on
+                // `ctx` and surface later against unrelated code (the same
+                // `JS_GetException`-then-`JS_FreeValue` "take and discard"
+                // shape `Context::eval`'s own error path already uses).
+                let stray = sys::JS_GetException(ctx);
+                sys::JS_FreeValue(ctx, stray);
+                if sys::JS_IsArray(val) {
+                    js_array_to_value(ctx, val)
+                } else {
+                    js_object_to_value(ctx, val)
+                }
             }
         }
         _ => Value::Null,
@@ -191,5 +220,9 @@ pub(crate) unsafe fn storage_value_to_js(ctx: *mut sys::JSContext, value: &Value
             }
             obj
         }
+        // A real, independent `Uint8Array` copy (`ROADMAP.md` item 32) -
+        // `bytes` isn't borrowed afterward, matching `JS_NewUint8ArrayCopy`'s
+        // own doc.
+        Value::Bytes(bytes) => sys::JS_NewUint8ArrayCopy(ctx, bytes.as_ptr(), bytes.len()),
     }
 }

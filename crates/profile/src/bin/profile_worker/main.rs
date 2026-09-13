@@ -102,12 +102,12 @@
 //!   `RELOAD`/`NAVIGATE`, same as `focused_id`. No horizontal scroll.
 //!   The page's own script sees and can drive the same value now too
 //!   (`window.scrollY`/`pageYOffset`/`scroll`/`scrollTo`/`scrollBy` —
-//!   `js_runtime::window`, `ROADMAP.md` P3 item 22): [`sync_scroll`] runs
-//!   before every command's paint, reading back whatever the page's own
-//!   script last requested (`Context::scroll_y`) and re-clamping it the
-//!   same way this command already did, so a `SCROLL` from the shell and a
-//!   `window.scrollTo(...)` from the page converge on the one authoritative
-//!   offset instead of racing.
+//!   `js_runtime::window`, `ROADMAP.md` P3 item 22): [`commands::WorkerState::sync_scroll`]
+//!   runs before every command's paint, reading back whatever the page's
+//!   own script last requested (`Context::scroll_y`) and re-clamping it
+//!   the same way this command already did, so a `SCROLL` from the shell
+//!   and a `window.scrollTo(...)` from the page converge on the one
+//!   authoritative offset instead of racing.
 //! - `EVAL <script>` -> evaluates arbitrary JS in the current page's own
 //!   context (the automation/devtools-console entry point this protocol
 //!   previously had no equivalent of - every other command was a fixed,
@@ -151,10 +151,15 @@
 //!   wire-shaped data `getBoundingClientRect`/`getComputedStyle` need.
 //! - [`page`]: the `Page` struct itself — DOM + stylesheet + JS context +
 //!   cached layout, plus `render`/`hit_test_at`.
+//! - [`commands`]: the stdin command-protocol dispatch (all the commands
+//!   documented above), bundled into [`commands::WorkerState`] so the
+//!   render loop's mutable state (page, viewport, scroll, timing) could
+//!   be threaded through one struct instead of a dozen loose locals.
 //!
-//! `main()` stays here as the thin entry point: CLI-argument parsing, the
-//! stdin command-protocol loop, and the fixed-cadence render loop
-//! dispatching into the modules above.
+//! `main()` stays here as the thin entry point: CLI-argument parsing,
+//! initial `WorkerState` construction, the stdin-reader thread, and the
+//! fixed-cadence render loop dispatching into `commands`.
+mod commands;
 mod document_load;
 mod input_commands;
 mod layout_snapshot;
@@ -162,7 +167,7 @@ mod network;
 mod page;
 mod page_source;
 
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -170,88 +175,12 @@ use std::time::{Duration, Instant};
 use js_runtime::Runtime;
 use render::GpuRenderer;
 
+use commands::WorkerState;
 use document_load::{load_source, PageSource};
-use input_commands::{
-    dispatch_click, dispatch_click_at, fill_element, tab_focus, type_key, TabOutcome,
-};
 use network::{parse_dns_arg, parse_proxy_arg};
 
 const TARGET_FPS: u32 = 60;
 const FRAME_INTERVAL: Duration = Duration::from_nanos(1_000_000_000 / TARGET_FPS as u64);
-
-/// Reconciles `scroll_top` (the loop's own render/hit-test offset) with
-/// whatever `page.ctx`'s real `window.scrollY` currently holds — a page's
-/// own script (a `scrollTo` call, or a `"load"`/timer/click-handler that
-/// runs one) can change that independently of any `SCROLL` command, so this
-/// must run before every paint, not just after `SCROLL` itself. Clamps
-/// against real content height (same `[0, content_height - viewport_height]`
-/// range `SCROLL`'s own handling already enforced) and writes the clamped
-/// result back into `page.ctx` too, so a page that requested an
-/// out-of-range offset observes the corrected value on its very next read
-/// — the host is authoritative, script only requests, same split a real
-/// compositor-driven scroll has.
-/// Checks for and performs a pending `<a href>` click-navigation request
-/// (see `js_runtime::Context::take_pending_navigation`'s own doc) — called
-/// after any command that could dispatch a real click (`CLICK`/`CLICK_AT`/
-/// `EVAL`). This *is* a real navigation, same `fire_before_unload` gate,
-/// `load_source`, and focus/scroll reset `NAVIGATE`'s own handler already
-/// uses — just host-invisible in the sense that no explicit `NAVIGATE`
-/// command triggered it, only an in-page click. A silent no-op if nothing
-/// was requested, the href doesn't resolve to a real `http(s)` URL (see
-/// `page_source::resolve_url`), or `beforeunload` cancels it — the click
-/// itself already succeeded/replied by the time this runs; it only affects
-/// whether a *subsequent* published frame shows a new page.
-#[allow(clippy::too_many_arguments)]
-fn navigate_if_requested<'rt>(
-    page: &mut page::Page<'rt>,
-    current_source: &mut PageSource,
-    runtime: &'rt Runtime,
-    storage_root: &std::path::Path,
-    proxy: Option<&net::ProxyConfig>,
-    dns_server: Option<std::net::SocketAddr>,
-    width: u32,
-    height: u32,
-    renderer: &GpuRenderer,
-    writer: &mut ipc::FrameWriter,
-    focused_id: &mut Option<String>,
-    scroll_top: &mut f64,
-) {
-    let Some(href) = page.ctx.take_pending_navigation() else {
-        return;
-    };
-    let base_url = match &*current_source {
-        PageSource::Demo => None,
-        PageSource::Url(url) => Some(url.as_str()),
-    };
-    let Some(resolved) = page_source::resolve_url(base_url, &href) else {
-        return;
-    };
-    if !page.ctx.fire_before_unload() {
-        return;
-    }
-    *current_source = PageSource::Url(resolved);
-    let (loaded, _error) = load_source(
-        runtime,
-        current_source,
-        width as f64,
-        storage_root,
-        proxy,
-        dns_server,
-    );
-    *page = loaded;
-    *focused_id = None;
-    *scroll_top = 0.0;
-    sync_scroll(page, width, height, scroll_top);
-    writer.publish(&page.render(renderer, width, height, *scroll_top));
-}
-
-fn sync_scroll(page: &mut page::Page, width: u32, height: u32, scroll_top: &mut f64) {
-    let requested = page.ctx.scroll_y();
-    let max_scroll = (page.content_height(width, height) - height as f64).max(0.0);
-    let clamped = requested.clamp(0.0, max_scroll);
-    *scroll_top = clamped;
-    page.ctx.set_scroll_y(clamped);
-}
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -259,9 +188,9 @@ fn main() {
         eprintln!("usage: profile-worker <shmem-name> <width> <height> [proxy: host:port or user:pass@host:port] [dns-server: host:port] [gpu-adapter-index]");
         std::process::exit(2);
     }
-    let shmem_name = &args[1];
-    let mut width: u32 = args[2].parse().expect("width must be a positive integer");
-    let mut height: u32 = args[3].parse().expect("height must be a positive integer");
+    let shmem_name = args[1].clone();
+    let width: u32 = args[2].parse().expect("width must be a positive integer");
+    let height: u32 = args[3].parse().expect("height must be a positive integer");
     let proxy = parse_proxy_arg(args.get(4).map(String::as_str));
     let dns_server = parse_dns_arg(args.get(5).map(String::as_str));
     // A missing/empty/unparseable value degrades to `render::GpuRenderer::
@@ -281,10 +210,10 @@ fn main() {
     // process's own lifetime yet - see `Page::load`'s doc.
     let storage_root = std::env::temp_dir()
         .join("atomic-profile-storage")
-        .join(shmem_name);
+        .join(&shmem_name);
 
     let runtime = Runtime::new();
-    let mut current_source = PageSource::Demo;
+    let current_source = PageSource::Demo;
     let (mut page, _) = load_source(
         &runtime,
         &current_source,
@@ -298,7 +227,7 @@ fn main() {
         None => GpuRenderer::new(),
     };
 
-    let mut writer = ipc::FrameWriter::new(shmem_name, width, height)
+    let mut writer = ipc::FrameWriter::new(&shmem_name, width, height)
         .expect("failed to create/open shared memory");
     writer.publish(&page.render(&renderer, width, height, 0.0));
 
@@ -317,380 +246,68 @@ fn main() {
     });
 
     let mut stdout = io::stdout();
-    // Mutable, runtime-adjustable cap for the mockup's "Settings >
-    // Performance > frame cap" knob (see `SET_FPS_CAP` below) - starts at
-    // the fixed `FRAME_INTERVAL` this loop always used before that command
-    // existed, so a caller that never sends it gets identical behavior.
-    let mut frame_interval = FRAME_INTERVAL;
-    let mut next_tick = Instant::now() + frame_interval;
-    // Real "background throttling" (mockup's Settings > Performance knob):
-    // while `true`, the tick below skips JS timer pumping and re-rendering
-    // entirely instead of just rendering an unchanged page - a genuinely
-    // idle loop, not a disguised zero-work render. `PING`/`SET_FPS_CAP`/
-    // `QUIT` still work while paused (a hidden pane should still answer
-    // liveness checks and settings changes), only the vsync work itself
-    // stops.
-    let mut paused = false;
-    // Real "which id does the next KEY affect" state - a thin cache of
-    // `dom::Dom`'s own real `active_element()` (see `dispatch_click_at`'s
-    // doc), kept as a `String` id here since `KEY`'s handler goes through
-    // `id`-selector `eval()` scripts like every other command in this
-    // protocol. Reset on `RELOAD`/`NAVIGATE` since a fresh `Page` means a
-    // fresh DOM the old id might not even exist in anymore (a fresh
-    // `dom::Dom` starts with no focus of its own either).
-    let mut focused_id: Option<String> = None;
-    // Real viewport scroll offset (see `SCROLL`'s own handling below and
-    // `Page::render`/`hit_test_at`'s docs) - reset to `0.0` on
-    // `RELOAD`/`NAVIGATE` same as `focused_id`, since a fresh page always
-    // starts scrolled to the top.
-    let mut scroll_top: f64 = 0.0;
-    // Real live resize (`RESIZE` below): a new shared-memory segment is
-    // created per resize rather than growing the fixed-size original one
-    // in place (see `ipc::FrameWriter`'s module doc on the region's size
-    // being fixed at creation) - `resize_count` names each successive
-    // segment `<shmem_name>-r<N>` so the host can find and reopen it.
-    let mut resize_count: u32 = 0;
-    page.ctx.set_viewport_size(width as f64, height as f64);
+
+    let mut state = WorkerState {
+        shmem_name,
+        runtime: &runtime,
+        page,
+        current_source,
+        storage_root,
+        proxy,
+        dns_server,
+        width,
+        height,
+        renderer,
+        writer,
+        // Real "which id does the next KEY affect" state - a thin cache of
+        // `dom::Dom`'s own real `active_element()` (see `dispatch_click_at`'s
+        // doc), kept as a `String` id here since `KEY`'s handler goes through
+        // `id`-selector `eval()` scripts like every other command in this
+        // protocol. Reset on `RELOAD`/`NAVIGATE` since a fresh `Page` means a
+        // fresh DOM the old id might not even exist in anymore (a fresh
+        // `dom::Dom` starts with no focus of its own either).
+        focused_id: None,
+        // Real viewport scroll offset (see `SCROLL`'s own handling and
+        // `Page::render`/`hit_test_at`'s docs) - reset to `0.0` on
+        // `RELOAD`/`NAVIGATE` same as `focused_id`, since a fresh page always
+        // starts scrolled to the top.
+        scroll_top: 0.0,
+        // Real live resize (`RESIZE`): a new shared-memory segment is
+        // created per resize rather than growing the fixed-size original one
+        // in place (see `ipc::FrameWriter`'s module doc on the region's size
+        // being fixed at creation) - `resize_count` names each successive
+        // segment `<shmem_name>-r<N>` so the host can find and reopen it.
+        resize_count: 0,
+        // Mutable, runtime-adjustable cap for the mockup's "Settings >
+        // Performance > frame cap" knob (see `SET_FPS_CAP`) - starts at
+        // the fixed `FRAME_INTERVAL` this loop always used before that
+        // command existed, so a caller that never sends it gets identical
+        // behavior.
+        frame_interval: FRAME_INTERVAL,
+        // Real "background throttling" (mockup's Settings > Performance
+        // knob): while `true`, the tick below skips JS timer pumping and
+        // re-rendering entirely instead of just rendering an unchanged
+        // page - a genuinely idle loop, not a disguised zero-work render.
+        // `PING`/`SET_FPS_CAP`/`QUIT` still work while paused (a hidden
+        // pane should still answer liveness checks and settings changes),
+        // only the vsync work itself stops.
+        paused: false,
+        next_tick: Instant::now() + FRAME_INTERVAL,
+    };
+    state
+        .page
+        .ctx
+        .set_viewport_size(width as f64, height as f64);
 
     'render_loop: loop {
         while let Ok(line) = cmd_rx.try_recv() {
             let line = line.trim();
-            if line == "PING" {
-                let _ = writeln!(stdout, "PONG");
-                let _ = stdout.flush();
-            } else if line == "PAUSE" {
-                paused = true;
-                let _ = writeln!(stdout, "PAUSED");
-                let _ = stdout.flush();
-            } else if line == "RESUME" {
-                paused = false;
-                next_tick = Instant::now() + frame_interval;
-                let _ = writeln!(stdout, "RESUMED");
-                let _ = stdout.flush();
-            } else if line == "RELOAD" {
-                if !page.ctx.fire_before_unload() {
-                    let _ = writeln!(stdout, "ERROR navigation canceled by beforeunload");
-                    let _ = stdout.flush();
-                    continue;
-                }
-                let (loaded, error) = load_source(
-                    &runtime,
-                    &current_source,
-                    width as f64,
-                    &storage_root,
-                    proxy.as_ref(),
-                    dns_server,
-                );
-                page = loaded;
-                focused_id = None;
-                scroll_top = 0.0;
-                sync_scroll(&mut page, width, height, &mut scroll_top);
-                writer.publish(&page.render(&renderer, width, height, scroll_top));
-                match error {
-                    Some(message) => {
-                        let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
-                    }
-                    None => {
-                        let _ = writeln!(stdout, "RELOADED");
-                    }
-                }
-                let _ = stdout.flush();
-            } else if let Some(url) = line.strip_prefix("NAVIGATE ") {
-                if !page.ctx.fire_before_unload() {
-                    let _ = writeln!(stdout, "ERROR navigation canceled by beforeunload");
-                    let _ = stdout.flush();
-                    continue;
-                }
-                current_source = PageSource::Url(url.trim().to_string());
-                let (loaded, error) = load_source(
-                    &runtime,
-                    &current_source,
-                    width as f64,
-                    &storage_root,
-                    proxy.as_ref(),
-                    dns_server,
-                );
-                page = loaded;
-                focused_id = None;
-                scroll_top = 0.0;
-                sync_scroll(&mut page, width, height, &mut scroll_top);
-                writer.publish(&page.render(&renderer, width, height, scroll_top));
-                match error {
-                    Some(message) => {
-                        let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
-                    }
-                    None => {
-                        let _ = writeln!(stdout, "NAVIGATED");
-                    }
-                }
-                let _ = stdout.flush();
-            } else if let Some(rest) = line.strip_prefix("CLICK ") {
-                let result = dispatch_click(&page.ctx, rest.trim());
-                sync_scroll(&mut page, width, height, &mut scroll_top);
-                writer.publish(&page.render(&renderer, width, height, scroll_top));
-                navigate_if_requested(
-                    &mut page,
-                    &mut current_source,
-                    &runtime,
-                    &storage_root,
-                    proxy.as_ref(),
-                    dns_server,
-                    width,
-                    height,
-                    &renderer,
-                    &mut writer,
-                    &mut focused_id,
-                    &mut scroll_top,
-                );
-                match result {
-                    Ok(()) => {
-                        let _ = writeln!(stdout, "CLICKED");
-                    }
-                    Err(message) => {
-                        let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
-                    }
-                }
-                let _ = stdout.flush();
-            } else if let Some(rest) = line.strip_prefix("CLICK_AT ") {
-                let mut parts = rest.split_whitespace();
-                let coords = parts
-                    .next()
-                    .zip(parts.next())
-                    .and_then(|(x, y)| Some((x.parse::<f64>().ok()?, y.parse::<f64>().ok()?)));
-                match coords {
-                    Some((x, y)) => {
-                        let result = dispatch_click_at(&mut page, width, height, x, y, scroll_top);
-                        sync_scroll(&mut page, width, height, &mut scroll_top);
-                        writer.publish(&page.render(&renderer, width, height, scroll_top));
-                        navigate_if_requested(
-                            &mut page,
-                            &mut current_source,
-                            &runtime,
-                            &storage_root,
-                            proxy.as_ref(),
-                            dns_server,
-                            width,
-                            height,
-                            &renderer,
-                            &mut writer,
-                            &mut focused_id,
-                            &mut scroll_top,
-                        );
-                        match result {
-                            Ok(focus) => {
-                                focused_id = focus;
-                                let _ = writeln!(stdout, "CLICKED");
-                            }
-                            Err(message) => {
-                                let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
-                            }
-                        }
-                    }
-                    None => {
-                        let _ = writeln!(stdout, "ERROR CLICK_AT requires two numeric coordinates");
-                    }
-                }
-                let _ = stdout.flush();
-            } else if let Some(key) = line.strip_prefix("KEY ") {
-                match &focused_id {
-                    Some(id) => {
-                        let result = type_key(&page.ctx, id, key);
-                        sync_scroll(&mut page, width, height, &mut scroll_top);
-                        writer.publish(&page.render(&renderer, width, height, scroll_top));
-                        match result {
-                            Ok(()) => {
-                                let _ = writeln!(stdout, "TYPED");
-                            }
-                            Err(message) => {
-                                let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
-                            }
-                        }
-                    }
-                    None => {
-                        let _ = writeln!(
-                            stdout,
-                            "ERROR no element focused - CLICK_AT an <input>/<textarea> first"
-                        );
-                    }
-                }
-                let _ = stdout.flush();
-            } else if line == "TAB" || line == "TAB_REVERSE" {
-                let reverse = line == "TAB_REVERSE";
-                let result = tab_focus(&mut page, reverse);
-                sync_scroll(&mut page, width, height, &mut scroll_top);
-                writer.publish(&page.render(&renderer, width, height, scroll_top));
-                match result {
-                    Ok(TabOutcome::Moved(id)) => {
-                        focused_id = Some(id);
-                        let _ = writeln!(stdout, "TABBED");
-                    }
-                    Ok(TabOutcome::NothingFocusable) => {
-                        let _ =
-                            writeln!(stdout, "ERROR no focusable element with an id on this page");
-                    }
-                    Ok(TabOutcome::DefaultPrevented) => {
-                        let _ = writeln!(stdout, "ERROR default action prevented");
-                    }
-                    Err(message) => {
-                        let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
-                    }
-                }
-                let _ = stdout.flush();
-            } else if let Some(rest) = line.strip_prefix("FILL ") {
-                let mut parts = rest.splitn(2, ' ');
-                let selector = parts.next().unwrap_or("").trim();
-                let value = parts.next().unwrap_or("");
-                let result = fill_element(&page.ctx, selector, value);
-                sync_scroll(&mut page, width, height, &mut scroll_top);
-                writer.publish(&page.render(&renderer, width, height, scroll_top));
-                match result {
-                    Ok(()) => {
-                        let _ = writeln!(stdout, "FILLED");
-                    }
-                    Err(message) => {
-                        let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
-                    }
-                }
-                let _ = stdout.flush();
-            } else if let Some(rest) = line.strip_prefix("SCROLL ") {
-                match rest.trim().parse::<f64>() {
-                    Ok(dy) => {
-                        page.ctx.set_scroll_y(page.ctx.scroll_y() + dy);
-                        sync_scroll(&mut page, width, height, &mut scroll_top);
-                        writer.publish(&page.render(&renderer, width, height, scroll_top));
-                        let _ = writeln!(stdout, "SCROLLED");
-                    }
-                    Err(_) => {
-                        let _ = writeln!(stdout, "ERROR SCROLL requires a numeric delta");
-                    }
-                }
-                let _ = stdout.flush();
-            } else if let Some(rest) = line.strip_prefix("SET_FPS_CAP ") {
-                match rest.trim().parse::<u32>() {
-                    Ok(fps) if fps >= 1 => {
-                        frame_interval = Duration::from_nanos(1_000_000_000 / fps as u64);
-                        let _ = writeln!(stdout, "FPS_CAP_SET {fps}");
-                    }
-                    _ => {
-                        let _ = writeln!(stdout, "ERROR fps cap must be a positive integer");
-                    }
-                }
-                let _ = stdout.flush();
-            } else if let Some(rest) = line.strip_prefix("RESIZE ") {
-                let mut parts = rest.trim().splitn(2, ' ');
-                let dims = parts
-                    .next()
-                    .zip(parts.next())
-                    .and_then(|(w, h)| Some((w.parse::<u32>().ok()?, h.parse::<u32>().ok()?)));
-                match dims {
-                    Some((new_width, new_height)) => {
-                        resize_count += 1;
-                        let new_shmem_name = format!("{shmem_name}-r{resize_count}");
-                        match ipc::FrameWriter::new(&new_shmem_name, new_width, new_height) {
-                            Ok(new_writer) => {
-                                writer = new_writer;
-                                width = new_width;
-                                height = new_height;
-                                page.ctx.set_viewport_size(width as f64, height as f64);
-                                page.ctx.fire_resize();
-                                sync_scroll(&mut page, width, height, &mut scroll_top);
-                                writer.publish(&page.render(&renderer, width, height, scroll_top));
-                                let _ = writeln!(stdout, "RESIZED {new_shmem_name}");
-                            }
-                            Err(e) => {
-                                let _ = writeln!(
-                                    stdout,
-                                    "ERROR failed to open resized frame buffer: {e}"
-                                );
-                            }
-                        }
-                    }
-                    None => {
-                        let _ = writeln!(stdout, "ERROR RESIZE requires two positive integers");
-                    }
-                }
-                let _ = stdout.flush();
-            } else if let Some(script) = line.strip_prefix("EVAL ") {
-                let script = script.trim();
-                // Rendered in both outcomes - a script that mutated the DOM
-                // (or an adopted stylesheet) before throwing still changed
-                // real state worth painting, same convention CLICK's handler
-                // follows when the dispatch itself fails. A NUL byte is
-                // rejected up front rather than passed to `Context::eval`,
-                // whose `CString::new` conversion panics on one - a hostile/
-                // buggy stdin writer must not be able to crash this process.
-                if script.contains('\0') {
-                    let _ = writeln!(stdout, "ERROR script must not contain NUL bytes");
-                    let _ = stdout.flush();
-                } else {
-                    let result = page.ctx.eval(script, "<pane eval>");
-                    sync_scroll(&mut page, width, height, &mut scroll_top);
-                    writer.publish(&page.render(&renderer, width, height, scroll_top));
-                    navigate_if_requested(
-                        &mut page,
-                        &mut current_source,
-                        &runtime,
-                        &storage_root,
-                        proxy.as_ref(),
-                        dns_server,
-                        width,
-                        height,
-                        &renderer,
-                        &mut writer,
-                        &mut focused_id,
-                        &mut scroll_top,
-                    );
-                    match result {
-                        Ok(value) => {
-                            let _ = writeln!(stdout, "EVALUATED {}", value.replace('\n', " "));
-                        }
-                        Err(e) => {
-                            // The real stringified exception (an Error's own
-                            // message, a thrown string verbatim) - a devtools
-                            // console shows what threw, not just that
-                            // something did.
-                            let _ = writeln!(stdout, "ERROR {}", e.0.replace('\n', " "));
-                        }
-                    }
-                    let _ = stdout.flush();
-                }
-            } else if line == "CONSOLE" {
-                // Drains every `console.*` message the page has produced so
-                // far - load-time scripts' output AND anything EVAL'd since
-                // (uncaught script errors land in the same buffer, reported
-                // by `Context::eval` itself). Read-only as far as rendering
-                // goes: no re-render, no frame publish. Draining means a
-                // second CONSOLE only returns messages logged after the
-                // first - devtools-console semantics, and what bounds this
-                // from growing forever across a long session (the buffer is
-                // additionally capped inside js-runtime). Message text is
-                // flattened (newlines -> spaces, our separator -> slashes)
-                // because the reply must be one protocol line.
-                let joined = page
-                    .ctx
-                    .take_console_messages()
-                    .iter()
-                    .map(|m| {
-                        format!(
-                            "{}:{}",
-                            m.level.as_str(),
-                            m.text.replace('\n', " ").replace('|', "/")
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" | ");
-                if joined.is_empty() {
-                    let _ = writeln!(stdout, "MESSAGES");
-                } else {
-                    let _ = writeln!(stdout, "MESSAGES {joined}");
-                }
-                let _ = stdout.flush();
-            } else if line == "QUIT" {
+            if state.handle_command(&mut stdout, line) {
                 break 'render_loop;
             }
         }
 
-        if paused {
+        if state.paused {
             // No timer pumping, no render, no publish - genuinely idle,
             // not "render the same frame every tick". A short fixed sleep
             // (not `frame_interval`, which could be very large under a low
@@ -700,9 +317,14 @@ fn main() {
             continue 'render_loop;
         }
 
-        page.ctx.run_pending_timers();
-        sync_scroll(&mut page, width, height, &mut scroll_top);
-        writer.publish(&page.render(&renderer, width, height, scroll_top));
+        state.page.ctx.run_pending_timers();
+        state.sync_scroll();
+        state.writer.publish(&state.page.render(
+            &state.renderer,
+            state.width,
+            state.height,
+            state.scroll_top,
+        ));
 
         // Fixed-cadence scheduling, not `sleep(frame_interval)` in a loop -
         // that drifts by however long each tick's own work took. If a tick
@@ -712,11 +334,11 @@ fn main() {
         // `frame_interval` is read fresh each tick, not captured once, so a
         // `SET_FPS_CAP` takes effect on the very next tick.
         let now = Instant::now();
-        if next_tick > now {
-            thread::sleep(next_tick - now);
-            next_tick += frame_interval;
+        if state.next_tick > now {
+            thread::sleep(state.next_tick - now);
+            state.next_tick += state.frame_interval;
         } else {
-            next_tick = now + frame_interval;
+            state.next_tick = now + state.frame_interval;
         }
     }
 }

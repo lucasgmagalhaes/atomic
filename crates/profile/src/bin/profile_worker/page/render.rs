@@ -13,7 +13,7 @@ use render::{
 
 use crate::layout_snapshot::{collect_computed_styles, collect_layout_rects};
 
-use super::{LayoutCache, Page};
+use super::{LayoutCache, Page, PaintCache};
 
 impl<'rt> Page<'rt> {
     /// Builds and lays out this page's real box tree against `width`/
@@ -137,6 +137,30 @@ impl<'rt> Page<'rt> {
         height: u32,
         scroll_top: f64,
     ) -> Vec<u8> {
+        // Real paint damage tracking (`ROADMAP.md` P1 item 13): same key
+        // `LayoutCache` uses (a paint result can only differ if the layout
+        // tree it was painted from could) plus `scroll_top`, the one
+        // paint-affecting input layout doesn't need — see `PaintCache`'s
+        // own doc for why this key is used instead of `dom::DirtyFlags::PAINT`.
+        let dom = self
+            .ctx
+            .dom()
+            .expect("Page::load always builds a context over a dom");
+        let layout_ver = dom.layout_version();
+        let style_ver = dom.style_version();
+        let adopted_version = self.ctx.adopted_stylesheet_version();
+        if let Some(cached) = self.paint_cache.borrow().as_ref() {
+            if cached.width == width
+                && cached.height == height
+                && cached.scroll_top == scroll_top
+                && cached.layout_ver == layout_ver
+                && cached.style_ver == style_ver
+                && cached.adopted_version == adopted_version
+            {
+                return cached.pixels.clone();
+            }
+        }
+
         let tree = self
             .layout(width, height)
             .expect("parsed HTML always produces a box");
@@ -176,6 +200,16 @@ impl<'rt> Page<'rt> {
         let mut pixels = renderer.render_to_rgba(&rects, width, height, [0.08, 0.09, 0.13, 1.0]);
         composite_images(&mut pixels, width, height, &images);
         composite_glyphs(&mut pixels, width, height, &glyphs);
+
+        *self.paint_cache.borrow_mut() = Some(PaintCache {
+            width,
+            height,
+            scroll_top,
+            layout_ver,
+            style_ver,
+            adopted_version,
+            pixels: pixels.clone(),
+        });
         pixels
     }
 

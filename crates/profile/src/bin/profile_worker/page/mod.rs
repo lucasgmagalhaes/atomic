@@ -89,6 +89,13 @@ pub(crate) struct Page<'rt> {
     /// pushed via `collect_computed_styles`, which comes straight from
     /// this cache.
     layout_cache: RefCell<Option<LayoutCache>>,
+    /// Real paint damage tracking (`ROADMAP.md` P1 item 13): the last
+    /// composited frame, plus the exact inputs it was computed from.
+    /// `render()` reuses `pixels.clone()` on a cache hit instead of
+    /// re-walking the display list and re-running the GPU/CPU compositing
+    /// passes — see `PaintCache`'s own doc for why this reuses
+    /// `LayoutCache`'s key rather than `dom::DirtyFlags::PAINT`.
+    paint_cache: RefCell<Option<PaintCache>>,
 }
 
 struct LayoutCache {
@@ -106,4 +113,30 @@ struct LayoutCache {
     layout_ver: u64,
     adopted_version: u64,
     tree: LayoutBox,
+}
+
+/// Caches `render()`'s composited pixels the same way `LayoutCache` caches
+/// the box tree they were painted from — same `width`/`height`/`layout_ver`/
+/// `style_ver`/`adopted_version` key (a paint result can only differ if the
+/// layout tree it was painted from could differ), plus `scroll_top`, the
+/// one paint-affecting input `LayoutCache` doesn't need (scrolling doesn't
+/// change layout, only which vertical slice of it is visible).
+///
+/// Deliberately **not** keyed on `dom::DirtyFlags::PAINT`/`drain_dirty()`:
+/// `Dom::focus`/`hover::set_hovered` bump `style_version()` without ever
+/// setting `DirtyFlags::PAINT` (same gap `LayoutCache::style_ver`'s own doc
+/// already documents), so a `DirtyFlags`-only cache would silently freeze a
+/// stale frame across a `:hover`/`:focus` style change. Reusing
+/// `LayoutCache`'s already-proven-correct key sidesteps that gap instead of
+/// reintroducing it. `DirtyFlags::PAINT` itself is untouched by this pass —
+/// reserved for a future, more precise per-region damage pass (see
+/// `spec/architecture/performance.md` §18), not repurposed here.
+struct PaintCache {
+    width: u32,
+    height: u32,
+    scroll_top: f64,
+    layout_ver: u64,
+    style_ver: u64,
+    adopted_version: u64,
+    pixels: Vec<u8>,
 }

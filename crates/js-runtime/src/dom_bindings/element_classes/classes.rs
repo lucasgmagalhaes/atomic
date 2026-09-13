@@ -15,11 +15,12 @@ use crate::dom_bindings::content::{
 };
 use crate::dom_bindings::dataset::define_dataset;
 use crate::dom_bindings::forms::define_form_properties;
+use crate::dom_bindings::iframe::define_iframe_properties;
 use crate::dom_bindings::mutation::define_mutation_methods;
 use crate::dom_bindings::navigation::define_navigation;
 use crate::dom_bindings::node_registry::{
     node_opaque, ELEMENT_CLASS_KIND, HTML_ELEMENT_CLASS_KIND, HTML_FORM_CLASS_KIND,
-    HTML_SELECT_CLASS_KIND, NODE_CLASS_KIND,
+    HTML_IFRAME_CLASS_KIND, HTML_SELECT_CLASS_KIND, NODE_CLASS_KIND,
 };
 use crate::dom_bindings::scroll_focus::{define_focus_methods, define_scroll_methods};
 use crate::dom_bindings::select::define_select_properties;
@@ -169,6 +170,8 @@ pub(super) unsafe fn ensure_html_subclass(
         define_form_properties(ctx, proto);
     } else if kind == HTML_SELECT_CLASS_KIND {
         define_select_properties(ctx, proto);
+    } else if kind == HTML_IFRAME_CLASS_KIND {
+        define_iframe_properties(ctx, proto);
     }
     sys::JS_SetClassProto(ctx, class_id, proto);
 

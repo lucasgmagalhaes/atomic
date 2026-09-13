@@ -61,6 +61,7 @@ mod document_properties_define;
 mod document_query;
 mod element_classes;
 mod forms;
+mod iframe;
 mod mutation;
 mod navigation;
 mod node_registry;

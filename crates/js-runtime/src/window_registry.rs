@@ -36,21 +36,22 @@
 //! internally for its own same-realm clone — as the thing that actually
 //! crosses.
 //!
-//! # Scope cut: no `iframe` (`ROADMAP.md` item 35)
+//! # `<iframe>` (`ROADMAP.md` item 35): `.contentWindow` only
 //!
 //! `window.open()` creates a new *top-level* browsing context (real spec
 //! behavior: `top`/`parent`/`self` on the opened window all alias itself,
 //! exactly like `window.rs`'s existing aliasing already does for any
-//! `Context` — no changes needed there). An `<iframe>`'s `contentWindow`/
-//! `contentDocument` need a *child* browsing context embedded in the
-//! opener's own document, which needs two things this pass doesn't
-//! attempt: (1) `contentDocument` requires exposing a live object from a
-//! *different* `JSContext` directly into the parent's own realm — this
+//! `Context` — no changes needed there). `<iframe>.contentWindow`
+//! (`dom_bindings::iframe`) reuses this exact primitive — `window_for_
+//! iframe` opens (and caches by the `<iframe>`'s own `NodeId`) a child
+//! window the same way `open_window` does. What's still deliberately
+//! not attempted: `contentDocument` requires exposing a live object from
+//! a *different* `JSContext` directly into the parent's own realm — this
 //! engine has no cross-`JSContext` object-sharing mechanism, only the
-//! structured-clone-shaped message passing `postMessage` already uses;
-//! (2) real visual embedding needs `layout-engine` to lay out and paint a
-//! second document nested inside a box, which it has no concept of. Both
-//! are honest, separate future work, not attempted here.
+//! structured-clone-shaped message passing `postMessage` already uses —
+//! and real visual embedding needs `layout-engine` to lay out and paint
+//! a second document nested inside a box, which it has no concept of.
+//! Both are honest, separate future work.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -112,6 +113,20 @@ thread_local! {
     // Opener ctx pointer -> every WindowId it opened, for `pump_children`
     // to walk without needing every opener to track its own children.
     static CHILDREN_OF: RefCell<HashMap<usize, Vec<WindowId>>> = RefCell::new(HashMap::new());
+    // (owner ctx, iframe NodeId) -> the WindowId `window_for_iframe`
+    // lazily opened for it, so repeated `.contentWindow` reads return the
+    // *same* window instead of opening a fresh one every time.
+    static IFRAME_WINDOWS: RefCell<HashMap<(usize, dom::NodeId), WindowId>> =
+        RefCell::new(HashMap::new());
+    // (viewing ctx, target WindowId) -> the RemoteWindow object already
+    // built for that pair, so repeated access (`iframe.contentWindow`
+    // read twice, `window.open()`'s handle looked up again) returns the
+    // *same* JS object identity — real spec behavior for `contentWindow`
+    // in particular. Same per-(ctx, id) object-identity-cache shape
+    // `dom_bindings::node_registry::NODE_OBJECTS` already uses for
+    // `dom::NodeId`s.
+    static REMOTE_WINDOW_OBJECTS: RefCell<HashMap<(usize, WindowId), sys::JSValue>> =
+        RefCell::new(HashMap::new());
 }
 
 /// Registers a new window identity with an empty inbox. Called once by
@@ -261,6 +276,10 @@ pub(crate) unsafe fn make_remote_window(
     ctx: *mut sys::JSContext,
     target: WindowId,
 ) -> sys::JSValue {
+    let cache_key = (ctx as usize, target);
+    if let Some(cached) = REMOTE_WINDOW_OBJECTS.with(|m| m.borrow().get(&cache_key).copied()) {
+        return sys::JS_DupValue(ctx, cached);
+    }
     let obj = sys::JS_NewObject(ctx);
     sys::JS_SetPropertyStr(
         ctx,
@@ -270,6 +289,9 @@ pub(crate) unsafe fn make_remote_window(
     );
     crate::js_helpers::define_method(ctx, obj, "postMessage", remote_window_post_message, 1);
     crate::js_helpers::define_method(ctx, obj, "close", remote_window_close, 0);
+    REMOTE_WINDOW_OBJECTS.with(|m| {
+        m.borrow_mut().insert(cache_key, sys::JS_DupValue(ctx, obj));
+    });
     obj
 }
 
@@ -352,6 +374,7 @@ pub(crate) unsafe fn close_window(id: WindowId) -> bool {
         return false;
     };
     close_children_of(child.ctx);
+    cleanup_remote_window_cache(child.ctx);
     crate::module_loader::cleanup(child.ctx);
     crate::context::cleanup_standard_globals(child.ctx);
     crate::dom_bindings::cleanup(child.ctx);
@@ -372,6 +395,47 @@ pub(crate) unsafe fn close_children_of(owner_ctx: *mut sys::JSContext) {
         .unwrap_or_default();
     for child_id in children {
         close_window(child_id);
+    }
+}
+
+/// Real `<iframe>.contentWindow`'s core (`ROADMAP.md` item 35): returns
+/// the child window already opened for `iframe_id` on `ctx`, or opens
+/// (and caches) one on first access — same underlying primitive as
+/// `window.open()`, just keyed by the `<iframe>` element's own `NodeId`
+/// instead of created fresh on every call. See `dom_bindings::iframe`'s
+/// own doc for the `.contentDocument`/visual-embedding scope cut.
+pub(crate) unsafe fn window_for_iframe(
+    ctx: *mut sys::JSContext,
+    iframe_id: dom::NodeId,
+) -> WindowId {
+    let key = (ctx as usize, iframe_id);
+    if let Some(existing) = IFRAME_WINDOWS.with(|m| m.borrow().get(&key).copied()) {
+        return existing;
+    }
+    let id = open_window(ctx);
+    IFRAME_WINDOWS.with(|m| {
+        m.borrow_mut().insert(key, id);
+    });
+    id
+}
+
+/// Frees every cached `RemoteWindow` object built *in* `ctx` (regardless
+/// of which target window each represents) — must run before `ctx` is
+/// freed, same ordering requirement every other module's own
+/// `cleanup(ctx)` documents. Called from both `Context::drop` (a
+/// top-level context) and [`close_window`] (a dynamically-opened one).
+pub(crate) unsafe fn cleanup_remote_window_cache(ctx: *mut sys::JSContext) {
+    let keys: Vec<(usize, WindowId)> = REMOTE_WINDOW_OBJECTS.with(|m| {
+        m.borrow()
+            .keys()
+            .filter(|(owner, _)| *owner == ctx as usize)
+            .copied()
+            .collect()
+    });
+    for key in keys {
+        if let Some(obj) = REMOTE_WINDOW_OBJECTS.with(|m| m.borrow_mut().remove(&key)) {
+            sys::JS_FreeValue(ctx, obj);
+        }
     }
 }
 

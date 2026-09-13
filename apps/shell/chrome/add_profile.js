@@ -6,17 +6,16 @@
 // class.
 const modal = document.getElementById('modal');
 
-const field = (id, label) =>
-    Row({}, [El('label', {}, [label]), El('input', { id, type: 'text' }, [])]);
+const field = (id, label) => Row({}, [Label({}, [label]), Input({ id, type: 'text' })]);
 
 modal.appendChild(field('field-name', 'Name'));
 modal.appendChild(field('field-start-url', 'Start URL'));
 modal.appendChild(field('field-email', 'Email'));
 modal.appendChild(field('field-password', 'Password'));
 modal.appendChild(field('field-proxy', 'Proxy'));
-modal.appendChild(El('div', { id: 'error', className: 'error' }, []));
+modal.appendChild(Div({ id: 'error', className: 'error' }, []));
 modal.appendChild(
-    El('div', { id: 'buttons' }, [
+    Div({ id: 'buttons' }, [
         Button({ id: 'create', active: true, onClick: () => atomic.createProfileSubmit() }, ['Create']),
         Button({ id: 'cancel', onClick: () => atomic.cancelAddProfile() }, ['Cancel']),
     ])

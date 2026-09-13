@@ -9,50 +9,50 @@
 // `atomic.*` call in the original `settings.js`.
 const settings = document.getElementById('settings');
 
-settings.appendChild(El('div', { className: 'section-title' }, ['Performance']));
+settings.appendChild(Div({ className: 'section-title' }, ['Performance']));
 settings.appendChild(
     Row({}, [
-        El('label', {}, ['Max live panes']),
+        Label({}, ['Max live panes']),
         Button({ id: 'panes-minus', onClick: () => atomic.stepMaxPanes(-1) }, ['-']),
-        El('span', { id: 'panes-value' }, ['1']),
+        Span({ id: 'panes-value' }, ['1']),
         Button({ id: 'panes-plus', onClick: () => atomic.stepMaxPanes(1) }, ['+']),
     ])
 );
 settings.appendChild(
     Row({}, [
-        El('label', {}, ['Cap frame rate']),
+        Label({}, ['Cap frame rate']),
         Button({ id: 'fps-cap-off', onClick: () => atomic.setFpsCapEnabled(0) }, ['Off']),
         Button({ id: 'fps-cap-on', onClick: () => atomic.setFpsCapEnabled(1) }, ['On']),
         Button({ id: 'fps-minus', onClick: () => atomic.stepFpsCap(-1) }, ['-']),
-        El('span', { id: 'fps-value' }, ['-']),
+        Span({ id: 'fps-value' }, ['-']),
         Button({ id: 'fps-plus', onClick: () => atomic.stepFpsCap(1) }, ['+']),
     ])
 );
-settings.appendChild(El('div', { id: 'error', className: 'error' }, []));
+settings.appendChild(Div({ id: 'error', className: 'error' }, []));
 
-settings.appendChild(El('div', { className: 'section-title' }, ['GPU adapter']));
-settings.appendChild(El('div', { id: 'adapter-list' }, []));
+settings.appendChild(Div({ className: 'section-title' }, ['GPU adapter']));
+settings.appendChild(Div({ id: 'adapter-list' }, []));
 settings.appendChild(Button({ id: 'apply-gpu' }, ['Apply (respawns all panes)']));
 
-settings.appendChild(El('div', { className: 'section-title' }, ['Credentials']));
+settings.appendChild(Div({ className: 'section-title' }, ['Credentials']));
 settings.appendChild(
     Row({}, [
-        El('label', {}, ['Use OS keychain']),
+        Label({}, ['Use OS keychain']),
         Button({ id: 'keychain-off', onClick: () => atomic.setUseKeychain(0) }, ['Off']),
         Button({ id: 'keychain-on', onClick: () => atomic.setUseKeychain(1) }, ['On']),
     ])
 );
-settings.appendChild(El('div', { id: 'vault-error', className: 'error' }, []));
+settings.appendChild(Div({ id: 'vault-error', className: 'error' }, []));
 settings.appendChild(
     Row({}, [
-        El('input', { id: 'field-cred-key', type: 'text', placeholder: 'key' }, []),
-        El('input', { id: 'field-cred-value', type: 'text', placeholder: 'value' }, []),
+        Input({ id: 'field-cred-key', type: 'text', placeholder: 'key' }),
+        Input({ id: 'field-cred-value', type: 'text', placeholder: 'value' }),
         Button({ id: 'add-credential', onClick: () => atomic.addCredential() }, ['Add']),
     ])
 );
-settings.appendChild(El('div', { id: 'credential-list' }, []));
+settings.appendChild(Div({ id: 'credential-list' }, []));
 
-settings.appendChild(El('div', { className: 'section-title' }, ['Import from Chrome']));
+settings.appendChild(Div({ className: 'section-title' }, ['Import from Chrome']));
 settings.appendChild(
     Row({}, [
         Button({ id: 'import-history', onClick: () => atomic.importHistory() }, ['Import History']),
@@ -61,8 +61,8 @@ settings.appendChild(
         Button({ id: 'import-passwords', onClick: () => atomic.importPasswords() }, ['Import Passwords']),
     ])
 );
-settings.appendChild(El('div', { id: 'import-result' }, []));
-settings.appendChild(El('div', { id: 'bookmark-list' }, []));
+settings.appendChild(Div({ id: 'import-result' }, []));
+settings.appendChild(Div({ id: 'bookmark-list' }, []));
 
 settings.appendChild(Button({ id: 'close-settings' }, ['Close']));
 
@@ -93,7 +93,7 @@ function renderCredentials(keys) {
             emptyText: 'No stored credentials.',
             renderItem: (key, i) =>
                 Row({}, [
-                    El('span', {}, [key]),
+                    Span({}, [key]),
                     Button({ id: `cred-remove-${i}`, onClick: () => atomic.removeCredential(i) }, ['Remove']),
                 ]),
         })

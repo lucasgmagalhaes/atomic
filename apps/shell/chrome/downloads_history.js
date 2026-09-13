@@ -10,7 +10,7 @@
 const panel = document.getElementById('panel');
 panel.appendChild(
     Row({ id: 'download-row' }, [
-        El('input', { id: 'download-url', type: 'text', placeholder: 'URL to download' }, []),
+        Input({ id: 'download-url', type: 'text', placeholder: 'URL to download' }),
         Button(
             {
                 id: 'download-submit',
@@ -23,15 +23,15 @@ panel.appendChild(
     ])
 );
 panel.appendChild(
-    El('div', { id: 'downloads-section' }, [
-        El('div', { className: 'section-title' }, ['Downloads']),
-        El('div', { id: 'downloads-list' }, []),
+    Div({ id: 'downloads-section' }, [
+        Div({ className: 'section-title' }, ['Downloads']),
+        Div({ id: 'downloads-list' }, []),
     ])
 );
 panel.appendChild(
-    El('div', { id: 'history-section' }, [
-        El('div', { className: 'section-title' }, ['History']),
-        El('div', { id: 'history-list' }, []),
+    Div({ id: 'history-section' }, [
+        Div({ className: 'section-title' }, ['History']),
+        Div({ id: 'history-list' }, []),
     ])
 );
 

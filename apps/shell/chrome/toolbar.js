@@ -6,8 +6,8 @@
 // `ChromeEngine::sync_toolbar_state`) — same reason it stays a stable
 // `<span>` container here instead of being rebuilt with the rest.
 const toolbar = document.getElementById('toolbar');
-toolbar.appendChild(El('span', { id: 'workspaces' }, []));
-toolbar.appendChild(El('span', { id: 'label' }, ['Panes:']));
+toolbar.appendChild(Span({ id: 'workspaces' }, []));
+toolbar.appendChild(Span({ id: 'label' }, ['Panes:']));
 toolbar.appendChild(Button({ id: 'count-1', onClick: () => atomic.setPaneCount(1) }, ['1']));
 toolbar.appendChild(Button({ id: 'count-2', onClick: () => atomic.setPaneCount(2) }, ['2']));
 toolbar.appendChild(Button({ id: 'count-4', onClick: () => atomic.setPaneCount(4) }, ['4']));

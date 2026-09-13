@@ -4,7 +4,7 @@
 
 use super::types::{
     AlignItems, BorderStyle, BoxShadow, Clear, Color, Display, EdgeSizes, FlexDirection, Float,
-    JustifyContent, Length, Overflow, Position,
+    GridTracks, JustifyContent, Length, Overflow, Position,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -71,6 +71,13 @@ pub struct ComputedStyle {
     pub flex_grow: f64,
     pub flex_shrink: f64,
     pub flex_basis: Length,
+    /// Only meaningful when this box's own `display` is `Grid` — the
+    /// explicit column/row track list (`ROADMAP.md` item 34). Empty
+    /// means no explicit tracks: `crate::grid` falls back to a single
+    /// full-width column for `grid_template_columns`, and content-sized
+    /// (auto) rows for `grid_template_rows` — see that module's own doc.
+    pub grid_template_columns: GridTracks,
+    pub grid_template_rows: GridTracks,
     pub background_color: Color,
     /// The two *inherited* properties this crate models (`resolve_style`
     /// takes the parent's resolved values as the starting point instead of
@@ -151,6 +158,8 @@ impl ComputedStyle {
             flex_grow: 0.0,
             flex_shrink: 1.0,
             flex_basis: Length::Auto,
+            grid_template_columns: GridTracks::EMPTY,
+            grid_template_rows: GridTracks::EMPTY,
             background_color: Color::TRANSPARENT,
             font_size: 16.0,
             color: Color {

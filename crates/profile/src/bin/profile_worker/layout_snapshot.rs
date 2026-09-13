@@ -84,6 +84,7 @@ pub(crate) fn collect_computed_styles(
                 Display::Block => "block",
                 Display::Inline => "inline",
                 Display::Flex => "flex",
+                Display::Grid => "grid",
                 Display::None => "none",
             }
             .to_string(),

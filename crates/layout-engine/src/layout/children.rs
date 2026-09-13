@@ -1,6 +1,7 @@
 //! `layout_children` — split out from `layout.rs`.
 
 use crate::flex::layout_flex_children;
+use crate::grid::layout_grid_children;
 use crate::style::{Clear, Display, Float, Length, Position};
 use crate::tree::LayoutBox;
 
@@ -73,6 +74,9 @@ pub(crate) fn layout_children(
         } else {
             result.main_size
         }
+    } else if box_.style.display == Display::Grid {
+        let result = layout_grid_children(box_, content_width, content_x, content_y);
+        result.height
     } else {
         let mut cursor_y = content_y;
         let mut left_edge_y = content_y;

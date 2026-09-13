@@ -1,7 +1,7 @@
 //! `sync_*`/`set_*` DOM-mutation methods — split out from
 //! `chrome_engine.rs`.
 
-use super::helpers::{html_escape, js_string_literal};
+use super::helpers::{html_escape, js_string_array, js_string_literal, js_workspace_array};
 use super::ChromeEngine;
 
 impl<'rt> ChromeEngine<'rt> {
@@ -17,19 +17,12 @@ impl<'rt> ChromeEngine<'rt> {
     /// `locale_is_en` picks which of the two locale buttons gets the
     /// `active` class.
     pub(crate) fn sync_toolbar_state(&self, workspaces: &[(String, bool)], locale_is_en: bool) {
-        let mut buttons = String::new();
-        for (i, (name, active)) in workspaces.iter().enumerate() {
-            let class = if *active { "ws-active" } else { "" };
-            buttons.push_str(&format!(
-                "<button id=\"workspace-{i}\" class=\"{class}\">{}</button>",
-                html_escape(name)
-            ));
-        }
-        buttons.push_str("<button id=\"new-workspace\">+ New</button>");
-
-        self.set_inner_html("workspaces", &buttons);
-        self.set_class_name("locale-en", if locale_is_en { "ws-active" } else { "" });
-        self.set_class_name("locale-pt", if !locale_is_en { "ws-active" } else { "" });
+        self.render_call("renderWorkspaces", &js_workspace_array(workspaces));
+        self.set_class_name("locale-en", if locale_is_en { "btn active" } else { "btn" });
+        self.set_class_name(
+            "locale-pt",
+            if !locale_is_en { "btn active" } else { "btn" },
+        );
     }
 
     /// Rewrites the downloads/history bundle's two list containers to
@@ -39,21 +32,8 @@ impl<'rt> ChromeEngine<'rt> {
     /// already-formatted display lines (the caller decides formatting,
     /// same as `side_panel_ui.rs`'s egui version does per-record).
     pub(crate) fn sync_downloads_history(&self, downloads: &[String], history: &[String]) {
-        let render_list = |items: &[String], empty_text: &str| -> String {
-            if items.is_empty() {
-                format!("<span class=\"empty\">{empty_text}</span>")
-            } else {
-                items
-                    .iter()
-                    .map(|line| format!("<div class=\"row\">{}</div>", html_escape(line)))
-                    .collect()
-            }
-        };
-        self.set_inner_html(
-            "downloads-list",
-            &render_list(downloads, "No downloads yet."),
-        );
-        self.set_inner_html("history-list", &render_list(history, "No history yet."));
+        self.render_call("renderDownloads", &js_string_array(downloads));
+        self.render_call("renderHistory", &js_string_array(history));
     }
 
     /// Rewrites `#error`'s text — used by the add-profile modal to reflect
@@ -88,79 +68,68 @@ impl<'rt> ChromeEngine<'rt> {
         bookmarks: &[String],
     ) {
         self.set_inner_html("panes-value", &max_panes.to_string());
-        self.set_class_name("fps-cap-off", if fps_cap.is_none() { "active" } else { "" });
-        self.set_class_name("fps-cap-on", if fps_cap.is_some() { "active" } else { "" });
+        self.set_class_name(
+            "fps-cap-off",
+            if fps_cap.is_none() {
+                "btn active"
+            } else {
+                "btn"
+            },
+        );
+        self.set_class_name(
+            "fps-cap-on",
+            if fps_cap.is_some() {
+                "btn active"
+            } else {
+                "btn"
+            },
+        );
         self.set_inner_html(
             "fps-value",
             &fps_cap
                 .map(|v| v.to_string())
                 .unwrap_or_else(|| "-".to_string()),
         );
-        self.set_class_name("keychain-off", if !use_keychain { "active" } else { "" });
-        self.set_class_name("keychain-on", if use_keychain { "active" } else { "" });
-
-        let mut adapter_html = String::from(
-            "<button id=\"adapter-default\" class=\"active-if-none\">Default</button>",
-        );
-        for (i, name) in adapters.iter().enumerate() {
-            adapter_html.push_str(&format!(
-                "<button id=\"adapter-{i}\">{}</button>",
-                html_escape(name)
-            ));
-        }
-        self.set_inner_html("adapter-list", &adapter_html);
-        // The default button's active class is set separately from the
-        // indexed ones (its id is fixed, not part of the loop above) so
-        // `selected_adapter == None` highlights it without a special case
-        // inside the loop.
         self.set_class_name(
-            "adapter-default",
-            if selected_adapter.is_none() {
-                "active-if-none active"
-            } else {
-                "active-if-none"
-            },
+            "keychain-off",
+            if !use_keychain { "btn active" } else { "btn" },
         );
-        for i in 0..adapters.len() {
-            self.set_class_name(
-                &format!("adapter-{i}"),
-                if selected_adapter == Some(i) {
-                    "active"
-                } else {
-                    ""
-                },
-            );
-        }
+        self.set_class_name(
+            "keychain-on",
+            if use_keychain { "btn active" } else { "btn" },
+        );
 
-        let credential_html: String = if credential_keys.is_empty() {
-            "<span class=\"empty\">No stored credentials.</span>".to_string()
-        } else {
-            credential_keys
-                .iter()
-                .enumerate()
-                .map(|(i, key)| {
-                    format!(
-                        "<div class=\"row\"><span>{}</span><button id=\"cred-remove-{i}\">Remove</button></div>",
-                        html_escape(key)
-                    )
-                })
-                .collect()
-        };
-        self.set_inner_html("credential-list", &credential_html);
+        // `settings.js`'s `renderAdapters` folds the old "active-if-none"
+        // special case for the default button into a plain `active` prop —
+        // `null` here is that prop's "none selected" sentinel.
+        let selected_js = selected_adapter.map_or_else(|| "null".to_string(), |i| i.to_string());
+        self.render_call(
+            "renderAdapters",
+            &format!("{},{selected_js}", js_string_array(adapters)),
+        );
+
+        self.render_call("renderCredentials", &js_string_array(credential_keys));
 
         self.set_inner_html("error", performance_error.unwrap_or(""));
         self.set_inner_html("vault-error", vault_error.unwrap_or(""));
         self.set_inner_html("import-result", &html_escape(import_result.unwrap_or("")));
 
-        let bookmark_html: String = bookmarks
-            .iter()
-            .map(|line| format!("<div class=\"row\">{}</div>", html_escape(line)))
-            .collect();
-        self.set_inner_html("bookmark-list", &bookmark_html);
+        self.render_call("renderBookmarks", &js_string_array(bookmarks));
+    }
+
+    /// Calls a bundle-defined render function (e.g. `toolbar.js`'s
+    /// `renderWorkspaces`) with a JS literal argument built by the caller
+    /// (`js_workspace_array`, etc.) — the "Rust sends data, JS builds the
+    /// component tree with `lib/ui.js`" counterpart to
+    /// [`set_inner_html`](Self::set_inner_html)'s "Rust builds HTML, JS
+    /// assigns it" pattern the string-based bundles still use.
+    fn render_call(&self, fn_name: &str, args_js: &str) {
+        let script = format!("{fn_name}({args_js});");
+        let _ = self.ctx.eval(&script, "<chrome sync>");
     }
 
     /// Generic innerHTML rewrite for `#id` — the shared primitive both
-    /// `sync_toolbar_state` and `sync_downloads_history` build on.
+    /// `sync_downloads_history` and `sync_settings_state` build on.
     fn set_inner_html(&self, id: &str, html: &str) {
         let script = format!(
             "document.getElementById({id_js}).innerHTML = {html_js};",

@@ -28,6 +28,24 @@ mod input;
 mod render_hit_test;
 mod sync;
 
+/// Shared base styles for every chrome bundle (button/row/error/empty-state
+/// classes) — see `UI_JS`'s `El`/`Button`/`Row`/`List` for the JS
+/// components that apply these classes. Not a CSS-custom-property theme
+/// (`var(--x)`) system: `crates/css`'s parser has no custom-property
+/// support today, so this is a plain shared stylesheet prepended to every
+/// bundle's own CSS, not a swappable token set. Revisit if `css` ever grows
+/// `var()` support.
+const THEME_CSS: &str = include_str!("../../chrome/lib/theme.css");
+
+/// Shared component kit (`El`, `Button`, `Row`, `Toggle`, `List`) evaluated
+/// into every chrome bundle's JS context before its own script runs, so a
+/// bundle's top-level code can call `Button(...)`/`List(...)` immediately.
+/// Plain function composition over the engine's real DOM API
+/// (`createElement`/`setAttribute`/`addEventListener`) — no template
+/// parser, no build step, same "static string, `ctx.eval`" mechanism the
+/// bundle scripts themselves already use.
+const UI_JS: &str = include_str!("../../chrome/lib/ui.js");
+
 /// One loaded chrome surface (e.g. the toolbar): its DOM root, stylesheet,
 /// and the JS context driving it, plus a cached box tree so `render` and
 /// `hit_test` never disagree — same reasoning `Page::layout`'s cache
@@ -99,11 +117,14 @@ impl<'rt> ChromeEngine<'rt> {
     /// script can wire button handlers immediately.
     fn new(runtime: &'rt Runtime, html: &str, css_text: &str, js: &str) -> Self {
         let (dom, root) = html::parse_to_html_element(html);
-        let sheet = parse_stylesheet(css_text);
+        let combined_css = format!("{THEME_CSS}\n{css_text}");
+        let sheet = parse_stylesheet(&combined_css);
         let ctx = Context::with_dom(runtime, dom);
         unsafe {
             chrome_bridge::register(ctx.as_raw());
         }
+        ctx.eval(UI_JS, "chrome-lib-ui.js")
+            .expect("shared chrome UI kit is static and must not fail to eval");
         ctx.eval(js, "chrome-toolbar.js")
             .expect("chrome bundle script is static and must not fail to eval");
         ctx.dispatch_lifecycle_events();

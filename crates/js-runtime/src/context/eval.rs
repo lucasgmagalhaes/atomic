@@ -67,6 +67,75 @@ impl<'rt> Context<'rt> {
         Ok(owned)
     }
 
+    /// Evaluates `code` as a real ES module (`ROADMAP.md` item 19):
+    /// compile → link → execute, the three-step lifecycle quickjs-ng's
+    /// module API requires (`JS_Eval(MODULE|COMPILE_ONLY)`, then
+    /// `JS_ResolveModule` — which recursively invokes the registered
+    /// `module_load_fn` for every static import this module's own source
+    /// declares — then `JS_EvalFunction` to actually run its top-level
+    /// code). Real `import`/`export` bindings and a real module namespace
+    /// exist once this returns `Ok`; a script's own `import()` calls work
+    /// the same way regardless of whether it's itself a module or a
+    /// classic script (see `runtime.rs`'s own doc on why one loader
+    /// callback serves both). Same exception-to-`EvalError` reporting
+    /// `eval` already uses. The returned string is whatever
+    /// `JS_EvalFunction`'s completion value stringifies to — for a module
+    /// this is rarely meaningful on its own (a real page never observes
+    /// a `<script type="module">`'s own completion value either); `Ok`
+    /// itself is the useful signal that linking/execution succeeded.
+    pub fn eval_module(&self, code: &str, filename: &str) -> Result<String, EvalError> {
+        let code_c = CString::new(code).expect("script source must not contain NUL bytes");
+        let filename_c = CString::new(filename).expect("filename must not contain NUL bytes");
+
+        let compiled = unsafe {
+            sys::JS_Eval(
+                self.ptr,
+                code_c.as_ptr(),
+                code_c.as_bytes().len(),
+                filename_c.as_ptr(),
+                sys::JS_EVAL_TYPE_MODULE | sys::JS_EVAL_FLAG_COMPILE_ONLY,
+            )
+        };
+        if sys::js_is_exception(&compiled) {
+            unsafe { sys::JS_FreeValue(self.ptr, compiled) };
+            let text = self.take_exception_text();
+            self.report_uncaught_error(&text);
+            return Err(EvalError(text));
+        }
+
+        // `JS_ResolveModule` takes a borrowed reference (unlike `JS_Eval`'s
+        // own returned value, which callers normally consume) - `compiled`
+        // is still needed afterward for `JS_EvalFunction`, so it is not
+        // freed here.
+        if unsafe { sys::JS_ResolveModule(self.ptr, compiled) } < 0 {
+            unsafe { sys::JS_FreeValue(self.ptr, compiled) };
+            let text = self.take_exception_text();
+            self.report_uncaught_error(&text);
+            return Err(EvalError(text));
+        }
+
+        // `JS_EvalFunction` consumes `compiled`.
+        let result = unsafe { sys::JS_EvalFunction(self.ptr, compiled) };
+        if sys::js_is_exception(&result) {
+            unsafe { sys::JS_FreeValue(self.ptr, result) };
+            let text = self.take_exception_text();
+            self.report_uncaught_error(&text);
+            return Err(EvalError(text));
+        }
+
+        let mut len: usize = 0;
+        let c_str_ptr = unsafe { sys::JS_ToCStringLen2(self.ptr, &mut len, result, false) };
+        unsafe { sys::JS_FreeValue(self.ptr, result) };
+        if c_str_ptr.is_null() {
+            return Ok(String::new());
+        }
+        let owned = unsafe { CStr::from_ptr(c_str_ptr) }
+            .to_string_lossy()
+            .into_owned();
+        unsafe { sys::JS_FreeCString(self.ptr, c_str_ptr) };
+        Ok(owned)
+    }
+
     /// [`Context::eval`]'s core, parameterized over a raw `JSContext`
     /// pointer instead of `self` — lets [`Context::eval_in_window`]
     /// reuse it against a dynamically-opened window's `JSContext`, which

@@ -4,7 +4,8 @@
 use std::os::raw::{c_char, c_int, c_void};
 
 use crate::types::{
-    JSAtom, JSCFunction, JSClassDef, JSClassID, JSContext, JSPropertyEnum, JSRuntime, JSValue,
+    JSAtom, JSCFunction, JSClassDef, JSClassID, JSContext, JSModuleDef, JSModuleLoaderFunc,
+    JSModuleNormalizeFunc, JSPropertyEnum, JSRuntime, JSValue,
 };
 
 extern "C" {
@@ -241,4 +242,41 @@ extern "C" {
     pub fn JS_SetPrototype(ctx: *mut JSContext, obj: JSValue, proto_val: JSValue) -> c_int;
 
     pub fn JS_IsJobPending(rt: *mut JSRuntime) -> bool;
+
+    /// Registers the runtime-wide module normalize/load callback pair
+    /// (`ROADMAP.md` item 19) — both static `import` and dynamic
+    /// `import()` route through these (see `JSModuleLoaderFunc`'s own
+    /// doc). `module_normalize`/`opaque` may be null (a default identity
+    /// normalizer); this crate always supplies its own.
+    pub fn JS_SetModuleLoaderFunc(
+        rt: *mut JSRuntime,
+        module_normalize: Option<JSModuleNormalizeFunc>,
+        module_loader: Option<JSModuleLoaderFunc>,
+        opaque: *mut c_void,
+    );
+
+    /// Links `module` (already-compiled, from `JS_Eval(...,
+    /// JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY)`) and its whole
+    /// static-import graph, invoking the registered `JSModuleLoaderFunc`
+    /// once per not-yet-loaded specifier. Returns `< 0` on failure (an
+    /// exception is left pending on `ctx`).
+    pub fn JS_ResolveModule(ctx: *mut JSContext, obj: JSValue) -> c_int;
+
+    /// Executes a linked module's top-level code (must run after a
+    /// successful [`JS_ResolveModule`]) — the second half of quickjs.h's
+    /// documented compile/link/execute module lifecycle. Consumes `func_obj`.
+    pub fn JS_EvalFunction(ctx: *mut JSContext, func_obj: JSValue) -> JSValue;
+
+    /// The module's real namespace object (its exported bindings as
+    /// enumerable properties) — only meaningful after `m` has been
+    /// resolved/evaluated. Returns a new reference.
+    pub fn JS_GetModuleNamespace(ctx: *mut JSContext, m: *mut JSModuleDef) -> JSValue;
+
+    /// Allocates a copy of `str` using quickjs-ng's own allocator — the
+    /// only safe way to build the string a [`JSModuleNormalizeFunc`]
+    /// returns, since quickjs-ng frees it with `js_free`, not the system
+    /// allocator `CString`/`libc::malloc` would use.
+    pub fn js_strdup(ctx: *mut JSContext, str1: *const c_char) -> *mut c_char;
+
+    pub fn JS_ThrowReferenceError(ctx: *mut JSContext, fmt: *const c_char, ...) -> JSValue;
 }

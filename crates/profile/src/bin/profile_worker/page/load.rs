@@ -119,8 +119,16 @@ impl<'rt> Page<'rt> {
         // report it to, so a failure is silent here, same "no error
         // surface for a page's own script" scope every other page-script
         // path in this worker already has).
-        for (index, script) in scripts.iter().enumerate() {
-            let _ = ctx.eval(script, &format!("<script {index}>"));
+        for script in &scripts {
+            if script.is_module {
+                // Real ES module execution (`ROADMAP.md` item 19): the
+                // script's own resolved URL is its module's name, so its
+                // own relative `import`/`import()` specifiers resolve
+                // against it, not an arbitrary debug label.
+                let _ = ctx.eval_module(&script.text, &script.url);
+            } else {
+                let _ = ctx.eval(&script.text, &script.url);
+            }
         }
         // Real `DOMContentLoaded`/`load` lifecycle timing: fired once the
         // document is parsed and every page script has run, matching a

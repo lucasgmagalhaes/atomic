@@ -36,6 +36,56 @@ pub const JS_TAG_EXCEPTION: i64 = 6;
 pub const JS_TAG_FLOAT64: i64 = 8;
 
 pub const JS_EVAL_TYPE_GLOBAL: c_int = 0;
+/// Compile `input` as an ES module instead of a classic script — real
+/// `import`/`export` syntax parsing, per quickjs.h's own
+/// `JS_EVAL_TYPE_MODULE` (`ROADMAP.md` item 19).
+pub const JS_EVAL_TYPE_MODULE: c_int = 1 << 0;
+/// Paired with [`JS_EVAL_TYPE_MODULE`]: compile only, don't execute yet —
+/// the returned `JSValue` wraps a `JSModuleDef*` a caller must
+/// `JS_ResolveModule` (link) then `JS_EvalFunction` (execute) before its
+/// top-level code has run, matching quickjs.h's own documented two-step
+/// module lifecycle (see `JS_EvalFunction`'s own doc comment there).
+pub const JS_EVAL_FLAG_COMPILE_ONLY: c_int = 1 << 5;
+
+/// Opaque handle to a compiled-but-not-yet-necessarily-linked ES module —
+/// mirrors `JSRuntime`/`JSContext`'s own zero-sized-opaque-struct shape.
+/// Never constructed on the Rust side; only ever received back from
+/// `JS_Eval(..., JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY)`'s
+/// returned `JSValue.u.ptr` (this crate's non-NAN-boxed `JSValue` layout
+/// makes that pointer directly readable, no `JS_VALUE_GET_PTR`-equivalent
+/// macro needed — see `JSValue`'s own doc).
+#[repr(C)]
+pub struct JSModuleDef {
+    _private: [u8; 0],
+}
+
+/// Matches quickjs.h's `JSModuleNormalizeFunc`: resolves `module_name`
+/// (an import specifier) against `module_base_name` (the importing
+/// module's own resolved name/URL) into a new, absolute module name.
+/// Must return a string allocated via [`js_strdup`] (quickjs-ng frees it
+/// with its own allocator, not the system one) or `NULL` after throwing on
+/// this `ctx` — real relative/absolute resolution, not a string-
+/// concatenation approximation (`js_runtime::module_loader::resolve_specifier`
+/// is what actually implements this).
+pub type JSModuleNormalizeFunc = unsafe extern "C" fn(
+    ctx: *mut JSContext,
+    module_base_name: *const c_char,
+    module_name: *const c_char,
+    opaque: *mut c_void,
+) -> *mut c_char;
+
+/// Matches quickjs.h's `JSModuleLoaderFunc`: fetches and compiles
+/// `module_name` (already normalized/resolved) into a `JSModuleDef*`, or
+/// returns `NULL` after throwing on this `ctx`. Called both for a static
+/// top-level `import` and (per this crate's own grounding research — no
+/// separate dynamic-import host hook exists in this quickjs-ng version) a
+/// dynamic `import()`, so registering this one callback via
+/// `JS_SetModuleLoaderFunc` is what makes both syntaxes work.
+pub type JSModuleLoaderFunc = unsafe extern "C" fn(
+    ctx: *mut JSContext,
+    module_name: *const c_char,
+    opaque: *mut c_void,
+) -> *mut JSModuleDef;
 
 /// `JSCFunctionEnum::JS_CFUNC_generic` — the calling convention for a plain
 /// `(ctx, this_val, argc, argv) -> JSValue` native function, as opposed to

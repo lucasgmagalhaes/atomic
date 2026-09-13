@@ -68,11 +68,11 @@ Read [matrix/css-layout.md](matrix/css-layout.md) and [matrix/paint.md](matrix/p
 
 Read [architecture/primitives.md §12](architecture/primitives.md).
 
-29. `[ ]` MessagePort.
-30. `[ ]` MessageChannel.
-31. `[ ]` Structured Clone integration (see P0 item 7).
-32. `[ ]` Transferable objects.
-33. `[~]` Worker — real OS-thread `Worker` already exists (`crates/workers`, genuine parallelism), but built on ad hoc string messages instead of MessagePort/StructuredClone; needs rework once items 29–31 land rather than bolting structured clone onto the existing API.
+29. `[~]` MessagePort — done (2026-09-13), scoped: `js_runtime::message_channel` (`crates/js-runtime/src/message_channel.rs`) — real `postMessage`/`close`/`start`/`onmessage` (implicit single listener, invoked alongside `addEventListener("message", ...)` via `events::define_simple_event_target`), delivered on `Context::run_pending_timers`' usual "host must pump" cadence. `new MessagePort()` throws (matches real browsers — only `MessageChannel` produces one).
+30. `[~]` MessageChannel — done (2026-09-13, same file): `new MessageChannel()` returns a real entangled `{port1, port2}` pair.
+31. `[~]` Structured Clone integration — done (2026-09-13): `postMessage`'s second real native caller (after `history.pushState`/`replaceState`) — clones `data` immediately via `value_bridge::deep_clone` before queuing, same scope `structuredClone()`/P0 item 7 already documents (no `Date`/`Map`/`Set`/typed arrays/`RegExp`, no cycles).
+32. `[ ]` Transferable objects — explicitly deferred, not attempted: this crate has no real `ArrayBuffer`/typed-array type yet for anything to transfer ownership of; `postMessage`'s `transfer` argument is accepted and silently ignored. Revisit once a real `ArrayBuffer` exists.
+33. `[~]` Worker — real OS-thread `Worker` already exists (`crates/workers`, genuine parallelism), but built on ad hoc string messages instead of MessagePort/StructuredClone; items 29–31 have now landed, but the rework itself (routing `Worker.postMessage`/`onmessage` through real `MessagePort`s) is a separate follow-up, not bundled into this pass.
 
 ## P5 — Large Platform Features
 

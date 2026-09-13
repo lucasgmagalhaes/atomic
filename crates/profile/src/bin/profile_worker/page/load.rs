@@ -134,6 +134,7 @@ impl<'rt> Page<'rt> {
             images,
             layout_cache: std::cell::RefCell::new(None),
             paint_cache: std::cell::RefCell::new(None),
+            layers: std::cell::RefCell::new(std::collections::HashMap::new()),
         }
     }
 }

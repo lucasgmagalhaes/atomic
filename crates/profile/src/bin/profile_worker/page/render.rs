@@ -1,19 +1,50 @@
 //! `Page::layout`/`content_height`/`render`/`hit_test_at` — split out
 //! from `page.rs`.
 
+use std::collections::HashSet;
+
 use css::parse_stylesheet;
 use dom::NodeId;
+use layout_engine::style::{BorderStyle, Color};
 use layout_engine::{
-    apply_image_sizes, build_box_tree_with_viewport, layout_block, LayoutBox, PositionedGlyph,
+    apply_image_sizes, build_box_tree_with_viewport, find_layer_roots, layout_block, LayoutBox,
+    PositionedGlyph,
 };
 use render::{
     build_display_list, build_glyph_list, build_image_list, composite_glyphs, composite_images,
-    ClipRect, ClippedGlyph, GpuRenderer, ImageQuad, Rect,
+    composite_layer_onto, ClipRect, ClippedGlyph, GpuRenderer, ImageQuad, Layer, LayerCacheKey,
+    Rect,
 };
 
 use crate::layout_snapshot::{collect_computed_styles, collect_layout_rects};
 
-use super::{LayoutCache, Page, PaintCache};
+use super::{LayerCacheEntry, LayoutCache, Page, PaintCache};
+
+/// Empties a layer root's own subtree out of a (cloned) base tree so the
+/// base pass's own `build_display_list`/`build_image_list`/
+/// `build_glyph_list` paint it zero times — its content instead paints
+/// once, inside its own layer canvas (see `Page::render`'s own doc). Kept
+/// as a plain `NodeId` match rather than a tree-position walk: every
+/// layer root is a real element box (`establishes_stacking_context` only
+/// matches an element's own resolved style), never an anonymous merged
+/// inline-run box, so the `NodeId` ambiguity `LayoutBox::node`'s own doc
+/// warns about for those doesn't apply here.
+fn prune_layer_roots(box_: &mut LayoutBox, layer_root_ids: &HashSet<NodeId>) {
+    if layer_root_ids.contains(&box_.node) {
+        box_.children.clear();
+        box_.text = None;
+        box_.inline_spans = None;
+        box_.glyphs.clear();
+        box_.image = None;
+        box_.style.background_color = Color::TRANSPARENT;
+        box_.style.border_style = BorderStyle::None;
+        box_.style.box_shadow = None;
+        return;
+    }
+    for child in &mut box_.children {
+        prune_layer_roots(child, layer_root_ids);
+    }
+}
 
 impl<'rt> Page<'rt> {
     /// Builds and lays out this page's real box tree against `width`/
@@ -170,14 +201,57 @@ impl<'rt> Page<'rt> {
         let shift_clip =
             |clip: Option<ClipRect>, dy: f32| clip.map(|c| ClipRect { y: c.y - dy, ..c });
 
-        let rects: Vec<Rect> = build_display_list(&tree)
+        // Real compositing layers (`ROADMAP.md` item 28): boxes that
+        // establish a stacking context (`layout_engine::find_layer_roots`)
+        // paint into their own transparent canvas, cached independently -
+        // reused across frames unless Stage 2's `dom::StyleInvalidation`
+        // queue names a target under that layer's own subtree (drained
+        // once per recompute below, checked via `Dom::contains`). Without
+        // this, every layer would share the same coarse whole-page key and
+        // invalidate together on any change - see `layer.rs`'s own doc.
+        let layer_roots = find_layer_roots(&tree);
+        let layer_root_ids: HashSet<NodeId> = layer_roots.iter().map(|b| b.node).collect();
+        self.layers
+            .borrow_mut()
+            .retain(|id, _| layer_root_ids.contains(id));
+
+        let dom_mut = self
+            .ctx
+            .dom_mut()
+            .expect("Page::load always builds a context over a dom");
+        let invalidations = dom_mut.drain_style_invalidations();
+        let dom = self
+            .ctx
+            .dom()
+            .expect("Page::load always builds a context over a dom");
+        let mut dirty_layers: HashSet<NodeId> = HashSet::new();
+        for invalidation in &invalidations {
+            for root in &layer_roots {
+                if root.node == invalidation.root || dom.contains(root.node, invalidation.root) {
+                    dirty_layers.insert(root.node);
+                }
+            }
+        }
+
+        let layer_key = LayerCacheKey {
+            width,
+            height,
+            layout_ver,
+            style_ver,
+            adopted_version,
+        };
+
+        let mut base_tree = tree.clone();
+        prune_layer_roots(&mut base_tree, &layer_root_ids);
+
+        let rects: Vec<Rect> = build_display_list(&base_tree)
             .into_iter()
             .map(|r| Rect {
                 y: r.y - offset,
                 ..r
             })
             .collect();
-        let images: Vec<ImageQuad> = build_image_list(&tree)
+        let images: Vec<ImageQuad> = build_image_list(&base_tree)
             .into_iter()
             .map(|q| ImageQuad {
                 y: q.y - offset,
@@ -185,7 +259,7 @@ impl<'rt> Page<'rt> {
                 ..q
             })
             .collect();
-        let glyphs: Vec<ClippedGlyph> = build_glyph_list(&tree)
+        let glyphs: Vec<ClippedGlyph> = build_glyph_list(&base_tree)
             .into_iter()
             .map(|g| ClippedGlyph {
                 glyph: PositionedGlyph {
@@ -200,6 +274,76 @@ impl<'rt> Page<'rt> {
         let mut pixels = renderer.render_to_rgba(&rects, width, height, [0.08, 0.09, 0.13, 1.0]);
         composite_images(&mut pixels, width, height, &images);
         composite_glyphs(&mut pixels, width, height, &glyphs);
+
+        // Nearest-ancestor-flattened stacking order: paint in ascending
+        // `z-index` (ties keep `find_layer_roots`' own pre-order/document
+        // order) - real nested-layer-within-layer compositing is a
+        // documented scope cut (see `stacking.rs`'s own doc).
+        let mut sorted_roots = layer_roots;
+        sorted_roots.sort_by_key(|b| b.style.z_index.unwrap_or(0));
+
+        for layer_root in sorted_roots {
+            let dirty = dirty_layers.contains(&layer_root.node);
+            let reuse = !dirty
+                && self
+                    .layers
+                    .borrow()
+                    .get(&layer_root.node)
+                    .is_some_and(|entry| {
+                        entry.layer.is_valid(layer_key) && entry.scroll_top == scroll_top
+                    });
+
+            let layer_pixels = if reuse {
+                self.layers
+                    .borrow()
+                    .get(&layer_root.node)
+                    .expect("just checked present and valid above")
+                    .layer
+                    .pixels
+                    .clone()
+            } else {
+                let layer_rects: Vec<Rect> = build_display_list(layer_root)
+                    .into_iter()
+                    .map(|r| Rect {
+                        y: r.y - offset,
+                        ..r
+                    })
+                    .collect();
+                let layer_images: Vec<ImageQuad> = build_image_list(layer_root)
+                    .into_iter()
+                    .map(|q| ImageQuad {
+                        y: q.y - offset,
+                        clip: shift_clip(q.clip, offset),
+                        ..q
+                    })
+                    .collect();
+                let layer_glyphs: Vec<ClippedGlyph> = build_glyph_list(layer_root)
+                    .into_iter()
+                    .map(|g| ClippedGlyph {
+                        glyph: PositionedGlyph {
+                            y: g.glyph.y - scroll_top as i32,
+                            ..g.glyph
+                        },
+                        clip: shift_clip(g.clip, offset),
+                        opacity: g.opacity,
+                    })
+                    .collect();
+
+                let mut layer_canvas =
+                    renderer.render_to_rgba(&layer_rects, width, height, [0.0, 0.0, 0.0, 0.0]);
+                composite_images(&mut layer_canvas, width, height, &layer_images);
+                composite_glyphs(&mut layer_canvas, width, height, &layer_glyphs);
+
+                let mut layer = Layer::new(layer_root.node);
+                layer.store(layer_key, layer_canvas.clone());
+                self.layers
+                    .borrow_mut()
+                    .insert(layer_root.node, LayerCacheEntry { layer, scroll_top });
+                layer_canvas
+            };
+
+            composite_layer_onto(&mut pixels, &layer_pixels, width, height);
+        }
 
         *self.paint_cache.borrow_mut() = Some(PaintCache {
             width,

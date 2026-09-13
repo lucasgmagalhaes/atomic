@@ -2,11 +2,13 @@ pub mod flex;
 pub mod grid;
 pub mod hit_test;
 pub mod layout;
+pub mod stacking;
 pub mod style;
 pub mod text;
 pub mod tree;
 
 pub use hit_test::hit_test;
+pub use stacking::{establishes_stacking_context, find_layer_roots};
 
 pub use flex::layout_flex_children;
 pub use grid::layout_grid_children;

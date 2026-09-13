@@ -14,7 +14,7 @@ use std::path::Path;
 
 use quickjs_sys as sys;
 
-use crate::Runtime;
+use crate::{EvalError, Runtime};
 
 mod console_nav;
 mod eval;
@@ -45,43 +45,98 @@ use crate::{
     value_bridge, web_audio, window, window_registry,
 };
 
+/// Registers every global this crate exposes on a fresh `JSContext` —
+/// factored out of [`Context::new`] so [`window_registry`]'s
+/// `window.open()` support (`ROADMAP.md` items 36/37) can build a second,
+/// independent `JSContext` sharing the same `JSRuntime` without going
+/// through the safe [`Context`] wrapper's own `&'rt Runtime`-borrowing
+/// lifetime (a dynamically-opened window has no such borrow to hold —
+/// its lifetime is managed by `window_registry`'s own registry instead).
+pub(crate) unsafe fn register_standard_globals(ptr: *mut sys::JSContext) {
+    performance::register(ptr);
+    console::register(ptr);
+    abort_controller::register(ptr);
+    crypto::register(ptr);
+    events::register(ptr);
+    event_subclasses::register(ptr);
+    page_visibility::register(ptr);
+    request_response::register(ptr);
+    fetch::register(ptr);
+    fetch_async::register(ptr);
+    timers::register(ptr);
+    document_cookie::register(ptr);
+    cssom_stylesheet::register(ptr);
+    trusted_types::register(ptr);
+    indexed_db_bindings::register(ptr);
+    local_storage_bindings::register(ptr);
+    blob::register(ptr);
+    url_bindings::register(ptr);
+    form_data::register(ptr);
+    notifications::register(ptr);
+    navigator::register(ptr);
+    clipboard::register(ptr);
+    web_audio::register(ptr);
+    window::register(ptr);
+    location::register(ptr);
+    history::register(ptr);
+    message_channel::register(ptr);
+    mutation_observer::register(ptr);
+    custom_elements::register(ptr);
+    screen::register(ptr);
+    value_bridge::register(ptr);
+}
+
+/// The exact inverse of [`register_standard_globals`] — every module's
+/// `cleanup(ctx)` that must run before `JS_FreeContext`, minus
+/// `dom_bindings::cleanup` (only relevant for a `with_dom`-flavored
+/// context, called separately by whichever caller attached DOM bindings
+/// in the first place).
+pub(crate) unsafe fn cleanup_standard_globals(ptr: *mut sys::JSContext) {
+    custom_elements::cleanup(ptr);
+    script_limits::cleanup(ptr);
+    timers::cleanup(ptr);
+    fetch_async::cleanup(ptr);
+    mutation_observer::cleanup(ptr);
+    message_channel::cleanup(ptr);
+    blob::cleanup(ptr);
+    notifications::cleanup(ptr);
+}
+
+/// Builds a fresh, unattached [`host_state::HostState`] wrapping `dom`
+/// with a brand-new [`window_registry::WindowId`] — factored out of
+/// [`Context::with_dom`] for the same reason [`register_standard_globals`]
+/// is: `window_registry`'s dynamically-opened windows need this without
+/// constructing a safe [`Context`].
+pub(crate) fn build_host_state(dom: dom::Dom) -> Box<host_state::HostState> {
+    Box::new(host_state::HostState {
+        dom,
+        cookies: None,
+        host: String::new(),
+        storage_dir: None,
+        local_storage: None,
+        session_storage: None,
+        url: None,
+        layout_rects: std::collections::HashMap::new(),
+        computed_styles: std::collections::HashMap::new(),
+        csp: Vec::new(),
+        trusted_type_policy_names: Vec::new(),
+        console_messages: Vec::new(),
+        permissions_policy: None,
+        scroll_y: 0.0,
+        viewport_width: 0.0,
+        viewport_height: 0.0,
+        pending_navigation: None,
+        window: host_state::WindowState {
+            id: window_registry::register(),
+        },
+    })
+}
+
 impl<'rt> Context<'rt> {
     pub fn new(runtime: &'rt Runtime) -> Self {
         let ptr = unsafe { sys::JS_NewContext(runtime.ptr) };
         assert!(!ptr.is_null(), "JS_NewContext returned null");
-        unsafe {
-            performance::register(ptr);
-            console::register(ptr);
-            abort_controller::register(ptr);
-            crypto::register(ptr);
-            events::register(ptr);
-            event_subclasses::register(ptr);
-            page_visibility::register(ptr);
-            request_response::register(ptr);
-            fetch::register(ptr);
-            fetch_async::register(ptr);
-            timers::register(ptr);
-            document_cookie::register(ptr);
-            cssom_stylesheet::register(ptr);
-            trusted_types::register(ptr);
-            indexed_db_bindings::register(ptr);
-            local_storage_bindings::register(ptr);
-            blob::register(ptr);
-            url_bindings::register(ptr);
-            form_data::register(ptr);
-            notifications::register(ptr);
-            navigator::register(ptr);
-            clipboard::register(ptr);
-            web_audio::register(ptr);
-            window::register(ptr);
-            location::register(ptr);
-            history::register(ptr);
-            message_channel::register(ptr);
-            mutation_observer::register(ptr);
-            custom_elements::register(ptr);
-            screen::register(ptr);
-            value_bridge::register(ptr);
-        };
+        unsafe { register_standard_globals(ptr) };
         Context {
             ptr,
             _runtime: PhantomData,
@@ -97,28 +152,7 @@ impl<'rt> Context<'rt> {
     /// `null`) until [`Context::with_storage`] configures real storage.
     pub fn with_dom(runtime: &'rt Runtime, dom: dom::Dom) -> Self {
         let mut ctx = Self::new(runtime);
-        let mut state = Box::new(host_state::HostState {
-            dom,
-            cookies: None,
-            host: String::new(),
-            storage_dir: None,
-            local_storage: None,
-            session_storage: None,
-            url: None,
-            layout_rects: std::collections::HashMap::new(),
-            computed_styles: std::collections::HashMap::new(),
-            csp: Vec::new(),
-            trusted_type_policy_names: Vec::new(),
-            console_messages: Vec::new(),
-            permissions_policy: None,
-            scroll_y: 0.0,
-            viewport_width: 0.0,
-            viewport_height: 0.0,
-            pending_navigation: None,
-            window: host_state::WindowState {
-                id: window_registry::register(),
-            },
-        });
+        let mut state = build_host_state(dom);
         let raw = state.as_mut() as *mut host_state::HostState as *mut std::os::raw::c_void;
         unsafe {
             sys::JS_SetContextOpaque(ctx.ptr, raw);
@@ -171,6 +205,13 @@ impl<'rt> Context<'rt> {
             .window_id()
             .map(|id| unsafe { window_registry::pump(self.ptr, id) })
             .unwrap_or(0);
+        // Any window this context opened via `window.open()` (`ROADMAP.md`
+        // items 36/37) has no host loop of its own driving it — piggyback
+        // on this context's own pump instead, recursively, so the whole
+        // tree of windows a page opens gets driven by the same per-frame
+        // `run_pending_timers` call the top-level host already makes. See
+        // `window_registry::pump_children`'s own doc.
+        let children_delivered = unsafe { window_registry::pump_children(self.ptr) };
         unsafe {
             timers::pump(self.ptr)
                 + fetch_async::pump(self.ptr)
@@ -178,6 +219,7 @@ impl<'rt> Context<'rt> {
                 + message_channel::pump(self.ptr)
                 + window_delivered
                 + module_loader::pump(self.ptr)
+                + children_delivered
         }
     }
 
@@ -212,6 +254,33 @@ impl<'rt> Context<'rt> {
     /// themselves.
     pub fn window_id(&self) -> Option<window_registry::WindowId> {
         self._host_state.as_ref().map(|s| s.window.id)
+    }
+
+    /// Evaluates `code` in a window this context (or any context)
+    /// opened via `window.open()` — there is no JS-facing way to reach
+    /// another window's realm directly (by design, matching real
+    /// cross-window isolation), so this is a host/test-facing debugging
+    /// hook, not something a page script can call. `None` if `id` isn't
+    /// a currently-open, dynamically-opened window (an externally-owned
+    /// top-level `Context`'s own id doesn't resolve here either — this
+    /// only reaches windows `window_registry` itself owns).
+    pub fn eval_in_window(
+        &self,
+        id: window_registry::WindowId,
+        code: &str,
+        filename: &str,
+    ) -> Option<Result<String, EvalError>> {
+        let ptr = window_registry::context_ptr_for(id)?;
+        Some(unsafe { Self::eval_raw(ptr, code, filename) })
+    }
+
+    /// Rust-level `window.open()` — opens a real child window the same
+    /// way the JS-facing `window.open()` global does, without going
+    /// through `eval`. A host/test-facing convenience for driving the
+    /// primitive directly (same "Rust-level entry point alongside the
+    /// JS one" shape [`Context::send_cross_window_message`] already has).
+    pub fn open_window(&self) -> window_registry::WindowId {
+        unsafe { window_registry::open_window(self.ptr) }
     }
 
     /// Sends `js_expr`'s evaluated result (cloned via the same
@@ -316,18 +385,12 @@ impl<'rt> Context<'rt> {
 impl Drop for Context<'_> {
     fn drop(&mut self) {
         if let Some(id) = self.window_id() {
+            unsafe { window_registry::close_children_of(self.ptr) };
             window_registry::unregister(id);
         }
         module_loader::cleanup(self.ptr);
         unsafe {
-            custom_elements::cleanup(self.ptr);
-            script_limits::cleanup(self.ptr);
-            timers::cleanup(self.ptr);
-            fetch_async::cleanup(self.ptr);
-            mutation_observer::cleanup(self.ptr);
-            message_channel::cleanup(self.ptr);
-            blob::cleanup(self.ptr);
-            notifications::cleanup(self.ptr);
+            cleanup_standard_globals(self.ptr);
             dom_bindings::cleanup(self.ptr);
             sys::JS_FreeContext(self.ptr);
         }

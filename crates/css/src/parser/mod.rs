@@ -205,3 +205,13 @@ impl<'a> Parser<'a> {
 pub fn parse_stylesheet(input: &str) -> Stylesheet {
     Parser::new(input).parse_stylesheet()
 }
+
+/// Parses a bare declaration list with no enclosing selector/braces (an
+/// inline `style="..."` HTML attribute's value) into the same
+/// [`Declaration`] shape a stylesheet rule's body produces — reuses
+/// [`Parser::parse_declarations`], which already stops at `None` as well as
+/// `RBrace`, so it works equally for a full rule body and a brace-less
+/// fragment like this one.
+pub fn parse_inline_style(input: &str) -> Vec<Declaration> {
+    Parser::new(input).parse_declarations()
+}

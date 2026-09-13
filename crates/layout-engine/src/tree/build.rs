@@ -1,13 +1,13 @@
 //! `build_children`/`build` — the recursive box-tree construction itself,
 //! split out from `tree/mod.rs`.
 
-use css::{matching_declarations_indexed, ElementSnapshot, SelectorIndex, Stylesheet};
+use css::{ElementSnapshot, SelectorIndex, Stylesheet};
 use dom::{Dom, NodeData, NodeId};
 
-use crate::style::{resolve_style, Color, ComputedStyle, Display};
+use crate::style::{Color, ComputedStyle, Display};
 
 use super::inline::{collect_inline_spans, is_inline_level};
-use super::snapshot::{build_element_snapshot, is_never_rendered};
+use super::snapshot::{is_never_rendered, resolve_element_style};
 use super::types::{Dimensions, LayoutBox, ResolvedBorder};
 
 /// Builds every child box of `node` in one pass, grouping consecutive
@@ -170,16 +170,26 @@ pub(super) fn build<'a>(
         });
     }
 
-    let NodeData::Element { tag, .. } = &n.data else {
+    let NodeData::Element {
+        tag, attributes, ..
+    } = &n.data
+    else {
         return None;
     };
     if is_never_rendered(tag) {
         return None;
     }
 
-    chain.push(build_element_snapshot(dom, node));
-    let style = resolve_style(
-        &matching_declarations_indexed(index, sheet, chain, viewport_width, viewport_height),
+    let style = resolve_element_style(
+        dom,
+        node,
+        tag,
+        attributes,
+        sheet,
+        index,
+        viewport_width,
+        viewport_height,
+        chain,
         parent_font_size,
         parent_color,
     );

@@ -20,7 +20,7 @@
 //! that ties parsing to `ComputedStyle` fields) — this file keeps only
 //! the public entry point, `resolve_style`.
 
-use css::MatchedDeclarations;
+use css::{Declaration, MatchedDeclarations};
 
 mod apply_declaration;
 mod computed_style;
@@ -52,4 +52,17 @@ pub fn resolve_style(
         }
     }
     style
+}
+
+/// Applies an inline `style="..."` HTML attribute's declarations
+/// (already parsed via `css::parse_inline_style`) on top of an
+/// already-cascaded [`ComputedStyle`] — inline style always wins over
+/// every stylesheet rule regardless of selector specificity (CSS
+/// Cascading and Inheritance §6.4.1), so this must run strictly after
+/// every `matching_declarations`-sourced declaration, never merged into
+/// the same sorted pass.
+pub fn apply_inline_declarations(style: &mut ComputedStyle, decls: &[Declaration]) {
+    for decl in decls {
+        apply_declaration::apply_declaration(style, decl);
+    }
 }

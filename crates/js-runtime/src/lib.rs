@@ -32,6 +32,7 @@ mod js_helpers;
 mod layout_measurement;
 mod local_storage_bindings;
 mod location;
+mod mutation_observer;
 mod navigator;
 mod notifications;
 mod page_visibility;

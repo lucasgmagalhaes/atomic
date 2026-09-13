@@ -196,6 +196,45 @@ pub struct Dom {
     /// drain API — which requires `&mut self` and isn't available from
     /// an immutable borrow of `Dom`.
     layout_version: u64,
+    /// Real `MutationObserver` record queue (`ROADMAP.md` item 40):
+    /// appended by every tree-shape mutation (`append_child`/
+    /// `insert_before`/`remove_from_parent`/`remove`/`replace_child`) and
+    /// attribute mutation (`set_attribute`/`remove_attribute`), drained by
+    /// [`Dom::take_mutation_records`]. A caller (`js_runtime`'s
+    /// `mutation_observer` module) matches each record's `target` against
+    /// registered observers and delivers the ones that match.
+    mutation_records: Vec<MutationRecord>,
+}
+
+/// One entry in [`Dom::take_mutation_records`]'s queue — either a
+/// `childList` change (direct children of `target` added/removed) or an
+/// `attributes` change (one attribute on `target` set/removed). Scoped
+/// down from the full spec: no `subtree` observation (a record's `target`
+/// is always the exact node whose own children/attributes changed, never
+/// a descendant several levels down) and no `characterData` records
+/// (`Text`/`Comment` `.data` mutations don't push one) — real, narrower
+/// coverage for the two record kinds real pages overwhelmingly use.
+#[derive(Debug, Clone)]
+pub struct MutationRecord {
+    pub target: NodeId,
+    pub kind: MutationRecordKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum MutationRecordKind {
+    ChildList {
+        added: Vec<NodeId>,
+        removed: Vec<NodeId>,
+    },
+    Attributes {
+        name: String,
+        /// The attribute's value immediately before this change (`None`
+        /// if it didn't exist yet) — always captured; a plain `HashMap`
+        /// lookup is cheap enough that gating it behind whether some
+        /// observer asked for `attributeOldValue` isn't worth the added
+        /// plumbing (per this crate's own YAGNI convention).
+        old_value: Option<String>,
+    },
 }
 
 impl Default for Dom {
@@ -230,6 +269,7 @@ impl Dom {
             mutations: 0,
             dirty: DirtyFlags::EMPTY,
             layout_version: 0,
+            mutation_records: Vec::new(),
         }
     }
 

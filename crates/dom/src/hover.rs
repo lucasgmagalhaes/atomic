@@ -10,8 +10,13 @@ impl Dom {
     /// leaves both untouched.
     pub fn set_hovered(&mut self, id: NodeId) {
         if self.get(id).is_some() && self.hovered != Some(id) {
+            let previous = self.hovered;
             self.hovered = Some(id);
             self.bump_style_version();
+            if let Some(previous) = previous {
+                self.push_style_invalidation(previous, false);
+            }
+            self.push_style_invalidation(id, false);
         }
     }
 
@@ -21,9 +26,9 @@ impl Dom {
     /// nothing was hovered, mirroring [`Dom::clear_focus`]'s own
     /// "no-op on an already-clear state" convention.
     pub fn clear_hover(&mut self) {
-        if self.hovered.is_some() {
-            self.hovered = None;
+        if let Some(previous) = self.hovered.take() {
             self.bump_style_version();
+            self.push_style_invalidation(previous, false);
         }
     }
 

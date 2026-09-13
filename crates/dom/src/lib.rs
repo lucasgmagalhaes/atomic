@@ -204,6 +204,41 @@ pub struct Dom {
     /// `mutation_observer` module) matches each record's `target` against
     /// registered observers and delivers the ones that match.
     mutation_records: Vec<MutationRecord>,
+    /// Real dirty-style-propagation queue (`ROADMAP.md` item 11): appended
+    /// by every mutation that can affect cascade results, drained by
+    /// [`Dom::drain_style_invalidations`]. Unlike `dirty`/`style_version`
+    /// (a single global "something changed" signal), each entry names
+    /// *which* node needs re-cascading and whether its descendants do too
+    /// — a consumer (`layout-engine`'s future incremental style pass, see
+    /// ROADMAP item 27) can restyle only the named subtrees instead of the
+    /// whole document. Same drain-and-reset shape as `mutation_records`.
+    style_invalidations: Vec<StyleInvalidation>,
+}
+
+/// One entry in [`Dom::drain_style_invalidations`]'s queue.
+///
+/// `subtree: true` means `root` and every descendant may need
+/// re-cascading — a structural change (a subtree was added/moved, whose
+/// own elements have never been cascaded against this tree's rules) or an
+/// attribute mutation (`class`/`style`/anything else — this crate can't
+/// know which specific properties an arbitrary attribute change affects,
+/// so it's conservative here the same way `attributes::ATTR_DIRTY`
+/// already is, and inherited properties mean a changed value can affect
+/// descendants regardless of which attribute changed).
+///
+/// `subtree: false` means only `root` itself needs re-cascading — a
+/// `:hover`/`:focus` state change, which affects which rule matches the
+/// exact node whose state changed but not, in this engine's scope, its
+/// descendants (a real page can write `.foo:hover .bar { ... }`, which
+/// this narrower classification misses — documented scope cut, not a
+/// silent bug: the *global* `style_version` counter still bumps
+/// alongside every entry pushed here, so any consumer that isn't ready to
+/// trust per-subtree scoping yet can keep comparing that instead, same
+/// fallback `LayoutCache`/`PaintCache` already use).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StyleInvalidation {
+    pub root: NodeId,
+    pub subtree: bool,
 }
 
 /// One entry in [`Dom::take_mutation_records`]'s queue — either a
@@ -270,6 +305,7 @@ impl Dom {
             dirty: DirtyFlags::EMPTY,
             layout_version: 0,
             mutation_records: Vec::new(),
+            style_invalidations: Vec::new(),
         }
     }
 
@@ -300,5 +336,19 @@ impl Dom {
     /// invalidates a cache whose cascaded styles depend on it.
     pub fn style_version(&self) -> u64 {
         self.style_version
+    }
+
+    /// Records that `root` (and, if `subtree`, its descendants) needs
+    /// re-cascading — see [`StyleInvalidation`]'s own doc for the
+    /// `subtree` distinction. Deliberately does *not* touch
+    /// [`Dom::style_version`]/`layout_version` — those two counters keep
+    /// their existing, narrower meaning (`style_version`: a `:hover`/
+    /// `:focus` state change; `layout_version`: a `LAYOUT`-flagged
+    /// mutation, via `mark_dirty`) and callers already keyed on them must
+    /// not see extra bumps from every attribute/structural mutation this
+    /// queue also now records.
+    pub(crate) fn push_style_invalidation(&mut self, root: NodeId, subtree: bool) {
+        self.style_invalidations
+            .push(StyleInvalidation { root, subtree });
     }
 }

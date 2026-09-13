@@ -10,9 +10,14 @@ impl Dom {
     /// can tell whether it moved (real `"change"`-event semantics).
     pub fn focus(&mut self, id: NodeId) {
         if self.get(id).is_some() {
+            let previous = self.focused;
             self.focused = Some(id);
             self.focused_value_snapshot = Some(self.value(id));
             self.bump_style_version();
+            if let Some(previous) = previous {
+                self.push_style_invalidation(previous, false);
+            }
+            self.push_style_invalidation(id, false);
         }
     }
 
@@ -31,6 +36,7 @@ impl Dom {
             self.focused = None;
             self.focused_value_snapshot = None;
             self.bump_style_version();
+            self.push_style_invalidation(id, false);
             Some(changed)
         } else {
             None
@@ -48,6 +54,7 @@ impl Dom {
         self.focused = None;
         self.focused_value_snapshot = None;
         self.bump_style_version();
+        self.push_style_invalidation(id, false);
         Some((id, changed))
     }
 

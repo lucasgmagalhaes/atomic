@@ -96,6 +96,27 @@ pub(crate) struct Page<'rt> {
     /// passes — see `PaintCache`'s own doc for why this reuses
     /// `LayoutCache`'s key rather than `dom::DirtyFlags::PAINT`.
     paint_cache: RefCell<Option<PaintCache>>,
+    /// Real per-compositing-layer paint cache (`ROADMAP.md` item 28),
+    /// keyed by each layer root's own `NodeId` — unlike `paint_cache`
+    /// (one whole-frame entry, invalidated by *any* page-wide change),
+    /// each entry here survives across frames independently, reused
+    /// whenever `render()` finds no `dom::StyleInvalidation` whose target
+    /// falls under that layer's own subtree (see `render.rs`'s own doc on
+    /// `find_layer_roots`/`Dom::contains` wiring). Entries whose `NodeId`
+    /// no longer resolves to a current layer root are pruned each
+    /// recompute so this can't grow unboundedly across navigations.
+    layers: RefCell<HashMap<NodeId, LayerCacheEntry>>,
+}
+
+/// One [`render::Layer`]'s cached pixels plus the `scroll_top` they were
+/// painted at — `render::LayerCacheKey` itself has no `scroll_top` field
+/// (a layer's own painted pixels embed the scroll shift, same as the
+/// whole-frame `PaintCache` already accounts for), so this wrapper keeps
+/// it alongside the layer without touching `render::Layer`'s own,
+/// already-landed shape.
+struct LayerCacheEntry {
+    layer: ::render::Layer,
+    scroll_top: f64,
 }
 
 struct LayoutCache {

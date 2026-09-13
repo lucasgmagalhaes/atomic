@@ -46,7 +46,9 @@
 
 use quickjs_sys as sys;
 
+mod attribute_methods;
 mod attributes;
+mod child_node_variadic;
 mod class_list;
 mod collections;
 mod content;
@@ -65,6 +67,7 @@ mod node_registry;
 mod scroll_focus;
 mod select;
 mod selectors;
+mod tree_edit;
 mod util;
 mod validity;
 

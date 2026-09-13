@@ -38,11 +38,11 @@ pub struct Context<'rt> {
 
 use crate::{
     abort_controller, blob, clipboard, computed_style, console, crypto, cssom_stylesheet,
-    document_cookie, dom_bindings, event_subclasses, events, fetch, fetch_async, form_data,
-    history, host_state, indexed_db_bindings, local_storage_bindings, location, message_channel,
-    module_loader, mutation_observer, navigator, notifications, page_visibility, performance,
-    request_response, screen, script_limits, timers, trusted_types, url_bindings, value_bridge,
-    web_audio, window, window_registry,
+    custom_elements, document_cookie, dom_bindings, event_subclasses, events, fetch, fetch_async,
+    form_data, history, host_state, indexed_db_bindings, local_storage_bindings, location,
+    message_channel, module_loader, mutation_observer, navigator, notifications, page_visibility,
+    performance, request_response, screen, script_limits, timers, trusted_types, url_bindings,
+    value_bridge, web_audio, window, window_registry,
 };
 
 impl<'rt> Context<'rt> {
@@ -78,6 +78,7 @@ impl<'rt> Context<'rt> {
             history::register(ptr);
             message_channel::register(ptr);
             mutation_observer::register(ptr);
+            custom_elements::register(ptr);
             screen::register(ptr);
             value_bridge::register(ptr);
         };
@@ -319,6 +320,7 @@ impl Drop for Context<'_> {
         }
         module_loader::cleanup(self.ptr);
         unsafe {
+            custom_elements::cleanup(self.ptr);
             script_limits::cleanup(self.ptr);
             timers::cleanup(self.ptr);
             fetch_async::cleanup(self.ptr);

@@ -1,3 +1,13 @@
+# Force LF for every text file regardless of the checking-out platform's
+# core.autocrlf setting. Without this, a Windows clone with
+# core.autocrlf=true checks files out as CRLF, but rustfmt/cargo fmt
+# always writes LF - every formatting run then makes git see every
+# formatted file as "modified" (a pure EOL flip, zero real content
+# change), which was silently polluting `git status`/`git add -A`
+# across this whole session's PRs. `text=auto` lets git still detect
+# genuinely binary files (images, fonts) and leave them untouched.
+* text=auto eol=lf
+
 # Shell scripts must keep LF line endings regardless of the checking-out
 # platform's core.autocrlf setting - a CRLF-mangled shebang line breaks
 # `#!/bin/sh` on any real POSIX shell (git-bash on Windows tolerates it,

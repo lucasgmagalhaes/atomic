@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+atoms = { path = "../atoms" }
 
 [dev-dependencies]
 criterion = "0.5"

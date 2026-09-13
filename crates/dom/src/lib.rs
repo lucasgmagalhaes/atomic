@@ -23,6 +23,7 @@ mod focus;
 mod hover;
 mod mutation;
 mod query;
+mod scroll;
 mod serialize;
 mod shadow;
 
@@ -243,6 +244,14 @@ pub struct Dom {
     /// ROADMAP item 27) can restyle only the named subtrees instead of the
     /// whole document. Same drain-and-reset shape as `mutation_records`.
     style_invalidations: Vec<StyleInvalidation>,
+    /// Real per-element scroll offset (`ROADMAP.md` item 22), keyed by
+    /// `NodeId` — unlike `focused`/`hovered` (exactly one node at a time),
+    /// any number of `overflow: auto`/`scroll` containers can be
+    /// independently scrolled at once, so this is a map, not a single
+    /// field. See [`Dom::element_scroll_offset`]/[`Dom::set_element_scroll_offset`]
+    /// in `scroll.rs`. A node absent here has never been scrolled — reads
+    /// as `(0.0, 0.0)`, matching a freshly laid-out element.
+    element_scroll: HashMap<NodeId, (f64, f64)>,
 }
 
 /// One entry in [`Dom::drain_style_invalidations`]'s queue.
@@ -336,6 +345,7 @@ impl Dom {
             layout_version: 0,
             mutation_records: Vec::new(),
             style_invalidations: Vec::new(),
+            element_scroll: HashMap::new(),
         }
     }
 

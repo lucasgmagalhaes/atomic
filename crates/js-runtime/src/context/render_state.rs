@@ -31,6 +31,19 @@ impl<'rt> Context<'rt> {
         }
     }
 
+    /// Replaces every real per-element scroll extent (`scrollWidth`/
+    /// `scrollHeight` — see `layout_measurement`) wholesale — same shape
+    /// and call site as [`Context::set_layout_rects`] (`ROADMAP.md` item
+    /// 22). No-op on a plain [`Context::new`].
+    pub fn set_scroll_extents(
+        &mut self,
+        extents: std::collections::HashMap<dom::NodeId, (f64, f64)>,
+    ) {
+        if let Some(state) = self._host_state.as_mut() {
+            state.scroll_extents = extents;
+        }
+    }
+
     /// Replaces this context's `Content-Security-Policy` policy list with
     /// the single given policy, checked by `fetch`/`fetchSync`/
     /// `XMLHttpRequest` before sending a request (see `csp`). No-op on a

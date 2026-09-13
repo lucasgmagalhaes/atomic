@@ -74,4 +74,12 @@ pub struct LayoutBox {
     /// those all render as an empty box, same as this engine already
     /// treats an unknown/unstyled element.
     pub image: Option<std::rc::Rc<image_decode::DecodedImage>>,
+    /// Real per-element scroll offset (`ROADMAP.md` item 22), read from
+    /// `dom::Dom::element_scroll_offset` at box-tree construction time -
+    /// `(0.0, 0.0)` for a text/synthetic-inline-run box (neither is ever a
+    /// real scroll container) and for any element never scrolled. Only
+    /// meaningful when this box's own `style.overflow` isn't `Visible`
+    /// (real CSS: only a non-`visible` overflow value makes an element a
+    /// scroll container) - `render::display_list` is the one consumer.
+    pub scroll_offset: (f64, f64),
 }

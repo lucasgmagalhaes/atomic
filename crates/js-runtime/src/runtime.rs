@@ -4,7 +4,7 @@
 
 use quickjs_sys as sys;
 
-use crate::class_registry;
+use crate::{class_registry, module_loader};
 
 #[derive(Debug)]
 pub struct EvalError(pub String);
@@ -25,6 +25,20 @@ impl Runtime {
     pub fn new() -> Self {
         let ptr = unsafe { sys::JS_NewRuntime() };
         assert!(!ptr.is_null(), "JS_NewRuntime returned null");
+        // Real ES module linking (`ROADMAP.md` item 19): registering this
+        // one normalize/load callback pair is what makes both static
+        // `import` and dynamic `import()` work — quickjs-ng has no
+        // separate dynamic-import host hook in this version (confirmed by
+        // grep against the vendored header), so both syntaxes route
+        // through here.
+        unsafe {
+            sys::JS_SetModuleLoaderFunc(
+                ptr,
+                Some(module_loader::module_normalize_fn),
+                Some(module_loader::module_load_fn),
+                std::ptr::null_mut(),
+            );
+        }
         Runtime { ptr }
     }
 }

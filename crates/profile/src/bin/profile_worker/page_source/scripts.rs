@@ -12,9 +12,20 @@ use super::url::resolve_url;
 /// present) - a `defer`/`async` attribute on an inline `<script>` is
 /// ignored (ignored here the same way: `Inline` carries no defer flag,
 /// always runs in its document-order slot in the non-deferred group).
+/// `is_module` reflects a real `type="module"` attribute (`ROADMAP.md`
+/// item 19) - previously read but discarded, treating every script as
+/// classic; a caller now uses it to pick `Context::eval` vs
+/// `Context::eval_module`.
 enum ScriptSource {
-    Inline(String),
-    External { src: String, defer: bool },
+    Inline {
+        text: String,
+        is_module: bool,
+    },
+    External {
+        src: String,
+        defer: bool,
+        is_module: bool,
+    },
 }
 
 /// Collects every `<script>` element's source in document order (matches
@@ -28,18 +39,37 @@ fn collect_script_sources(dom: &Dom, node: NodeId, out: &mut Vec<ScriptSource>) 
     } = &n.data
     {
         if tag == "script" {
+            let is_module = attributes
+                .get("type")
+                .is_some_and(|t| t.eq_ignore_ascii_case("module"));
             match attributes.get("src") {
                 Some(src) => out.push(ScriptSource::External {
                     src: src.clone(),
                     defer: attributes.contains_key("defer"),
+                    is_module,
                 }),
-                None => out.push(ScriptSource::Inline(dom.text_content(node))),
+                None => out.push(ScriptSource::Inline {
+                    text: dom.text_content(node),
+                    is_module,
+                }),
             }
         }
     }
     for &child in &n.children {
         collect_script_sources(dom, child, out);
     }
+}
+
+/// One script ready to run: its real source text, whether it's a real ES
+/// module (`ROADMAP.md` item 19 - a caller must use `Context::eval_module`,
+/// not `Context::eval`, for these), and the real URL its own relative
+/// `import`/`import()` specifiers resolve against - the page's own
+/// `base_url` for an inline module, or the external script's own resolved
+/// `src` for a fetched one, matching real per-module base-URL semantics.
+pub(crate) struct LoadedScript {
+    pub(crate) text: String,
+    pub(crate) is_module: bool,
+    pub(crate) url: String,
 }
 
 /// Real `<script>` tag execution - previously only the hardcoded demo
@@ -87,31 +117,48 @@ pub(crate) fn load_scripts(
     proxy: Option<&net::ProxyConfig>,
     dns_server: Option<std::net::SocketAddr>,
     cache: &mut ResourceCache,
-) -> Vec<String> {
+) -> Vec<LoadedScript> {
     let mut sources = Vec::new();
     collect_script_sources(dom, root, &mut sources);
 
-    let fetch_text = |src: &str, cache: &mut ResourceCache| -> Option<String> {
+    let fetch_text = |src: &str, cache: &mut ResourceCache| -> Option<(String, String)> {
         let url = resolve_url(base_url, src)?;
         let response = cache
             .fetch_cached(&url, storage_root, proxy, dns_server)
             .ok()?;
-        String::from_utf8(response.body.to_vec()).ok()
+        let text = String::from_utf8(response.body.to_vec()).ok()?;
+        Some((text, url))
     };
 
     let mut immediate = Vec::new();
     let mut deferred = Vec::new();
     for source in sources {
         match source {
-            ScriptSource::Inline(text) => immediate.push(text),
-            ScriptSource::External { src, defer } if defer => {
-                if let Some(text) = fetch_text(&src, cache) {
-                    deferred.push(text);
+            ScriptSource::Inline { text, is_module } => immediate.push(LoadedScript {
+                text,
+                is_module,
+                url: base_url.unwrap_or("<inline script>").to_string(),
+            }),
+            ScriptSource::External {
+                src,
+                defer,
+                is_module,
+            } if defer => {
+                if let Some((text, url)) = fetch_text(&src, cache) {
+                    deferred.push(LoadedScript {
+                        text,
+                        is_module,
+                        url,
+                    });
                 }
             }
-            ScriptSource::External { src, .. } => {
-                if let Some(text) = fetch_text(&src, cache) {
-                    immediate.push(text);
+            ScriptSource::External { src, is_module, .. } => {
+                if let Some((text, url)) = fetch_text(&src, cache) {
+                    immediate.push(LoadedScript {
+                        text,
+                        is_module,
+                        url,
+                    });
                 }
             }
         }

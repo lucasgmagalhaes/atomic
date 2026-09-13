@@ -24,6 +24,8 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::ffi::{CStr, CString};
+use std::os::raw::{c_char, c_void};
 use std::sync::mpsc;
 use std::thread;
 
@@ -134,6 +136,115 @@ pub(crate) fn pump(ctx: *mut sys::JSContext) -> usize {
         }
     });
     delivered
+}
+
+/// Real `JSModuleNormalizeFunc` (`ROADMAP.md` item 19) — registered once
+/// per `Runtime` via `JS_SetModuleLoaderFunc` (`runtime.rs`). Resolves
+/// `module_name` against `module_base_name` via [`resolve_specifier`]'s
+/// real `url::Url::join`, returning a string allocated with
+/// `sys::js_strdup` (quickjs-ng frees this with its own allocator, so a
+/// plain `CString::into_raw` would be unsound here). Throws a real
+/// `ReferenceError` and returns null on an unresolvable specifier (a bare
+/// specifier with no import map, or an unparseable base) - same "can't
+/// resolve without one" outcome `resolve_specifier`'s own doc documents.
+pub(crate) unsafe extern "C" fn module_normalize_fn(
+    ctx: *mut sys::JSContext,
+    module_base_name: *const c_char,
+    module_name: *const c_char,
+    _opaque: *mut c_void,
+) -> *mut c_char {
+    let base = CStr::from_ptr(module_base_name).to_string_lossy();
+    let specifier = CStr::from_ptr(module_name).to_string_lossy();
+    match resolve_specifier(&base, &specifier) {
+        Some(resolved) => match CString::new(resolved) {
+            Ok(c) => sys::js_strdup(ctx, c.as_ptr()),
+            Err(_) => std::ptr::null_mut(),
+        },
+        None => {
+            let fmt = CString::new("could not resolve module specifier '%s'").unwrap();
+            let spec_c = CString::new(specifier.into_owned()).unwrap_or_default();
+            sys::JS_ThrowReferenceError(ctx, fmt.as_ptr(), spec_c.as_ptr());
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Real `JSModuleLoaderFunc` (`ROADMAP.md` item 19) — registered
+/// alongside [`module_normalize_fn`]. Fetches `module_name` (already
+/// normalized/resolved to an absolute URL) synchronously: quickjs-ng's
+/// module-loader contract has no async continuation (it must return a
+/// real `JSModuleDef*` or `NULL` immediately), so this blocks the calling
+/// thread on the network request - a real, documented scope cut versus
+/// Stage 4's non-blocking background-thread fetch (still consulted/
+/// populated here, so a module already fetched once - by a prior
+/// `load`/`pump` cycle, or an earlier import of the same URL in this same
+/// graph - is reused instead of re-fetched). Compiles the fetched source
+/// via `JS_Eval(..., JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY)`,
+/// matching quickjs-libc.c's own reference `js_module_load`.
+pub(crate) unsafe extern "C" fn module_load_fn(
+    ctx: *mut sys::JSContext,
+    module_name: *const c_char,
+    _opaque: *mut c_void,
+) -> *mut sys::JSModuleDef {
+    let resolved = CStr::from_ptr(module_name).to_string_lossy().into_owned();
+
+    let source = match status(ctx, &resolved) {
+        Some(ModuleStatus::Ready(text)) => text,
+        _ => match net::request("GET", &resolved, &[], None) {
+            Ok(response) => {
+                let text = String::from_utf8_lossy(&response.body).into_owned();
+                CACHES.with(|c| {
+                    c.borrow_mut()
+                        .entry(ctx as usize)
+                        .or_default()
+                        .records
+                        .insert(resolved.clone(), ModuleStatus::Ready(text.clone()));
+                });
+                text
+            }
+            Err(e) => {
+                let message = e.to_string();
+                CACHES.with(|c| {
+                    c.borrow_mut()
+                        .entry(ctx as usize)
+                        .or_default()
+                        .records
+                        .insert(resolved.clone(), ModuleStatus::Failed(message.clone()));
+                });
+                let fmt = CString::new("could not load module '%s': %s").unwrap();
+                let name_c = CString::new(resolved).unwrap_or_default();
+                let msg_c = CString::new(message).unwrap_or_default();
+                sys::JS_ThrowReferenceError(ctx, fmt.as_ptr(), name_c.as_ptr(), msg_c.as_ptr());
+                return std::ptr::null_mut();
+            }
+        },
+    };
+
+    let source_c = match CString::new(source) {
+        Ok(c) => c,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let name_c = match CString::new(resolved) {
+        Ok(c) => c,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let result = sys::JS_Eval(
+        ctx,
+        source_c.as_ptr(),
+        source_c.as_bytes().len(),
+        name_c.as_ptr(),
+        sys::JS_EVAL_TYPE_MODULE | sys::JS_EVAL_FLAG_COMPILE_ONLY,
+    );
+    if sys::js_is_exception(&result) {
+        return std::ptr::null_mut();
+    }
+    // The module is already referenced by quickjs-ng's own internal
+    // module table once compiled - this returned `JSValue` wrapper must
+    // still be freed (matching quickjs-libc.c's own `js_module_load`),
+    // but doing so does not free the module itself.
+    let module = result.u.ptr as *mut sys::JSModuleDef;
+    sys::JS_FreeValue(ctx, result);
+    module
 }
 
 /// Frees `ctx`'s module cache — must run before `JS_FreeContext(ctx)`,

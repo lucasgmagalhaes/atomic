@@ -17,9 +17,7 @@ use super::content::{
     define_node_value, define_selection_properties, define_text_content, define_value,
 };
 use super::dataset::define_dataset;
-use super::forms::{
-    define_form_properties, define_select_properties, define_validation_and_labels,
-};
+use super::forms::define_form_properties;
 use super::mutation::define_mutation_methods;
 use super::navigation::define_navigation;
 use super::node_registry::{
@@ -28,6 +26,8 @@ use super::node_registry::{
     HTML_INPUT_CLASS_KIND, HTML_SELECT_CLASS_KIND, NODE_CLASS_KIND,
 };
 use super::scroll_focus::{define_focus_methods, define_scroll_methods};
+use super::select::define_select_properties;
+use super::validity::define_validation_and_labels;
 
 unsafe extern "C" fn node_finalizer(rt: *mut sys::JSRuntime, val: sys::JSValue) {
     let ptr = node_opaque(rt, val);

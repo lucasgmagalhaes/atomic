@@ -63,8 +63,10 @@ mod mutation;
 mod navigation;
 mod node_registry;
 mod scroll_focus;
+mod select;
 mod selectors;
 mod util;
+mod validity;
 
 pub(crate) use forms::run_default_click_action;
 pub(crate) use node_registry::{cleanup, node_class_id_for, node_id, node_object, parent_node_id};

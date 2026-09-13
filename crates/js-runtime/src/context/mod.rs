@@ -42,6 +42,7 @@ use crate::{
     history, host_state, indexed_db_bindings, local_storage_bindings, location, message_channel,
     mutation_observer, navigator, notifications, page_visibility, performance, request_response,
     screen, script_limits, timers, trusted_types, url_bindings, value_bridge, web_audio, window,
+    window_registry,
 };
 
 impl<'rt> Context<'rt> {
@@ -113,6 +114,9 @@ impl<'rt> Context<'rt> {
             viewport_width: 0.0,
             viewport_height: 0.0,
             pending_navigation: None,
+            window: host_state::WindowState {
+                id: window_registry::register(),
+            },
         });
         let raw = state.as_mut() as *mut host_state::HostState as *mut std::os::raw::c_void;
         unsafe {
@@ -162,11 +166,57 @@ impl<'rt> Context<'rt> {
     /// (`profile-worker`'s per-frame loop, or tests) must pump it
     /// explicitly. Returns how many callbacks/jobs ran in total.
     pub fn run_pending_timers(&self) -> usize {
+        let window_delivered = self
+            .window_id()
+            .map(|id| unsafe { window_registry::pump(self.ptr, id) })
+            .unwrap_or(0);
         unsafe {
             timers::pump(self.ptr)
                 + fetch_async::pump(self.ptr)
                 + mutation_observer::pump(self.ptr)
                 + message_channel::pump(self.ptr)
+                + window_delivered
+        }
+    }
+
+    /// This context's window identity (`ROADMAP.md` items 35-37) — `None`
+    /// for a plain [`Context::new`]/`with_dom` predates window registration
+    /// only in the sense that no host state exists at all; every
+    /// [`Context::with_dom`] context gets one. See `window_registry`'s
+    /// own module doc for why this exists ahead of `iframe`/`window.open`
+    /// themselves.
+    pub fn window_id(&self) -> Option<window_registry::WindowId> {
+        self._host_state.as_ref().map(|s| s.window.id)
+    }
+
+    /// Sends `js_expr`'s evaluated result (cloned via the same
+    /// context-independent `storage::value::Value` bridge `structuredClone`
+    /// uses) to window `to`'s inbox, delivered on that window's own
+    /// `Context` the next time its `run_pending_timers` pumps. Returns
+    /// `false` if `js_expr` throws or `to` isn't a live window. This is a
+    /// Rust-level primitive for now, not a JS-facing `postMessage` — see
+    /// `window_registry`'s own doc for the scope cut.
+    pub fn send_cross_window_message(&self, to: window_registry::WindowId, js_expr: &str) -> bool {
+        // Evaluates the raw JSValue directly (not via `Context::eval`,
+        // which stringifies the result) since the value itself, not its
+        // string form, is what needs to cross into `to`'s inbox.
+        unsafe {
+            let c_src = std::ffi::CString::new(js_expr).unwrap_or_default();
+            let c_name = std::ffi::CString::new("<cross-window-message>").unwrap();
+            let value = sys::JS_Eval(
+                self.ptr,
+                c_src.as_ptr(),
+                js_expr.len(),
+                c_name.as_ptr(),
+                sys::JS_EVAL_TYPE_GLOBAL as i32,
+            );
+            if sys::js_is_exception(&value) {
+                sys::JS_FreeValue(self.ptr, value);
+                return false;
+            }
+            let sent = window_registry::send(self.ptr, to, value);
+            sys::JS_FreeValue(self.ptr, value);
+            sent
         }
     }
 
@@ -240,6 +290,9 @@ impl<'rt> Context<'rt> {
 
 impl Drop for Context<'_> {
     fn drop(&mut self) {
+        if let Some(id) = self.window_id() {
+            window_registry::unregister(id);
+        }
         unsafe {
             script_limits::cleanup(self.ptr);
             timers::cleanup(self.ptr);

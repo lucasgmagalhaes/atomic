@@ -118,6 +118,19 @@ pub(crate) struct HostState {
     /// anchor click — real, honest degrade, not a crash, matching every
     /// other field's own convention here.
     pub pending_navigation: Option<String>,
+    /// This context's window identity (`ROADMAP.md` items 35-37,
+    /// `.claude/plans/architecture-p5-foundations.plan.md` Stage 3) — kept
+    /// as its own substruct rather than a flat field, per
+    /// `architecture/primitives.md` §13's "compose subsystems instead of
+    /// growing `HostState`" rule, since future window-identity concerns
+    /// (parent window, opener, frame kind) grow here, not as siblings on
+    /// `HostState` itself.
+    pub window: WindowState,
+}
+
+/// See [`HostState::window`]'s own doc.
+pub(crate) struct WindowState {
+    pub id: crate::window_registry::WindowId,
 }
 
 /// Reads the `HostState` behind `ctx`'s opaque slot, or null if unset

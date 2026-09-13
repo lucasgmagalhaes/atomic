@@ -48,6 +48,7 @@ mod url_bindings;
 mod value_bridge;
 mod web_audio;
 mod window;
+mod window_registry;
 
 mod context;
 mod runtime;
@@ -55,3 +56,4 @@ mod runtime;
 pub use context::Context;
 pub use layout_measurement::Rect;
 pub use runtime::{ensure_external_class, external_class_id, EvalError, Runtime};
+pub use window_registry::WindowId;

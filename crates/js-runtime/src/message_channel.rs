@@ -21,10 +21,15 @@
 //! `MessageChannel` ever produces one, same convention `AbortSignal`'s own
 //! constructor already documents).
 //!
-//! Scope cut (`ROADMAP.md` item 32, Transferable objects): not modeled —
-//! this crate has no real `ArrayBuffer`/typed-array type yet for anything
-//! to transfer ownership of, so `postMessage`'s second `transfer` argument
-//! is accepted and ignored.
+//! Real Transferable objects now (`ROADMAP.md` item 32), scoped to
+//! `Uint8Array` — `postMessage(data, transfer)`'s second argument, if a
+//! real array, has each `Uint8Array` element's backing buffer detached
+//! (`byteLength` becomes `0`, matching a real transferred buffer) *after*
+//! `deep_clone` has already copied its bytes — real "ownership moved"
+//! observable behavior, not just accepted-and-ignored. Not modeled: a
+//! bare `ArrayBuffer` with no view, and every other `TypedArray` kind —
+//! same narrower scope `value_bridge.rs`'s own doc already documents for
+//! Transferable objects generally.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -185,6 +190,44 @@ unsafe extern "C" fn port_post_message(
         sys::js_undefined()
     };
     let cloned = crate::value_bridge::deep_clone(ctx, data);
+
+    // Real transfer (`ROADMAP.md` item 32): detach each transferred
+    // `Uint8Array`'s backing buffer only *after* the clone above has
+    // already copied its bytes - detaching first would clone empty data.
+    if argc >= 2 {
+        let transfer = *argv.add(1);
+        if sys::JS_IsArray(transfer) {
+            let mut len: i64 = 0;
+            sys::JS_GetLength(ctx, transfer, &mut len);
+            for i in 0..len.max(0) as u32 {
+                let item = sys::JS_GetPropertyUint32(ctx, transfer, i);
+                let mut size: usize = 0;
+                if !sys::JS_GetUint8Array(ctx, &mut size, item).is_null() {
+                    let buffer = sys::JS_GetTypedArrayBuffer(
+                        ctx,
+                        item,
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                    );
+                    if !sys::js_is_exception(&buffer) {
+                        sys::JS_DetachArrayBuffer(ctx, buffer);
+                        sys::JS_FreeValue(ctx, buffer);
+                    }
+                } else {
+                    // Not a real Uint8Array - clear the stray TypeError
+                    // `JS_GetUint8Array` throws for any other value (see
+                    // `value_bridge.rs`'s own doc on this exact gotcha),
+                    // and silently skip it (narrower scope, not a thrown
+                    // `DataCloneError` for every invalid transfer target).
+                    let stray = sys::JS_GetException(ctx);
+                    sys::JS_FreeValue(ctx, stray);
+                }
+                sys::JS_FreeValue(ctx, item);
+            }
+        }
+    }
+
     REGISTRIES.with(|reg| {
         let mut map = reg.borrow_mut();
         let Some(registry) = map.get_mut(&(ctx as usize)) else {

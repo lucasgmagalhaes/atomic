@@ -7,14 +7,20 @@
 //! on-disk wire format.
 //!
 //! Deviations from the real Structured Clone Algorithm: no `Date`, `Map`,
-//! `Set`, `ArrayBuffer`/typed arrays, `RegExp`, or circular-reference
-//! support (a real structured clone can contain cycles; this tree can't
-//! represent one at all, so there's nothing to break) — those need either
-//! more variants or a cycle-aware clone algorithm this crate doesn't need
-//! yet. `clone_deep` is real regardless: every `Value` here is already a
-//! fully-owned tree with no shared/aliased state, so an ordinary `.clone()`
-//! *is* a structured clone — no separate deep-copy pass required, unlike
-//! JS's own object graphs.
+//! `Set`, `RegExp`, or circular-reference support (a real structured clone
+//! can contain cycles; this tree can't represent one at all, so there's
+//! nothing to break) — those need either more variants or a cycle-aware
+//! clone algorithm this crate doesn't need yet. `clone_deep` is real
+//! regardless: every `Value` here is already a fully-owned tree with no
+//! shared/aliased state, so an ordinary `.clone()` *is* a structured clone
+//! — no separate deep-copy pass required, unlike JS's own object graphs.
+//!
+//! `ArrayBuffer`/typed arrays (`ROADMAP.md` item 32) are real now, but
+//! narrowed to one kind: [`Value::Bytes`] represents exactly a
+//! `Uint8Array`'s raw bytes (matching this workspace's existing narrower
+//! scope for binary JS data, e.g. `crypto.getRandomValues`'s own
+//! `Uint8Array`-only precedent) — not a bare `ArrayBuffer` with no view,
+//! and not `Int32Array`/`Float64Array`/etc.
 //!
 //! Split into `write.rs` (JSON-like text encoding) and `parse.rs`
 //! (the recursive-descent parser).
@@ -35,6 +41,9 @@ pub enum Value {
     /// Insertion-ordered, like a real JS object's own enumeration order —
     /// a `HashMap` would silently scramble it.
     Object(Vec<(String, Value)>),
+    /// A real `Uint8Array`'s raw bytes (`ROADMAP.md` item 32) — see the
+    /// module doc for the narrower-than-full-spec scope.
+    Bytes(Vec<u8>),
 }
 
 impl From<&str> for Value {
@@ -97,6 +106,13 @@ impl Value {
         }
     }
 
+    pub fn as_bytes(&self) -> Option<&[u8]> {
+        match self {
+            Value::Bytes(b) => Some(b),
+            _ => None,
+        }
+    }
+
     /// Looks up a key in an `Object` value. `None` for a non-object or a
     /// missing key alike.
     pub fn get(&self, key: &str) -> Option<&Value> {
@@ -138,6 +154,7 @@ pub enum ParseError {
     InvalidNumber,
     InvalidEscape,
     TrailingData,
+    InvalidBase64,
 }
 
 impl std::fmt::Display for ParseError {
@@ -148,6 +165,7 @@ impl std::fmt::Display for ParseError {
             ParseError::InvalidNumber => write!(f, "invalid number literal"),
             ParseError::InvalidEscape => write!(f, "invalid string escape"),
             ParseError::TrailingData => write!(f, "trailing data after value"),
+            ParseError::InvalidBase64 => write!(f, "invalid base64 in bytes literal"),
         }
     }
 }

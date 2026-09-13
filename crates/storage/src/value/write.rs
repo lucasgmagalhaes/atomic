@@ -1,5 +1,7 @@
 //! JSON-like text encoding for `Value` — split out from `value.rs`.
 
+use base64::Engine;
+
 use super::Value;
 
 pub(super) fn write_value(value: &Value, out: &mut String) {
@@ -38,6 +40,14 @@ pub(super) fn write_value(value: &Value, out: &mut String) {
                 write_value(val, out);
             }
             out.push('}');
+        }
+        // `b"<base64>"` - a distinct token from a plain string (`"..."`),
+        // so a real `Value::Bytes` round-trips as itself, not as
+        // `Value::String` holding base64 text.
+        Value::Bytes(bytes) => {
+            out.push('b');
+            let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+            write_json_string(&encoded, out);
         }
     }
 }

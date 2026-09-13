@@ -175,6 +175,25 @@ extern "C" {
     pub fn JS_NewUint8ArrayCopy(ctx: *mut JSContext, buf: *const u8, len: usize) -> JSValue;
     pub fn JS_NewArrayBufferCopy(ctx: *mut JSContext, buf: *const u8, len: usize) -> JSValue;
 
+    /// Real Transferable-object support (`ROADMAP.md` item 32, scoped to
+    /// `Uint8Array`): detaches `obj`'s backing `ArrayBuffer` - after this,
+    /// every view onto it (this crate only ever builds/detects a plain
+    /// `Uint8Array` one) observably has `byteLength === 0`, matching a
+    /// real transferred buffer's spec behavior.
+    pub fn JS_DetachArrayBuffer(ctx: *mut JSContext, obj: JSValue);
+
+    /// Returns the real `ArrayBuffer` backing a typed array view (`obj`) -
+    /// a new reference the caller must eventually free. Writes the view's
+    /// own byte offset/length/element size into the three out-params if
+    /// non-null (not used by this crate - always passed null).
+    pub fn JS_GetTypedArrayBuffer(
+        ctx: *mut JSContext,
+        obj: JSValue,
+        pbyte_offset: *mut usize,
+        pbyte_length: *mut usize,
+        pbytes_per_element: *mut usize,
+    ) -> JSValue;
+
     pub fn JS_NewArray(ctx: *mut JSContext) -> JSValue;
     /// `true`/`false` reflect `Array.isArray`-shaped intent, but per
     /// quickjs-ng's own doc comment this no longer punches through

@@ -3,6 +3,8 @@
 
 use std::str::CharIndices;
 
+use base64::Engine;
+
 use super::{ParseError, Value};
 
 pub(super) struct Parser<'a> {
@@ -65,9 +67,21 @@ impl<'a> Parser<'a> {
             '"' => self.parse_string().map(Value::String),
             '[' => self.parse_array(),
             '{' => self.parse_object(),
+            'b' => self.parse_bytes(),
             c if c == '-' || c.is_ascii_digit() => self.parse_number(),
             c => Err(ParseError::UnexpectedChar(c)),
         }
+    }
+
+    /// `b"<base64>"` - see `write.rs`'s own doc for why `Value::Bytes`
+    /// needs a distinct token from a plain string.
+    fn parse_bytes(&mut self) -> Result<Value, ParseError> {
+        self.expect('b')?;
+        let encoded = self.parse_string()?;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded.as_bytes())
+            .map_err(|_| ParseError::InvalidBase64)?;
+        Ok(Value::Bytes(bytes))
     }
 
     fn parse_string(&mut self) -> Result<String, ParseError> {

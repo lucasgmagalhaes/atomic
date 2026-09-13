@@ -1,4 +1,4 @@
-use crate::{DirtyFlags, Dom, Node, NodeData, NodeId};
+use crate::{DirtyFlags, Dom, MutationRecordKind, Node, NodeData, NodeId};
 
 /// Attribute mutations affect selector matching, style cascade, and
 /// visual appearance. At the DOM layer we can't know which specific
@@ -13,6 +13,8 @@ const ATTR_DIRTY: DirtyFlags = DirtyFlags::SELECTORS
 impl Dom {
     pub fn set_attribute(&mut self, id: NodeId, name: &str, value: &str) {
         self.mark_dirty(ATTR_DIRTY);
+        let mut old_value = None;
+        let mut is_element = false;
         if let Some(Node {
             data:
                 NodeData::Element {
@@ -25,7 +27,7 @@ impl Dom {
             ..
         }) = self.get_mut(id)
         {
-            attributes.insert(name.to_string(), value.to_string());
+            old_value = attributes.insert(name.to_string(), value.to_string());
             // Mirrors the HTML `value` content attribute into the real
             // `.value` property — real browsers only do this before the
             // user/JS first touches `.value` (a "dirty value flag" this
@@ -48,6 +50,16 @@ impl Dom {
             if name == "selected" {
                 *selected_field = true;
             }
+            is_element = true;
+        }
+        if is_element {
+            self.push_mutation_record(
+                id,
+                MutationRecordKind::Attributes {
+                    name: name.to_string(),
+                    old_value,
+                },
+            );
         }
     }
 
@@ -64,6 +76,7 @@ impl Dom {
     /// mirror as well.
     pub fn remove_attribute(&mut self, id: NodeId, name: &str) -> bool {
         self.mark_dirty(ATTR_DIRTY);
+        let mut old_value = None;
         if let Some(Node {
             data:
                 NodeData::Element {
@@ -85,9 +98,19 @@ impl Dom {
             if name == "selected" {
                 *selected_field = false;
             }
-            return attributes.remove(name).is_some();
+            old_value = attributes.remove(name);
         }
-        false
+        let existed = old_value.is_some();
+        if existed {
+            self.push_mutation_record(
+                id,
+                MutationRecordKind::Attributes {
+                    name: name.to_string(),
+                    old_value,
+                },
+            );
+        }
+        existed
     }
 
     /// Appends `more` onto an existing `Text` node's content in place —

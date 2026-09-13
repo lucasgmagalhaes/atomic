@@ -1,4 +1,4 @@
-use crate::{DirtyFlags, Dom, Node, NodeId};
+use crate::{DirtyFlags, Dom, MutationRecord, Node, NodeId};
 
 impl Dom {
     /// See the `mutations` field's own doc — a caller compares two
@@ -21,6 +21,26 @@ impl Dom {
     /// Peek at the current dirty flags without resetting them.
     pub fn dirty_flags(&self) -> DirtyFlags {
         self.dirty
+    }
+
+    /// How many [`MutationRecord`]s are queued right now, without draining
+    /// them — a caller (`js_runtime`'s `mutation_observer::observe`) reads
+    /// this when a new observation starts, so it can ignore records that
+    /// were already queued *before* that point once the next drain happens
+    /// (a `MutationObserver` must never report history from before its own
+    /// `observe()` call).
+    pub fn pending_mutation_record_count(&self) -> usize {
+        self.mutation_records.len()
+    }
+
+    /// Returns every [`MutationRecord`] queued since the last call and
+    /// empties the queue — same drain-and-reset shape as
+    /// [`Dom::drain_dirty`]. A caller (`js_runtime`'s `mutation_observer`
+    /// module) calls this once per pump, not per mutation, matching this
+    /// crate's general "batch, don't call back synchronously" convention
+    /// for anything JS-observable.
+    pub fn take_mutation_records(&mut self) -> Vec<MutationRecord> {
+        std::mem::take(&mut self.mutation_records)
     }
 
     /// Version counter that increments only when layout-relevant

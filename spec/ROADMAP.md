@@ -84,7 +84,7 @@ Read [matrix/dom.md](matrix/dom.md).
 37. `[ ]` Cross-window messaging.
 38. `[ ]` Shadow DOM.
 39. `[ ]` Custom Elements.
-40. `[ ]` MutationObserver.
+40. `[~]` MutationObserver — done (2026-09-13), scoped: real `childList`/`attributes` (with `attributeOldValue`) observation, backed by `dom::Dom`'s new `MutationRecord` queue (`crates/dom/src/lib.rs`/`mutation.rs`/`attributes.rs`) appended by every tree-shape and attribute mutation, delivered via `js_runtime::mutation_observer::pump` once per `Context::run_pending_timers` tick (this crate's usual "no real microtask queue yet" cadence — see `timers`/`fetch_async`'s own docs for the same tradeoff). Real target-scoped filtering including a "no history before `observe()`" guard (`ObserveEntry::observed_at`, see that field's own doc — a real bug caught by `crates/js-runtime/tests/mutation_observer_test.rs`'s own regression tests during implementation: without it, a freshly-attached observer would wrongly see mutations that happened before it started observing). Documented scope cuts: no `subtree` option (a record's `target` must exactly equal the `observe()` target, never a descendant), no `characterData`, `addedNodes`/`removedNodes` are plain arrays not a live `NodeList`, and `takeRecords()` always returns `[]` (correct given the delivery model — see the module's own doc for why that's not just unimplemented).
 
 Note: `DOMParser`/`XMLSerializer` (a *different*, already-real piece of the "templates, shadow DOM, custom elements" matrix bullet) are done — see [matrix/dom.md](matrix/dom.md). `<template>` element content is not.
 

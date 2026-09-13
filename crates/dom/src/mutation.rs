@@ -1,4 +1,4 @@
-use crate::{DirtyFlags, Dom, Node, NodeData, NodeId, Slot};
+use crate::{DirtyFlags, Dom, MutationRecord, MutationRecordKind, Node, NodeData, NodeId, Slot};
 
 /// All dirty flags — set when the DOM tree shape changes (nodes
 /// added/removed/reordered), since every downstream subsystem may need
@@ -67,13 +67,34 @@ impl Dom {
 
     pub fn append_child(&mut self, parent: NodeId, child: NodeId) {
         self.mark_dirty(STRUCTURAL);
+        let old_parent = self.get(child).and_then(|n| n.parent);
         self.detach(child);
+        if let Some(old_parent) = old_parent {
+            self.push_mutation_record(
+                old_parent,
+                MutationRecordKind::ChildList {
+                    added: vec![],
+                    removed: vec![child],
+                },
+            );
+        }
         if let Some(node) = self.get_mut(child) {
             node.parent = Some(parent);
         }
         if let Some(node) = self.get_mut(parent) {
             node.children.push(child);
         }
+        self.push_mutation_record(
+            parent,
+            MutationRecordKind::ChildList {
+                added: vec![child],
+                removed: vec![],
+            },
+        );
+    }
+
+    pub(crate) fn push_mutation_record(&mut self, target: NodeId, kind: MutationRecordKind) {
+        self.mutation_records.push(MutationRecord { target, kind });
     }
 
     /// Inserts `new_node` as the sibling immediately before `sibling`,
@@ -87,7 +108,17 @@ impl Dom {
             .get(sibling)
             .and_then(|n| n.parent)
             .expect("sibling must have a parent");
+        let old_parent = self.get(new_node).and_then(|n| n.parent);
         self.detach(new_node);
+        if let Some(old_parent) = old_parent {
+            self.push_mutation_record(
+                old_parent,
+                MutationRecordKind::ChildList {
+                    added: vec![],
+                    removed: vec![new_node],
+                },
+            );
+        }
         if let Some(node) = self.get_mut(new_node) {
             node.parent = Some(parent);
         }
@@ -99,6 +130,13 @@ impl Dom {
                 .unwrap_or(node.children.len());
             node.children.insert(pos, new_node);
         }
+        self.push_mutation_record(
+            parent,
+            MutationRecordKind::ChildList {
+                added: vec![new_node],
+                removed: vec![],
+            },
+        );
     }
 
     /// Removes `child` from its current parent's children list without
@@ -107,7 +145,17 @@ impl Dom {
     /// subtree instead.
     pub fn remove_from_parent(&mut self, child: NodeId) {
         self.mark_dirty(STRUCTURAL);
+        let old_parent = self.get(child).and_then(|n| n.parent);
         self.detach(child);
+        if let Some(old_parent) = old_parent {
+            self.push_mutation_record(
+                old_parent,
+                MutationRecordKind::ChildList {
+                    added: vec![],
+                    removed: vec![child],
+                },
+            );
+        }
     }
 
     pub(crate) fn detach(&mut self, child: NodeId) {
@@ -125,6 +173,7 @@ impl Dom {
     /// Removes a node and its whole subtree, freeing slots for reuse (generation bumped).
     pub fn remove(&mut self, id: NodeId) {
         self.mark_dirty(STRUCTURAL);
+        let old_parent = self.get(id).and_then(|n| n.parent);
         let children = self.get(id).map(|n| n.children.clone()).unwrap_or_default();
         for child in children {
             self.remove(child);
@@ -134,6 +183,15 @@ impl Dom {
             self.focused_value_snapshot = None;
         }
         self.detach(id);
+        if let Some(old_parent) = old_parent {
+            self.push_mutation_record(
+                old_parent,
+                MutationRecordKind::ChildList {
+                    added: vec![],
+                    removed: vec![id],
+                },
+            );
+        }
         if id.index < self.slots.len() && self.slots[id.index].generation == id.generation {
             self.slots[id.index].node = None;
             self.slots[id.index].generation = self.slots[id.index].generation.wrapping_add(1);
@@ -170,8 +228,20 @@ impl Dom {
             return false;
         };
         self.mark_dirty(STRUCTURAL);
+        let new_child_old_parent = self.get(new_child).and_then(|n| n.parent);
         self.detach(new_child);
         self.detach(old_child);
+        if let Some(new_child_old_parent) = new_child_old_parent {
+            if new_child_old_parent != parent {
+                self.push_mutation_record(
+                    new_child_old_parent,
+                    MutationRecordKind::ChildList {
+                        added: vec![],
+                        removed: vec![new_child],
+                    },
+                );
+            }
+        }
         if let Some(node) = self.get_mut(parent) {
             let insert_pos = position.min(node.children.len());
             node.children.insert(insert_pos, new_child);
@@ -179,6 +249,13 @@ impl Dom {
         if let Some(node) = self.get_mut(new_child) {
             node.parent = Some(parent);
         }
+        self.push_mutation_record(
+            parent,
+            MutationRecordKind::ChildList {
+                added: vec![new_child],
+                removed: vec![old_child],
+            },
+        );
         true
     }
 }

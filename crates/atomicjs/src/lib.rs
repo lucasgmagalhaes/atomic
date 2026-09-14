@@ -4,8 +4,10 @@
 //! of the root workspace (own empty `[workspace]` stanza in Cargo.toml) —
 //! see that doc's §6 for why.
 
+pub mod ast;
 pub mod error;
 pub mod lexer;
+pub mod parser;
 pub mod value;
 
 pub use error::AtomicJsError;

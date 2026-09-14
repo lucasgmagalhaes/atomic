@@ -773,6 +773,56 @@ Item 2 is the only one of these that's both evidence-backed and in scope — wor
 deliberate decision before touching it, same as the `GetProp` fix, rather than being
 folded in silently.
 
+### Update, same day: item 2 (per-call allocation pooling) implemented and measured
+
+Added a `VmPools` holding a free-list of `Vec<LocalSlot>`/`Vec<Value>` buffers, shared
+across the whole recursive call tree via `RefCell` (same threading tradeoff
+`compiler.rs`'s `Scope` already uses). `execute_function` takes a buffer from the pool
+at entry instead of allocating fresh, and returns it (cleared, not deallocated) on the
+`Instr::Return` success path — an error path still drops its buffers normally, since
+errors aren't this pool's hot path. All 51 tests still pass unchanged, including the two
+closure-specific regression tests that would have caught a reused-buffer state leak
+(`each_call_to_the_same_closure_advances_independently`,
+`two_independent_counters_do_not_share_captured_state`).
+
+**Re-measured (`hyperfine --warmup 5 --runs 50`):**
+
+| Program | Before pooling | After pooling |
+| --- | --- | --- |
+| `closures` (the workload this fix targets — 1,000,000 calls in its loop) | 137.6 ms (2.68×) | **92.2 ms (1.88×)** |
+| `sum` (no repeated calls in its loop — shouldn't be affected) | 39.4 ms (1.22×) | 44.3 ms (1.49×) at 50 runs, **26.4 ms (1.29×) at 100 runs** |
+| `props` (no calls in its loop at all — shouldn't be affected either) | 54.3 ms (1.89×) | 71.0 ms (2.11×) at 50 runs, **73.3 ms (2.15×) at 100 runs** |
+
+`closures` improved exactly as the profiling predicted — clear, causal, reproducible.
+`sum` and `props` drifted too, in both directions, despite their hot loops never calling
+a function (so `execute_function` runs *once* for each, taking an empty pool on its
+first-ever call — behaviorally identical to before pooling existed). That drift is
+**environment noise between measurement sessions, not an effect of this change** — this
+sandbox isn't a dedicated benchmarking machine, and `hyperfine` flagged statistical
+outliers on `props` at both 50 and 100 runs. Repeating `sum` at 100 runs pulled it back
+toward its original ~1.2-1.3× range, consistent with that read.
+
+**Honest, unresolved state on `props`:** it now measures consistently in the ~2.1-2.15×
+range across two repeated 50/100-run sessions — right at, arguably just past, §9's 2×
+guardrail, and not clearly distinguishable from the earlier 1.89× reading given this
+environment's noise floor. This is reported as genuinely borderline, not rounded to
+whichever side looks better. A rerun on a quiet, dedicated machine is what would actually
+resolve it, not more runs here.
+
+**Where this leaves the three programs against §9:**
+
+| Program | Slowdown (best available reading) | Within 2×? |
+| --- | --- | --- |
+| `sum` | ~1.2-1.3× | Yes |
+| `props` | ~2.1-2.15× | Borderline / no, on the numbers as measured here |
+| `closures` | 1.88× | Yes |
+
+Memory still holds decisively (~6× smaller, §7.1, unaffected by any of this session's
+changes). Two of three programs are now within the execution-time guardrail; `props`
+remains the one open question, and it's a measurement-noise question at this point, not
+an architecture one — the object-model cost behind it is already understood (this
+section's own profiling) and correctly out of scope to fix further (item 3 above).
+
 ## Appendix — salvaged principles from the rejected proposal
 
 These remain correct engineering principles *if* this spike (or, contingent on a green

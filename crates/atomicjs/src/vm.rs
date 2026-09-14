@@ -40,6 +40,53 @@ impl LocalSlot {
     }
 }
 
+/// Reusable `Vec<LocalSlot>`/`Vec<Value>` buffers shared across the whole
+/// recursive call tree — added 2026-09-14 after profiling `closures` with
+/// `samply` (see ATOMIC_JS_SPIKE.md's Results section): `execute_function`
+/// previously allocated a fresh `Vec` for locals and for the operand stack
+/// on *every single call*, and `closures`' loop calls the same closure
+/// 1,000,000 times, so that was 2,000,000+ heap allocations attributable
+/// purely to the calling convention. A finished call's buffers (cleared, not
+/// deallocated) go back into the pool for the next call to reuse instead.
+///
+/// `RefCell`, not a `&mut` threaded through every recursive call: the pool
+/// needs to be reachable from arbitrarily deep, already-nested
+/// `execute_function` calls (a call in progress still holds its own
+/// buffers checked out), and a shared reference is simpler to thread
+/// through than a mutable-borrow chain — same tradeoff `compiler.rs`
+/// already made for its own `Scope` handle, and just as fine here: this is
+/// interpreter bookkeeping, not something with its own correctness-critical
+/// aliasing concerns.
+#[derive(Default)]
+struct VmPools {
+    locals: RefCell<Vec<Vec<LocalSlot>>>,
+    stack: RefCell<Vec<Vec<Value>>>,
+}
+
+impl VmPools {
+    fn take_locals(&self) -> Vec<LocalSlot> {
+        self.locals.borrow_mut().pop().unwrap_or_default()
+    }
+
+    fn take_stack(&self) -> Vec<Value> {
+        self.stack.borrow_mut().pop().unwrap_or_default()
+    }
+
+    /// Only called from the success path (`Instr::Return`, see
+    /// `execute_function`) - an error path drops its frame's buffers
+    /// normally instead of pooling them, which is fine: errors aren't the
+    /// hot path this pool exists for.
+    fn return_locals(&self, mut v: Vec<LocalSlot>) {
+        v.clear();
+        self.locals.borrow_mut().push(v);
+    }
+
+    fn return_stack(&self, mut v: Vec<Value>) {
+        v.clear();
+        self.stack.borrow_mut().push(v);
+    }
+}
+
 fn is_truthy(value: &Value) -> bool {
     match value {
         Value::Undefined => false,
@@ -83,12 +130,14 @@ pub fn run_source_with_feedback(
     let mut feedback: Vec<FunctionFeedback> = (0..module.functions.len())
         .map(|_| FunctionFeedback::default())
         .collect();
+    let pools = VmPools::default();
     let value = execute_function(
         &module,
         module.top_level,
         Vec::new(),
         Vec::new(),
         &mut feedback,
+        &pools,
     )?;
     Ok((value, feedback))
 }
@@ -99,11 +148,12 @@ fn execute_function(
     args: Vec<Value>,
     upvalues: Vec<Rc<RefCell<Value>>>,
     feedback: &mut [FunctionFeedback],
+    pools: &VmPools,
 ) -> Result<Value, AtomicJsError> {
     let function = &module.functions[function_index];
     feedback[function_index].call_count += 1;
 
-    let mut locals: Vec<LocalSlot> = Vec::with_capacity(function.local_count);
+    let mut locals: Vec<LocalSlot> = pools.take_locals();
     for i in 0..function.local_count {
         let initial = args.get(i).cloned().unwrap_or(Value::Undefined);
         if function.captured_locals.contains(&i) {
@@ -113,7 +163,7 @@ fn execute_function(
         }
     }
 
-    let mut stack: Vec<Value> = Vec::new();
+    let mut stack: Vec<Value> = pools.take_stack();
     let mut pc: usize = 0;
 
     loop {
@@ -282,12 +332,16 @@ fn execute_function(
                     args,
                     function_data.captured_env.clone(),
                     feedback,
+                    pools,
                 )?;
                 stack.push(result);
                 pc += 1;
             }
             Instr::Return => {
-                return Ok(stack.pop().unwrap_or(Value::Undefined));
+                let result = stack.pop().unwrap_or(Value::Undefined);
+                pools.return_stack(stack);
+                pools.return_locals(locals);
+                return Ok(result);
             }
             Instr::Pop => {
                 stack.pop();

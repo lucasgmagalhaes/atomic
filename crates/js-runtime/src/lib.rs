@@ -28,6 +28,7 @@ mod fetch_async;
 mod form_data;
 mod history;
 mod host_state;
+mod import_map;
 mod indexed_db_bindings;
 mod js_helpers;
 mod layout_measurement;

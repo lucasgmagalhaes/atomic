@@ -39,10 +39,10 @@ pub struct Context<'rt> {
 use crate::{
     abort_controller, blob, clipboard, computed_style, console, crypto, cssom_stylesheet,
     custom_elements, document_cookie, dom_bindings, event_subclasses, events, fetch, fetch_async,
-    form_data, history, host_state, indexed_db_bindings, local_storage_bindings, location,
-    message_channel, module_loader, mutation_observer, navigator, notifications, page_visibility,
-    performance, request_response, screen, script_limits, selection, timers, trusted_types,
-    url_bindings, value_bridge, web_audio, window, window_registry,
+    form_data, history, host_state, import_map, indexed_db_bindings, local_storage_bindings,
+    location, message_channel, module_loader, mutation_observer, navigator, notifications,
+    page_visibility, performance, request_response, screen, script_limits, selection, timers,
+    trusted_types, url_bindings, value_bridge, web_audio, window, window_registry,
 };
 
 /// Registers every global this crate exposes on a fresh `JSContext` —
@@ -228,11 +228,22 @@ impl<'rt> Context<'rt> {
 
     /// Resolves an `import`/dynamic-`import()` specifier against
     /// `base_url` — real relative/absolute URL resolution (`ROADMAP.md`
-    /// item 19's resolver half). See `module_loader`'s own doc for the
-    /// scope cut: no import maps yet, so a bare specifier with no scheme
-    /// can't resolve.
+    /// item 19's resolver half), plus a real import map for bare
+    /// specifiers (see `module_loader`/`import_map`'s own docs).
     pub fn resolve_module_specifier(&self, base_url: &str, specifier: &str) -> Option<String> {
-        module_loader::resolve_specifier(base_url, specifier)
+        unsafe { module_loader::resolve_specifier(self.ptr, base_url, specifier) }
+    }
+
+    /// Real import map (`ROADMAP.md` item 19's remaining sub-item):
+    /// parses `json` (`{"imports": {"bare": "url", "prefix/": "url/"}}`)
+    /// and replaces this `Context`'s import map wholesale — see
+    /// `import_map`'s own doc for the exact-then-longest-prefix
+    /// resolution rule and scope cuts (no `scopes`, last write wins).
+    /// `base_url` is the real document URL a root-relative mapped value
+    /// (e.g. `"/src/app/"`) resolves against, same real spec rule a
+    /// `<script type="importmap">`'s own values follow.
+    pub fn set_import_map(&self, base_url: &str, json: &str) -> Result<(), String> {
+        unsafe { import_map::set_import_map(self.ptr, base_url, json) }
     }
 
     /// Starts (or reuses, if already cached/in-flight) a background fetch
@@ -403,6 +414,7 @@ impl Drop for Context<'_> {
             window_registry::unregister(id);
         }
         module_loader::cleanup(self.ptr);
+        import_map::cleanup(self.ptr);
         unsafe {
             cleanup_standard_globals(self.ptr);
             dom_bindings::cleanup(self.ptr);

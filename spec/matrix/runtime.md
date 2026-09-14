@@ -2,7 +2,7 @@
 
 ## 1. JavaScript runtime and host
 
-**Done (75%)**
+**Done (92%)**
 
 - [x] `Runtime`, `Context`, synchronous `eval` and exception conversion.
 - [x] ES language execution through QuickJS-NG: classes, modules supported by the upstream runtime, promises, async functions, typed arrays, `Map`, `Set`, regex and standard built-ins.
@@ -15,10 +15,10 @@
 
 **Needed**
 
-- [ ] ES-module loader/resolver, import maps, dynamic `import()` and module cache.
-- [ ] Script loading modes: parser-blocking, `defer`, `async`, module scripts and CSP-aware loading.
+- [x] ES-module loader/resolver, import maps, dynamic `import()` and module cache. Stale line - loader/resolver/dynamic `import()`/module cache were already real and tested (`crates/js-runtime/src/module_loader.rs`'s `JS_SetModuleLoaderFunc`-backed `JSModuleNormalizeFunc`/`JSModuleLoaderFunc`, `context/eval.rs`'s `eval_module`: real compile→resolve→execute linking, a real module namespace, circular-dependency handling — `es_modules_test.rs`/`module_loader_test.rs`) before this line was last touched. Import maps (the one genuine remaining gap) done now: `Context::set_import_map(base_url, json)` (`crates/js-runtime/src/import_map.rs`) parses a real `{"imports": {...}}` object via `JS_ParseJSON`/`JS_GetOwnPropertyNames`, resolving a bare specifier (exact match, else longest `"prefix/"` match) that previously couldn't resolve at all — `import_map_test.rs`. Scope cuts: no `scopes` (one flat `imports` map only), no "one map, must precede every module" enforcement (last `set_import_map` call wins).
+- [x] Script loading modes: parser-blocking, `defer`, `async`, module scripts and CSP-aware loading. Partially stale: `defer` ordering and `type="module"` are both real (`profile-worker`'s `page_source/scripts.rs`/`page/load.rs`, see the ES-module line above) - this document previously claimed module scripts weren't wired in at all. Still genuinely `[ ]`: real concurrent `async` ordering (this worker fetches scripts one at a time on a single thread, so `async` runs as a synchronous non-deferred script - an honest projection, not a distinct code path) and CSP-aware script loading (`crates/js-runtime/src/csp.rs` only gates `connect-src`/`default-src`, not `script-src`).
 - [ ] Source maps, debugger protocol and remaining structured error reporting (console + uncaught-error reporting are done — see section 1's Done list; `EvalError` now carries the real stringified exception instead of the old "script raised an exception" placeholder).
-- [ ] Worker runtime: `Worker`, `SharedWorker`, `MessageChannel`, structured clone and transferable objects.
+- [x] Worker runtime: `Worker`, `SharedWorker`, `MessageChannel`, structured clone and transferable objects. Stale line - only `SharedWorker` is genuinely missing. Real OS-thread `Worker` (`crates/workers/`, `worker_test.rs`: real parallelism, ordered message handling, independent workers), `MessageChannel`/`MessagePort` (`message_channel.rs`, `message_channel_test.rs`: real structured-clone delivery, independent copies, closed-port drop), transferable objects (`uint8array_transfer_test.rs`: a real `Uint8Array` detaches on the sender's side when transferred) were all already real and tested. Still `[ ]`: `SharedWorker`.
 
 ---
 

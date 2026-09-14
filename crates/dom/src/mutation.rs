@@ -43,7 +43,7 @@ impl Dom {
     }
 
     pub fn create_element(&mut self, tag: &str) -> NodeId {
-        self.insert(NodeData::Element {
+        let id = self.insert(NodeData::Element {
             tag: atoms::Atom::new(tag),
             attributes: std::collections::HashMap::new(),
             value: None,
@@ -51,7 +51,26 @@ impl Dom {
             selection: (0, 0, "none".to_string()),
             selected: false,
             shadow_root: None,
-        })
+            template_content: None,
+        });
+        // A real `<template>` owns its content fragment from the moment it
+        // exists, not lazily on first access - see `NodeData::Element`'s
+        // own doc on `template_content`. Created after `insert` (rather
+        // than threading a self-referential id through the struct
+        // literal) since the fragment needs its own fresh id first.
+        if tag == "template" {
+            let content = self.insert(NodeData::DocumentFragment);
+            if let Some(Node {
+                data: NodeData::Element {
+                    template_content, ..
+                },
+                ..
+            }) = self.get_mut(id)
+            {
+                *template_content = Some(content);
+            }
+        }
+        id
     }
 
     pub fn create_text(&mut self, text: &str) -> NodeId {

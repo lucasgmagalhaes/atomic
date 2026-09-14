@@ -83,4 +83,17 @@ impl Dom {
             _ => None,
         }
     }
+
+    /// `<template>`'s real content `DocumentFragment` — `Some` for any
+    /// element created with tag `"template"` (set eagerly by
+    /// [`Dom::create_element`]), `None` for every other node. See
+    /// `NodeData::Element`'s own doc on `template_content`.
+    pub fn template_content(&self, id: NodeId) -> Option<NodeId> {
+        match self.get(id).map(|n| &n.data) {
+            Some(NodeData::Element {
+                template_content, ..
+            }) => *template_content,
+            _ => None,
+        }
+    }
 }

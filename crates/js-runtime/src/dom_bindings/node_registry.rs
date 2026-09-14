@@ -108,6 +108,7 @@ pub(super) const HTML_CANVAS_CLASS_KIND: &str = "HTMLCanvasElement";
 pub(super) const HTML_FORM_CLASS_KIND: &str = "HTMLFormElement";
 pub(super) const HTML_SELECT_CLASS_KIND: &str = "HTMLSelectElement";
 pub(super) const HTML_IFRAME_CLASS_KIND: &str = "HTMLIFrameElement";
+pub(super) const HTML_TEMPLATE_CLASS_KIND: &str = "HTMLTemplateElement";
 
 const ALL_NODE_CLASS_KINDS: &[&str] = &[
     NODE_CLASS_KIND,
@@ -121,6 +122,7 @@ const ALL_NODE_CLASS_KINDS: &[&str] = &[
     HTML_FORM_CLASS_KIND,
     HTML_SELECT_CLASS_KIND,
     HTML_IFRAME_CLASS_KIND,
+    HTML_TEMPLATE_CLASS_KIND,
 ];
 
 /// Returns the class ID for a node based on its `NodeData` variant and tag.
@@ -146,6 +148,7 @@ pub(crate) unsafe fn node_class_id_for(
                 "form" => HTML_FORM_CLASS_KIND,
                 "select" => HTML_SELECT_CLASS_KIND,
                 "iframe" => HTML_IFRAME_CLASS_KIND,
+                "template" => HTML_TEMPLATE_CLASS_KIND,
                 _ => HTML_ELEMENT_CLASS_KIND,
             };
             let id = crate::class_registry::class_id_for(rt, kind);

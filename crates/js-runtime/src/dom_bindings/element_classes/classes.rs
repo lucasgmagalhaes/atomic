@@ -20,11 +20,12 @@ use crate::dom_bindings::mutation::define_mutation_methods;
 use crate::dom_bindings::navigation::define_navigation;
 use crate::dom_bindings::node_registry::{
     node_opaque, ELEMENT_CLASS_KIND, HTML_ELEMENT_CLASS_KIND, HTML_FORM_CLASS_KIND,
-    HTML_IFRAME_CLASS_KIND, HTML_SELECT_CLASS_KIND, NODE_CLASS_KIND,
+    HTML_IFRAME_CLASS_KIND, HTML_SELECT_CLASS_KIND, HTML_TEMPLATE_CLASS_KIND, NODE_CLASS_KIND,
 };
 use crate::dom_bindings::scroll_focus::{define_focus_methods, define_scroll_methods};
 use crate::dom_bindings::select::define_select_properties;
 use crate::dom_bindings::shadow::{define_attach_shadow, define_shadow_root_properties};
+use crate::dom_bindings::template::define_template_properties;
 use crate::dom_bindings::validity::define_validation_and_labels;
 
 unsafe extern "C" fn node_finalizer(rt: *mut sys::JSRuntime, val: sys::JSValue) {
@@ -172,6 +173,8 @@ pub(super) unsafe fn ensure_html_subclass(
         define_select_properties(ctx, proto);
     } else if kind == HTML_IFRAME_CLASS_KIND {
         define_iframe_properties(ctx, proto);
+    } else if kind == HTML_TEMPLATE_CLASS_KIND {
+        define_template_properties(ctx, proto);
     }
     sys::JS_SetClassProto(ctx, class_id, proto);
 

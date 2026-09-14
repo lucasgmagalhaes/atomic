@@ -11,18 +11,8 @@ pub mod error;
 pub mod lexer;
 pub mod parser;
 pub mod value;
+pub mod vm;
 
 pub use error::AtomicJsError;
 pub use value::{FunctionData, FunctionFeedback, JsObject, Value};
-
-/// Runs `source` as a script and returns its completion value: the value of
-/// the last top-level expression statement evaluated, or `Value::Undefined`
-/// if the script's last statement isn't an expression statement (see
-/// ATOMIC_JS_SPIKE.md §5.4). This is the only symbol the benchmark harness
-/// (§7) calls.
-///
-/// Step-1 scaffold stub: always returns `Value::Undefined`. Real lexing,
-/// parsing, compiling, and execution land in steps 2-6 of §8's plan.
-pub fn run_source(_source: &str) -> Result<Value, AtomicJsError> {
-    Ok(Value::Undefined)
-}
+pub use vm::{run_source, run_source_with_feedback};

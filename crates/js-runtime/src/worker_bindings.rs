@@ -233,6 +233,11 @@ fn worker_thread_main(script: String, inbox: mpsc::Receiver<Value>, outbox: mpsc
             worker_self_onmessage_get,
             worker_self_onmessage_set,
         );
+        // Real `self` (a `DedicatedWorkerGlobalScope`'s own IDL alias to
+        // itself) - lets worker script use the real, spec-idiomatic
+        // `self.postMessage`/`self.onmessage` form, not just the bare
+        // global one.
+        set_prop(ctx, global, b"self\0", sys::JS_DupValue(ctx, global));
 
         let src_c = CString::new(script).unwrap_or_default();
         let name_c = CString::new("<worker>").unwrap();

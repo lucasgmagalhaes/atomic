@@ -6,13 +6,15 @@
 //! (focus/blur), `click.rs` (`dispatch_click`/`dispatch_click_at`),
 //! `fill.rs` (`fill_element`), `keyboard.rs` (`type_key`), `tab.rs`
 //! (`TabOutcome`/`tab_focus`), `mouse_move.rs` (`dispatch_mouse_move`),
-//! `context_menu.rs` (`dispatch_context_menu_at`), and `composition.rs`
+//! `context_menu.rs` (`dispatch_context_menu_at`), `composition.rs`
 //! (`dispatch_composition_start`/`dispatch_composition_update`/
-//! `dispatch_composition_end`).
+//! `dispatch_composition_end`), and `drag.rs` (`dispatch_drag_start`/
+//! `dispatch_drop_at`).
 
 mod click;
 mod composition;
 mod context_menu;
+mod drag;
 mod fill;
 mod focus;
 mod helpers;
@@ -25,6 +27,7 @@ pub(crate) use composition::{
     dispatch_composition_end, dispatch_composition_start, dispatch_composition_update,
 };
 pub(crate) use context_menu::dispatch_context_menu_at;
+pub(crate) use drag::{dispatch_drag_start, dispatch_drop_at};
 pub(crate) use fill::fill_element;
 pub(crate) use keyboard::type_key;
 pub(crate) use mouse_move::dispatch_mouse_move;

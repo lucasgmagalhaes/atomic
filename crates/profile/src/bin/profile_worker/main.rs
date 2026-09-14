@@ -272,6 +272,11 @@ fn main() {
         // the natural fact that a stale id from before simply won't match
         // a `click_id` computed against the fresh DOM.
         last_click: None,
+        // Real in-progress drag state - see `WorkerState::drag_source`'s
+        // own doc. Starts empty; nothing to reset on `RELOAD`/`NAVIGATE`
+        // beyond the natural fact that a stale id from before simply
+        // won't match a real element in the fresh DOM.
+        drag_source: None,
         // Real viewport scroll offset (see `SCROLL`'s own handling and
         // `Page::render`/`hit_test_at`'s docs) - reset to `0.0` on
         // `RELOAD`/`NAVIGATE` same as `focused_id`, since a fresh page always

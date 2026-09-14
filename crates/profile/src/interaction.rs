@@ -99,6 +99,53 @@ impl Profile {
         }
     }
 
+    /// Real coordinate-driven drag start: `x`/`y` are pixel coordinates in
+    /// the profile's own frame, same space [`click_at`](Self::click_at)
+    /// uses. The worker hit-tests its current layout and dispatches a
+    /// real cancelable `"dragstart"` `DragEvent` with a working
+    /// `.dataTransfer` on the nearest id-addressable ancestor - see
+    /// `profile-worker`'s `dispatch_drag_start` for the exact scope cut
+    /// (single `"text/plain"` format). If the listener calls
+    /// `preventDefault()`, real spec: the drag never starts - `Ok(Ok(()))`
+    /// either way (no real failure mode beyond "nothing at that point").
+    /// A later [`drop_at`](Self::drop_at) call completes (or rejects) the
+    /// drag this starts.
+    pub fn drag_start(&mut self, x: f64, y: f64) -> std::io::Result<Result<(), String>> {
+        writeln!(self.stdin, "DRAG_START {x} {y}")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        let line = line.trim();
+        match line.strip_prefix("ERROR ") {
+            Some(message) => Ok(Err(message.to_string())),
+            None => Ok(Ok(())),
+        }
+    }
+
+    /// Real coordinate-driven drop: requires a real drag already started
+    /// via [`drag_start`](Self::drag_start) (`Ok(Err(message))` if none is
+    /// in progress). Hit-tests `(x, y)`, dispatches a real cancelable
+    /// `"dragover"` at the target - real spec: only a `dragover` listener
+    /// that calls `preventDefault()` marks a valid drop target, so
+    /// `Ok(Err(message))` (a real, valid outcome, not a protocol failure)
+    /// means the target rejected the drop. `Ok(Ok(()))` means a real
+    /// `"drop"` (`dataTransfer.getData` returns the text
+    /// [`drag_start`](Self::drag_start) captured) fired on the target,
+    /// followed by a real `"dragend"` on the source. Either outcome
+    /// clears the in-progress drag - a `drop_at` call (valid or not)
+    /// always ends it, same as a real mouse button release does.
+    pub fn drop_at(&mut self, x: f64, y: f64) -> std::io::Result<Result<(), String>> {
+        writeln!(self.stdin, "DROP_AT {x} {y}")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        let line = line.trim();
+        match line.strip_prefix("ERROR ") {
+            Some(message) => Ok(Err(message.to_string())),
+            None => Ok(Ok(())),
+        }
+    }
+
     /// Real coordinate-driven right-click: `x`/`y` are pixel coordinates in
     /// the profile's own frame, same space [`click_at`](Self::click_at)
     /// uses. The worker hit-tests its current layout and dispatches a real

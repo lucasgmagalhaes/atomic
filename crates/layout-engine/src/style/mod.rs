@@ -30,7 +30,8 @@ mod types;
 pub use computed_style::ComputedStyle;
 pub use types::{
     AlignItems, BorderStyle, BoxShadow, Clear, Color, Display, EdgeSizes, FlexDirection, Float,
-    GridTrackSize, GridTracks, JustifyContent, Length, Overflow, Position,
+    GridTrackSize, GridTracks, JustifyContent, Length, ListStylePosition, ListStyleType, Overflow,
+    Position,
 };
 
 /// Applies `matched` (already cascade-ordered lowest to highest priority,

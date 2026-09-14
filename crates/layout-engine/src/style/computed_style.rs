@@ -4,7 +4,7 @@
 
 use super::types::{
     AlignItems, BorderStyle, BoxShadow, Clear, Color, Display, EdgeSizes, FlexDirection, Float,
-    GridTracks, JustifyContent, Length, Overflow, Position,
+    GridTracks, JustifyContent, Length, ListStylePosition, ListStyleType, Overflow, Position,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -123,6 +123,15 @@ pub struct ComputedStyle {
     /// affects layout — siblings/ancestors are positioned as if untransformed,
     /// exactly like `opacity` — only where this box (and its subtree) paints.
     pub transform: (f64, f64),
+    /// `None` means unset — `tree::build` falls back to a tag-based default
+    /// (`decimal` for an `<ol>`'s items, `disc` for an `<ul>`'s) when
+    /// generating a `<li>`'s marker, since this crate has no user-agent
+    /// stylesheet to express that default as an initial value the normal
+    /// way. See [`ListStyleType`]'s own doc for the real scope cut.
+    pub list_style_type: Option<ListStyleType>,
+    /// See [`ListStylePosition`]'s own doc — real initial value
+    /// (`outside`), but has no distinct effect in this crate.
+    pub list_style_position: ListStylePosition,
 }
 
 impl ComputedStyle {
@@ -171,6 +180,8 @@ impl ComputedStyle {
             opacity: 1.0,
             z_index: None,
             transform: (0.0, 0.0),
+            list_style_type: None,
+            list_style_position: ListStylePosition::Outside,
         }
     }
 }

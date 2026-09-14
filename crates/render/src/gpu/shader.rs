@@ -4,6 +4,21 @@
 use bytemuck::{Pod, Zeroable};
 
 use crate::display_list::Rect;
+use layout_engine::Color;
+
+/// `from`/`to` at blend position `t` (clamped to `[0, 1]`) — plain per-
+/// channel linear interpolation, straight (non-premultiplied) alpha
+/// included, same as every other color this crate hands the GPU.
+fn lerp_color(from: Color, to: Color, t: f32) -> [f32; 4] {
+    let t = t.clamp(0.0, 1.0);
+    let mix = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t) / 255.0;
+    [
+        mix(from.r, to.r),
+        mix(from.g, to.g),
+        mix(from.b, to.b),
+        mix(from.a, to.a),
+    ]
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -96,6 +111,44 @@ pub(super) fn rect_to_vertices(
 
     let half_w = rect.width / 2.0;
     let half_h = rect.height / 2.0;
+
+    // Real `linear-gradient` support with zero new shader code: each
+    // corner gets its own exact blend color (the real CSS gradient-line-
+    // length formula - the box's own half-diagonal projected onto the
+    // gradient direction), and the GPU's own vertex-color interpolation
+    // across the two triangles (`fs_main` below never changed) does the
+    // rest. This isn't an approximation - bilinear/barycentric
+    // interpolation of an affine function from its 4 corner values
+    // reproduces that function exactly at every interior point, regardless
+    // of which diagonal the quad's two triangles share. `None` (every
+    // rect but a real gradient background) uses `color` at all 4 corners,
+    // painting byte-identical to before this existed.
+    let [color_tl, color_tr, color_bl, color_br] = match rect.gradient {
+        Some((from, to, angle_deg)) => {
+            let rad = angle_deg.to_radians();
+            // CSS gradient-angle convention: 0deg points up, increasing
+            // clockwise - in this pixel-space local_pos (y-down, matching
+            // `local`'s own corner values below), that's (sin, -cos).
+            let dir_x = rad.sin();
+            let dir_y = -rad.cos();
+            let max_proj = half_w * dir_x.abs() + half_h * dir_y.abs();
+            let corner = |lx: f32, ly: f32| {
+                let t = if max_proj > 0.0 {
+                    0.5 + (lx * dir_x + ly * dir_y) / (2.0 * max_proj)
+                } else {
+                    0.5
+                };
+                lerp_color(from, to, t)
+            };
+            [
+                corner(-half_w, -half_h),
+                corner(half_w, -half_h),
+                corner(-half_w, half_h),
+                corner(half_w, half_h),
+            ]
+        }
+        None => [color, color, color, color],
+    };
     // A radius past either half-dimension isn't a valid rounded rect (the
     // SDF formula assumes r <= min(b.x, b.y)) - clamps to the largest
     // radius that still fits, which is exactly a pill/stadium shape on
@@ -107,25 +160,25 @@ pub(super) fn rect_to_vertices(
 
     let tl = Vertex {
         position: [x0, y0],
-        color,
+        color: color_tl,
         local_pos: local(-half_w, -half_h),
         half_size_radius,
     };
     let tr = Vertex {
         position: [x1, y0],
-        color,
+        color: color_tr,
         local_pos: local(half_w, -half_h),
         half_size_radius,
     };
     let bl = Vertex {
         position: [x0, y1],
-        color,
+        color: color_bl,
         local_pos: local(-half_w, half_h),
         half_size_radius,
     };
     let br = Vertex {
         position: [x1, y1],
-        color,
+        color: color_br,
         local_pos: local(half_w, half_h),
         half_size_radius,
     };

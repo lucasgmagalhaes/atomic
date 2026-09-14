@@ -20,6 +20,16 @@ pub struct Rect {
     /// rect and shadow rect this pass didn't touch) paints byte-identical
     /// to before this field existed.
     pub radius: f32,
+    /// `Some((from, to, angle_deg))` for a real `linear-gradient`
+    /// background (see `layout_engine::LinearGradient`'s own doc) - `None`
+    /// (every other rect: border/shadow rects, and a plain solid-color
+    /// background) paints exactly as before this field existed, using
+    /// `color` uniformly. `render::gpu::shader::rect_to_vertices` is the
+    /// only consumer - it computes each of the rect's 4 corners' own exact
+    /// blend color and lets the GPU's own vertex-color interpolation
+    /// (`fs_main` never changed) paint the gradient in between; no new
+    /// shader code.
+    pub gradient: Option<(Color, Color, f32)>,
 }
 
 /// Walks `box_` in paint order (parent before children, so later-painted
@@ -59,7 +69,14 @@ fn collect(
             push_box_shadow_rect(box_, shadow, out, clip, opacity, translate);
         }
     }
-    if box_.style.background_color.a > 0 {
+    if box_.style.background_color.a > 0 || box_.style.background_image.is_some() {
+        let gradient = box_.style.background_image.map(|g| {
+            (
+                scale_alpha(g.from, opacity),
+                scale_alpha(g.to, opacity),
+                g.angle_deg as f32,
+            )
+        });
         let rect = Rect {
             x: (box_.dimensions.x + translate.0) as f32,
             y: (box_.dimensions.y + translate.1) as f32,
@@ -67,6 +84,7 @@ fn collect(
             height: box_.dimensions.height as f32,
             color: scale_alpha(box_.style.background_color, opacity),
             radius: box_.style.border_radius as f32,
+            gradient,
         };
         if let Some(clipped) = clip_rect(rect, clip) {
             out.push(clipped);
@@ -127,6 +145,7 @@ fn push_box_shadow_rect(
         // for later (same "flat blur-less shadow" honesty this function's
         // own doc already states for blur-radius).
         radius: 0.0,
+        gradient: None,
     };
     if let Some(clipped) = clip_rect(rect, clip) {
         out.push(clipped);
@@ -176,6 +195,7 @@ fn push_border_rects(
             height: b.top as f32,
             color,
             radius,
+            gradient: None,
         });
     }
     if b.bottom > 0.0 {
@@ -186,6 +206,7 @@ fn push_border_rects(
             height: b.bottom as f32,
             color,
             radius,
+            gradient: None,
         });
     }
     if b.left > 0.0 {
@@ -196,6 +217,7 @@ fn push_border_rects(
             height: d.height as f32,
             color,
             radius,
+            gradient: None,
         });
     }
     if b.right > 0.0 {
@@ -206,6 +228,7 @@ fn push_border_rects(
             height: d.height as f32,
             color,
             radius,
+            gradient: None,
         });
     }
 }

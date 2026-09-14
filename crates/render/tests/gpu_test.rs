@@ -36,6 +36,7 @@ fn paints_a_solid_rect_at_the_right_pixels() {
             a: 255,
         },
         radius: 0.0,
+        gradient: None,
     }];
     let pixels = renderer.render_to_rgba(&rects, 8, 8, [0.0, 0.0, 0.0, 1.0]);
 
@@ -62,6 +63,7 @@ fn later_rects_paint_over_earlier_ones_at_the_same_pixel() {
                 a: 255,
             },
             radius: 0.0,
+            gradient: None,
         },
         Rect {
             x: 0.0,
@@ -75,6 +77,7 @@ fn later_rects_paint_over_earlier_ones_at_the_same_pixel() {
                 a: 255,
             },
             radius: 0.0,
+            gradient: None,
         },
     ];
     let pixels = renderer.render_to_rgba(&rects, 8, 8, [0.0, 0.0, 0.0, 1.0]);
@@ -126,5 +129,82 @@ fn new_with_adapter_opens_the_first_enumerated_adapter_and_renders_correctly() {
         pixel(&pixels, 4, 0, 0),
         [0, 255, 0, 255],
         "explicit adapter selection should still render correctly"
+    );
+}
+
+const RED: Color = Color {
+    r: 255,
+    g: 0,
+    b: 0,
+    a: 255,
+};
+const BLUE: Color = Color {
+    r: 0,
+    g: 0,
+    b: 255,
+    a: 255,
+};
+
+#[test]
+fn a_90_degree_gradient_varies_only_left_to_right() {
+    let renderer = GpuRenderer::new();
+    let rects = [Rect {
+        x: 0.0,
+        y: 0.0,
+        width: 8.0,
+        height: 8.0,
+        color: RED,
+        radius: 0.0,
+        gradient: Some((RED, BLUE, 90.0)),
+    }];
+    let pixels = renderer.render_to_rgba(&rects, 8, 8, [0.0, 0.0, 0.0, 1.0]);
+
+    let left = pixel(&pixels, 8, 0, 4);
+    let right = pixel(&pixels, 8, 7, 4);
+    assert!(
+        left[0] > right[0],
+        "red channel should decrease left to right, got {left:?} -> {right:?}"
+    );
+    assert!(
+        left[2] < right[2],
+        "blue channel should increase left to right, got {left:?} -> {right:?}"
+    );
+    // A 90deg (left-to-right) gradient doesn't vary with y at all - the
+    // same column should paint identically regardless of row.
+    assert_eq!(
+        pixel(&pixels, 8, 0, 0),
+        pixel(&pixels, 8, 0, 7),
+        "a horizontal gradient must not vary vertically"
+    );
+}
+
+#[test]
+fn a_gradient_with_no_direction_defaults_to_top_to_bottom() {
+    let renderer = GpuRenderer::new();
+    let rects = [Rect {
+        x: 0.0,
+        y: 0.0,
+        width: 8.0,
+        height: 8.0,
+        color: RED,
+        radius: 0.0,
+        gradient: Some((RED, BLUE, 180.0)),
+    }];
+    let pixels = renderer.render_to_rgba(&rects, 8, 8, [0.0, 0.0, 0.0, 1.0]);
+
+    let top = pixel(&pixels, 8, 4, 0);
+    let bottom = pixel(&pixels, 8, 4, 7);
+    assert!(
+        top[0] > bottom[0],
+        "red channel should decrease top to bottom, got {top:?} -> {bottom:?}"
+    );
+    assert!(
+        top[2] < bottom[2],
+        "blue channel should increase top to bottom, got {top:?} -> {bottom:?}"
+    );
+    assert_eq!(
+        pixel(&pixels, 8, 0, 0),
+        pixel(&pixels, 8, 7, 0),
+        "a vertical (180deg) gradient must not vary horizontally"
     );
 }

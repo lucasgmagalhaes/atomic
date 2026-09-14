@@ -11,8 +11,100 @@ use super::property_parsers::{
 };
 use super::types::{
     AlignItems, BorderStyle, Clear, Color, Display, FlexDirection, Float, GridTrackSize,
-    GridTracks, JustifyContent, ListStylePosition, ListStyleType, Overflow, Position,
+    GridTracks, JustifyContent, LinearGradient, ListStylePosition, ListStyleType, Overflow,
+    Position,
 };
+
+/// Parses one `linear-gradient(...)` value - real, but 2-stop only, see
+/// [`LinearGradient`]'s own doc. `tokens` is everything strictly between
+/// the function's own `LParen`/`RParen` (the caller already found and
+/// stripped those). The first comma-separated segment is an optional
+/// direction (`<angle>deg`, or a `to <side>[ <side>]` keyword pair,
+/// defaulting to `180.0` - real CSS's own default direction, `to bottom`
+/// - when the first segment parses as neither and is instead the first
+/// color); every segment after that is a color, of which only the first
+/// and last are kept (real CSS's own multi-stop list isn't modeled, same
+/// "one value" scope cut `BoxShadow` already takes elsewhere in this
+/// file).
+fn parse_linear_gradient(tokens: &[Token]) -> Option<LinearGradient> {
+    let segments: Vec<&[Token]> = tokens.split(|t| *t == Token::Comma).collect();
+    if segments.len() < 2 {
+        return None;
+    }
+
+    let parse_color = |seg: &[Token]| -> Option<Color> {
+        match seg.first()? {
+            Token::Ident(name) => Color::named(name),
+            Token::Hash(hex) => Color::from_hex(hex),
+            _ => None,
+        }
+    };
+
+    let angle_from_direction = |seg: &[Token]| -> Option<f64> {
+        if let [Token::Dimension(n, unit)] = seg {
+            if unit.eq_ignore_ascii_case("deg") {
+                return Some(*n);
+            }
+        }
+        let idents: Vec<&str> = seg
+            .iter()
+            .filter_map(|t| match t {
+                Token::Ident(v) => Some(v.as_str()),
+                _ => None,
+            })
+            .collect();
+        if idents.first() != Some(&"to") {
+            return None;
+        }
+        let sides: Vec<&str> = idents[1..].to_vec();
+        match sides.as_slice() {
+            ["top"] => Some(0.0),
+            ["right"] => Some(90.0),
+            ["bottom"] => Some(180.0),
+            ["left"] => Some(270.0),
+            ["top", "right"] | ["right", "top"] => Some(45.0),
+            ["bottom", "right"] | ["right", "bottom"] => Some(135.0),
+            ["bottom", "left"] | ["left", "bottom"] => Some(225.0),
+            ["top", "left"] | ["left", "top"] => Some(315.0),
+            _ => None,
+        }
+    };
+
+    let (angle_deg, color_segments) = match angle_from_direction(segments[0]) {
+        Some(angle) => (angle, &segments[1..]),
+        None => (180.0, &segments[..]),
+    };
+    if color_segments.len() < 2 {
+        return None;
+    }
+    let from = parse_color(color_segments[0])?;
+    let to = parse_color(color_segments[color_segments.len() - 1])?;
+    Some(LinearGradient {
+        angle_deg,
+        from,
+        to,
+    })
+}
+
+/// `true` when `value` opens with `linear-gradient(...)` - shared by the
+/// `"background"`/`"background-image"` arms below.
+fn is_linear_gradient_call(value: &[Token]) -> bool {
+    matches!(value.first(), Some(Token::Ident(name)) if name == "linear-gradient")
+        && matches!(value.get(1), Some(Token::LParen))
+}
+
+/// The inner tokens of a `linear-gradient(...)` call already confirmed by
+/// [`is_linear_gradient_call`] - everything between the matching parens.
+/// This crate's lexer never nests parens inside a gradient argument (no
+/// nested function calls are parsed), so a flat scan for the first
+/// `RParen` is exact, not just a heuristic.
+fn linear_gradient_inner(value: &[Token]) -> &[Token] {
+    let close = value
+        .iter()
+        .position(|t| *t == Token::RParen)
+        .unwrap_or(value.len());
+    &value[2..close]
+}
 
 /// Shared by `"list-style-type"` and the `"list-style"` shorthand.
 fn parse_list_style_type(v: &str) -> Option<ListStyleType> {
@@ -124,6 +216,12 @@ pub(super) fn apply_declaration(style: &mut ComputedStyle, decl: &Declaration) {
             }
         }
         "background-color" | "background" => {
+            if is_linear_gradient_call(&decl.value) {
+                if let Some(g) = parse_linear_gradient(linear_gradient_inner(&decl.value)) {
+                    style.background_image = Some(g);
+                }
+                return;
+            }
             let color = match decl.value.first() {
                 Some(Token::Ident(name)) => Color::named(name),
                 Some(Token::Hash(hex)) => Color::from_hex(hex),
@@ -132,6 +230,16 @@ pub(super) fn apply_declaration(style: &mut ComputedStyle, decl: &Declaration) {
             if let Some(c) = color {
                 style.background_color = c;
             }
+        }
+        "background-image" => {
+            if is_linear_gradient_call(&decl.value) {
+                if let Some(g) = parse_linear_gradient(linear_gradient_inner(&decl.value)) {
+                    style.background_image = Some(g);
+                }
+            }
+            // `url(...)` (a real image background) isn't modeled - same
+            // "solid color only" scope cut `"background"`'s own arm above
+            // already documents.
         }
         "font-size" => {
             // Only absolute px, matching parse_length's own scope - no

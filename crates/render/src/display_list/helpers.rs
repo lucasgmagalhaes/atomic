@@ -99,6 +99,13 @@ pub(super) fn clip_rect(rect: super::Rect, clip: Option<ClipRect>) -> Option<sup
             height: y1 - y0,
             color: rect.color,
             radius: rect.radius,
+            // Real, but not spec-exact: a clipped gradient rect's gradient
+            // re-stretches to whatever sub-rect actually survives clipping
+            // rather than staying anchored to the original box's own
+            // extent (`render::gpu::shader::rect_to_vertices` computes the
+            // gradient purely from a `Rect`'s own current x/y/width/height
+            // - it has no memory of a pre-clip size to anchor against).
+            gradient: rect.gradient,
         })
     }
 }

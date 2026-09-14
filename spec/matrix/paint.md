@@ -2,12 +2,13 @@
 
 ## 5. Paint, canvas and compositing
 
-**Done (42%)**
+**Done (44%)**
 
 - [x] GPU background/border rectangle pass.
 - [x] CPU glyph rasterization/compositing and decoded image compositing.
 - [x] Scroll-offset paint, clip regions, display lists and shared-memory frame publication.
 - [x] `Canvas2D` implementation scaffold.
+- [x] `linear-gradient` background paint (2026-09-14) — real per-vertex GPU color interpolation for a 2-stop `background`/`background-image: linear-gradient(...)` (`render::gpu::shader::rect_to_vertices`), mathematically exact for the 2-stop case, no new shader code. See `spec/matrix/css-layout.md`'s own entry for the CSS-parsing side. `radial-gradient`/`conic-gradient` and `Canvas2D`'s own separate gradient API (`createLinearGradient`/`createRadialGradient`) are still `[ ]` — see the "Needed" line below.
 
 **Needed**
 

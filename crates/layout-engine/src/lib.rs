@@ -16,7 +16,7 @@ pub use layout::layout_block;
 pub use style::{
     resolve_style, AlignItems, BorderStyle, BoxShadow, Clear, Color, ComputedStyle, Display,
     EdgeSizes, FlexDirection, Float, GridTrackSize, GridTracks, JustifyContent, Length,
-    ListStylePosition, ListStyleType, Overflow, Position,
+    LinearGradient, ListStylePosition, ListStyleType, Overflow, Position,
 };
 pub use text::{
     layout_inline, layout_text, rasterize_glyph, GlyphBitmap, InlineSpan, PositionedGlyph,

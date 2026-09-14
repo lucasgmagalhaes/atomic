@@ -22,6 +22,7 @@ mod clone;
 mod focus;
 mod hover;
 mod mutation;
+mod pointer_capture;
 mod query;
 mod scroll;
 mod serialize;
@@ -219,6 +220,13 @@ pub struct Dom {
     /// caller (e.g. a native embedding's per-frame mouse-move hit-test)
     /// decides *when* this changes, same as focus.
     hovered: Option<NodeId>,
+    /// Real `Element.setPointerCapture`/`releasePointerCapture`/
+    /// `hasPointerCapture` state — `pointerId` -> the node currently
+    /// capturing it. See [`pointer_capture`]'s own methods. Mirrors
+    /// `hovered`/`focused`'s shape but keyed by pointer id since,
+    /// unlike hover/focus, more than one pointer can be captured by
+    /// different elements at once.
+    pointer_captures: HashMap<i32, NodeId>,
     /// Bumped whenever `hovered`/`focused` change (see
     /// [`Dom::style_version`]) — a hover/focus change can affect which
     /// CSS rules match (`:hover`/`:focus`) without ever affecting layout,
@@ -354,6 +362,7 @@ impl Dom {
             focused: None,
             focused_value_snapshot: None,
             hovered: None,
+            pointer_captures: HashMap::new(),
             style_version: 0,
             mutations: 0,
             dirty: DirtyFlags::EMPTY,

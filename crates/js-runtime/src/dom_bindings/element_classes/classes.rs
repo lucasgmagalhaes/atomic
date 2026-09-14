@@ -22,6 +22,7 @@ use crate::dom_bindings::node_registry::{
     node_opaque, ELEMENT_CLASS_KIND, HTML_ELEMENT_CLASS_KIND, HTML_FORM_CLASS_KIND,
     HTML_IFRAME_CLASS_KIND, HTML_SELECT_CLASS_KIND, HTML_TEMPLATE_CLASS_KIND, NODE_CLASS_KIND,
 };
+use crate::dom_bindings::pointer_capture::define_pointer_capture_methods;
 use crate::dom_bindings::scroll_focus::{define_focus_methods, define_scroll_methods};
 use crate::dom_bindings::select::define_select_properties;
 use crate::dom_bindings::shadow::{define_attach_shadow, define_shadow_root_properties};
@@ -73,6 +74,7 @@ pub(super) unsafe fn ensure_node_class(ctx: *mut sys::JSContext) -> sys::JSClass
     define_validation_and_labels(ctx, proto);
     define_inner_outer_html(ctx, proto);
     define_focus_methods(ctx, proto);
+    define_pointer_capture_methods(ctx, proto);
     define_mutation_methods(ctx, proto);
     define_selector_methods(ctx, proto);
     define_shadow_root_properties(ctx, proto);

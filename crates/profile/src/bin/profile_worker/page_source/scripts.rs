@@ -4,6 +4,7 @@ use dom::{Dom, NodeData, NodeId};
 
 use crate::network::ResourceCache;
 
+use super::csp::is_script_allowed;
 use super::url::resolve_url;
 
 /// One `<script>` element in document order - either its real inline text
@@ -124,12 +125,24 @@ pub(crate) fn load_scripts(
     proxy: Option<&net::ProxyConfig>,
     dns_server: Option<std::net::SocketAddr>,
     cache: &mut ResourceCache,
+    csp_policies: &[String],
+    page_origin: Option<&str>,
 ) -> Vec<LoadedScript> {
     let mut sources = Vec::new();
     collect_script_sources(dom, root, &mut sources);
 
     let fetch_text = |src: &str, cache: &mut ResourceCache| -> Option<(String, String)> {
         let url = resolve_url(base_url, src)?;
+        // Real CSP `script-src` gating (`spec/matrix/runtime.md`'s own
+        // former gap): every policy this page will ever have is already
+        // known by the time this runs (see this module's own doc /
+        // `csp.rs`'s `is_script_allowed` doc for why gating happens here
+        // rather than inside `js-runtime`) - a disallowed external
+        // script is silently dropped, same "one resource failing doesn't
+        // fail the whole page" convention a fetch failure already has.
+        if !is_script_allowed(csp_policies, &url, page_origin) {
+            return None;
+        }
         let response = cache
             .fetch_cached(&url, storage_root, proxy, dns_server)
             .ok()?;

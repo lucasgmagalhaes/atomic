@@ -115,6 +115,9 @@ pub(crate) fn collect_computed_styles(
                 Display::Inline => "inline",
                 Display::Flex => "flex",
                 Display::Grid => "grid",
+                Display::Table => "table",
+                Display::TableRow => "table-row",
+                Display::TableCell => "table-cell",
                 Display::None => "none",
             }
             .to_string(),

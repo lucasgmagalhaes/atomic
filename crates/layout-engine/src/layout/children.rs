@@ -82,6 +82,9 @@ pub(crate) fn layout_children(
     } else if box_.style.display == Display::Grid {
         let result = layout_grid_children(box_, content_width, content_x, content_y);
         result.height
+    } else if box_.style.display == Display::Table {
+        let result = crate::table::layout_table_children(box_, content_width, content_x, content_y);
+        result.height
     } else {
         let mut cursor_y = content_y;
         let mut left_edge_y = content_y;

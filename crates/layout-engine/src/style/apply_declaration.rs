@@ -198,6 +198,9 @@ pub(super) fn apply_declaration(style: &mut ComputedStyle, decl: &Declaration) {
                     "inline" => Display::Inline,
                     "flex" => Display::Flex,
                     "grid" => Display::Grid,
+                    "table" => Display::Table,
+                    "table-row" => Display::TableRow,
+                    "table-cell" => Display::TableCell,
                     "none" => Display::None,
                     _ => return,
                 };

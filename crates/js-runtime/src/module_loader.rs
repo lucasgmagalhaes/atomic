@@ -54,13 +54,34 @@ thread_local! {
     static CACHES: RefCell<HashMap<usize, ModuleCache>> = RefCell::new(HashMap::new());
 }
 
+/// Real spec's own "bare specifier" test: no leading `./`/`../`/`/`, and
+/// not itself parseable as an absolute URL. A bare specifier (`"lodash"`,
+/// `"@app/utils"`) is never resolved by joining it onto `base_url` as a
+/// relative path — real spec routes it through the import map only (see
+/// `import_map.rs`), same as a real browser.
+fn is_bare_specifier(specifier: &str) -> bool {
+    !(specifier.starts_with("./")
+        || specifier.starts_with("../")
+        || specifier.starts_with('/')
+        || url::Url::parse(specifier).is_ok())
+}
+
 /// Resolves an `import`/dynamic-`import()` specifier against the
-/// importing module's own URL. Real relative/absolute resolution, not a
-/// string-concatenation approximation — `None` for an unparseable
-/// `base_url` or `specifier` (a bare specifier with no import map —
-/// ROADMAP item 19's own remaining work — can't resolve without one,
-/// same as a real browser without one configured).
-pub(crate) fn resolve_specifier(base_url: &str, specifier: &str) -> Option<String> {
+/// importing module's own URL. A relative (`./`/`../`) or absolute
+/// (`/`, or already a full URL) specifier resolves via real
+/// `url::Url::join` — not a string-concatenation approximation. A bare
+/// specifier resolves only through the real import map
+/// (`HostState::import_map`, `import_map::resolve`) — `None` if it has
+/// no entry there, same as a real browser with no matching import map.
+/// `None` also for an unparseable `base_url`.
+pub(crate) unsafe fn resolve_specifier(
+    ctx: *mut sys::JSContext,
+    base_url: &str,
+    specifier: &str,
+) -> Option<String> {
+    if is_bare_specifier(specifier) {
+        return crate::import_map::resolve(ctx, specifier);
+    }
     let base = url::Url::parse(base_url).ok()?;
     base.join(specifier).ok().map(|u| u.to_string())
 }
@@ -155,7 +176,7 @@ pub(crate) unsafe extern "C" fn module_normalize_fn(
 ) -> *mut c_char {
     let base = CStr::from_ptr(module_base_name).to_string_lossy();
     let specifier = CStr::from_ptr(module_name).to_string_lossy();
-    match resolve_specifier(&base, &specifier) {
+    match resolve_specifier(ctx, &base, &specifier) {
         Some(resolved) => match CString::new(resolved) {
             Ok(c) => sys::js_strdup(ctx, c.as_ptr()),
             Err(_) => std::ptr::null_mut(),

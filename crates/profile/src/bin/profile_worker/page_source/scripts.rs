@@ -99,16 +99,23 @@ pub(crate) struct LoadedScript {
 /// `DOMContentLoaded`/`load`, matching spec (`defer` scripts run before
 /// `DOMContentLoaded`, not after).
 ///
-/// Scope cut: no `async`/module-type distinction. Real `async` ordering
-/// (a script runs as soon as *its own* fetch completes, out of document
-/// order relative to other scripts) needs concurrent, independently-
-/// completing fetches - this worker fetches scripts one at a time on a
-/// single thread, so there's no real race to reorder around; treating
-/// `async` as a synchronous non-deferred script (this engine's existing
+/// Scope cut: no `async` distinction. Real `async` ordering (a script
+/// runs as soon as *its own* fetch completes, out of document order
+/// relative to other scripts) needs concurrent, independently-completing
+/// fetches - this worker fetches scripts one at a time on a single
+/// thread, so there's no real race to reorder around; treating `async`
+/// as a synchronous non-deferred script (this engine's existing
 /// classic-script behavior) is the honest projection of that, not a
-/// distinct code path. `type="module"` scripts are treated as plain
-/// classic scripts (no ES module resolution exists yet - see
-/// `ROADMAP.md` P2 item 19).
+/// distinct code path. `type="module"` *is* real, though (this doc block
+/// predates that landing - see this file's own `LoadedScript`/
+/// `ScriptSource` doc above, and `page/load.rs`'s real
+/// `Context::eval_module` call for `is_module` scripts): real
+/// import/export linking, dynamic `import()`, circular-dependency
+/// handling and a real module cache all exist (`module_loader.rs`,
+/// `context/eval.rs`'s `eval_module`). Still `[ ]`: import maps (a bare
+/// specifier with no scheme, e.g. `import "lodash"`, has no real
+/// resolution mechanism yet - see `module_loader.rs`'s own scope-cut
+/// doc).
 pub(crate) fn load_scripts(
     dom: &Dom,
     root: NodeId,

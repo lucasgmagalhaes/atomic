@@ -421,6 +421,27 @@ pub enum ListStylePosition {
     Inside,
 }
 
+/// Real 2-stop `linear-gradient(<angle>?, <color>, <color>)` — no 3+ color
+/// stops, no percentage stop positions, no `radial-gradient`/`conic-
+/// gradient` - the same "one value, not a list" scope cut `BoxShadow`'s own
+/// doc already takes. `angle_deg` follows the real CSS convention (`0deg`
+/// points up, increasing clockwise - `to bottom`, the real spec default
+/// when no direction is given, is `180.0`) and is what `render`'s
+/// `rect_to_vertices` uses to compute each corner's exact blend position
+/// along the real CSS gradient-line-length formula (the box's own half-
+/// diagonal projected onto the gradient direction) - painted as real
+/// per-vertex GPU color interpolation, not a new shader or paint
+/// primitive, and mathematically exact (not an approximation): bilinear
+/// interpolation of an affine function from its four corner values
+/// reproduces that function exactly at every interior point, regardless of
+/// how the quad's two triangles split the diagonal.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LinearGradient {
+    pub angle_deg: f64,
+    pub from: Color,
+    pub to: Color,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EdgeSizes {
     pub top: Length,

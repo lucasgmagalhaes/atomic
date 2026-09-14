@@ -4,7 +4,8 @@
 
 use super::types::{
     AlignItems, BorderStyle, BoxShadow, Clear, Color, Display, EdgeSizes, FlexDirection, Float,
-    GridTracks, JustifyContent, Length, ListStylePosition, ListStyleType, Overflow, Position,
+    GridTracks, JustifyContent, Length, LinearGradient, ListStylePosition, ListStyleType, Overflow,
+    Position,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -79,6 +80,10 @@ pub struct ComputedStyle {
     pub grid_template_columns: GridTracks,
     pub grid_template_rows: GridTracks,
     pub background_color: Color,
+    /// `None` (the common case — a flat `background-color`) paints exactly
+    /// as before this field existed. See [`LinearGradient`]'s own doc for
+    /// the real scope cut. Not inherited (matches real `background`).
+    pub background_image: Option<LinearGradient>,
     /// The two *inherited* properties this crate models (`resolve_style`
     /// takes the parent's resolved values as the starting point instead of
     /// the fixed initial values, per CSS inheritance rules) - every other
@@ -170,6 +175,7 @@ impl ComputedStyle {
             grid_template_columns: GridTracks::EMPTY,
             grid_template_rows: GridTracks::EMPTY,
             background_color: Color::TRANSPARENT,
+            background_image: None,
             font_size: 16.0,
             color: Color {
                 r: 0,

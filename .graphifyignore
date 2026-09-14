@@ -3,3 +3,16 @@ crates/js-runtime/quickjs-sys/vendor/
 
 # Build output
 target/
+
+# The "impeccable" design skill was installed once and duplicated itself
+# across five agent-tooling directories (.agents/, .claude/agents+skills/,
+# .codex/agents/, .github/agents+hooks+skills/, .opencode/skills/) — same
+# content five times, not project code/docs. Skews the graph with noise.
+.agents/
+.claude/agents/
+.claude/skills/
+.codex/agents/
+.github/agents/
+.github/hooks/
+.github/skills/
+.opencode/skills/

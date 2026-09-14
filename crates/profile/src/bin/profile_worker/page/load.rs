@@ -60,6 +60,17 @@ impl<'rt> Page<'rt> {
             dns_server,
             &mut cache,
         );
+        // Every CSP policy this page will ever have, known up front so
+        // `load_scripts` can gate `script-src` on external `<script src>`
+        // fetches before any of them happen - see `page_source::csp`'s own
+        // doc on why this moved earlier than the `ctx.add_csp_policy` calls
+        // below (which still exist, unchanged, to enforce `connect-src`/
+        // Trusted Types for the page's own later fetches/DOM writes).
+        let mut csp_policies = doc.csp_policies.clone();
+        collect_meta_csp_policies(&dom, html_el, &mut csp_policies);
+        let page_origin = base_url
+            .and_then(|u| url::Url::parse(u).ok())
+            .map(|u| u.origin().ascii_serialization());
         let scripts = load_scripts(
             &dom,
             html_el,
@@ -68,6 +79,8 @@ impl<'rt> Page<'rt> {
             proxy,
             dns_server,
             &mut cache,
+            &csp_policies,
+            page_origin.as_deref(),
         );
 
         let mut ctx = match storage_host {
@@ -92,21 +105,13 @@ impl<'rt> Page<'rt> {
         // the document response's own `Content-Security-Policy` headers
         // (extracted in `resolve_document`, repeated headers kept as
         // separate policies) and every `<meta http-equiv>` tag the parsed
-        // DOM turned out to carry. Each is appended via `add_csp_policy`
-        // rather than joined into one string - real CSP policies intersect
-        // rather than merge (see `js_runtime::csp`'s module docs).
-        for policy in &doc.csp_policies {
+        // DOM turned out to carry - both already collected into
+        // `csp_policies` above (for `load_scripts`'s own `script-src`
+        // gating). Each is appended via `add_csp_policy` rather than
+        // joined into one string - real CSP policies intersect rather
+        // than merge (see `js_runtime::csp`'s module docs).
+        for policy in &csp_policies {
             ctx.add_csp_policy(policy);
-        }
-        let mut meta_policies = Vec::new();
-        collect_meta_csp_policies(
-            ctx.dom()
-                .expect("Page::load always builds its context over a dom"),
-            html_el,
-            &mut meta_policies,
-        );
-        for policy in meta_policies {
-            ctx.add_csp_policy(&policy);
         }
         if run_demo_script {
             let _ = ctx.eval(DEMO_SCRIPT, "<profile-worker demo>");

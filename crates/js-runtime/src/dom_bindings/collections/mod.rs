@@ -11,6 +11,7 @@
 //! `define_selector_methods`).
 
 mod html_collection;
+mod live;
 mod methods;
 mod node_list;
 mod queries;

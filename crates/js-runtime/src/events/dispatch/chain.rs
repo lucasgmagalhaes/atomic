@@ -61,6 +61,7 @@ pub(super) unsafe fn run_phases(
     // `"input"` event bubbling from a text field through its `<form>`
     // ancestor used to leave that form's cached object without
     // `reset`/`requestSubmit` for every later access, not just this one.
+    (*state(ctx, event)).path = chain.to_vec();
     let host_dom: *mut dom::Dom = {
         let state_ptr = crate::host_state::get(ctx);
         if state_ptr.is_null() {

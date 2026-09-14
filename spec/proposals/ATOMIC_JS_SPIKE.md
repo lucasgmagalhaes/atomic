@@ -867,6 +867,42 @@ larger, out-of-scope architectural work already named and explicitly not recomme
 (Shapes/inline caches for `props`, a different execution model for interpreter dispatch
 overhead generally) — not more micro-fixes hunted for their own sake.
 
+### Final verdict (2026-09-14): green, conditional — user-requested decision, not unilateral
+
+The user asked for a call on the current numbers rather than further deferral. Decision:
+**green, conditional** — worth taking to the user as a new, dated scope decision (§10),
+not a silent green light to start building.
+
+**Why green:**
+
+1. **Memory — the actual product thesis — is decisive and consistent**: ~6× smaller
+   across all three programs, no session-to-session oscillation (unlike execution time).
+   This is the axis `spec/ROADMAP.md`'s 2026-08-26 decision actually rests the
+   competitive claim on.
+2. **Execution time: one of three comfortably passes, two sit right at the line — not a
+   clear failure.** `sum` ~1.0-1.3×. `props`/`closures` oscillate ~1.7-2.15× across
+   repeated sessions in a non-dedicated sandbox (`hyperfine` flagged statistical outliers
+   repeatedly) — categorically different from the original 5.08×/2.87× clear failures.
+3. **Context that favors green:** `props`/`closures` run 1,000,000 loop iterations —
+   far heavier than a real idle-game tick. `spec/architecture/performance.md` §21.6
+   already showed QuickJS-ng has large throughput headroom (5M+ ops/sec) against actual
+   1-60Hz idle-game needs. A borderline 2× on an intentionally extreme synthetic
+   benchmark is a weaker signal against real target content than a clean failure would
+   be.
+4. **Favorable trajectory, not an architectural wall.** Two rounds of profiling-driven
+   fixes (§ above) already moved `props` from 5.08× to ~1.9× and `closures` from 2.87× to
+   ~1.7-2×, cheaply and without touching anything §3 excludes. The remaining gap is small
+   and noise-bound, not a demonstrated structural ceiling.
+
+**What "green" does *not* mean:** authorization to build a full engine, or to treat
+`props`/`closures` as definitively resolved. The honest caveat stands: a clean
+re-measurement on a quiet, dedicated machine is what would actually settle whether they
+sit above or below 2× — this verdict doesn't wait for that, per the user's explicit
+request to decide on the numbers as they stand.
+
+**Next step, per §10:** raise this with the user explicitly as a new scope decision,
+same weight as 2026-08-26's — not auto-promoted into `spec/ROADMAP.md`.
+
 ## Appendix — salvaged principles from the rejected proposal
 
 These remain correct engineering principles *if* this spike (or, contingent on a green

@@ -119,6 +119,70 @@ impl Profile {
         }
     }
 
+    /// Real IME composition start: dispatches a real bubbling, cancelable
+    /// `"compositionstart"` `CompositionEvent` (`data: ""`) on whichever
+    /// real `<input>`/`<textarea>` the most recent
+    /// [`click_at`](Self::click_at) focused. `Ok(Err(message))` if nothing
+    /// is currently focused.
+    pub fn composition_start(&mut self) -> std::io::Result<Result<(), String>> {
+        writeln!(self.stdin, "COMPOSITION_START")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        let line = line.trim();
+        match line.strip_prefix("ERROR ") {
+            Some(message) => Ok(Err(message.to_string())),
+            None => Ok(Ok(())),
+        }
+    }
+
+    /// Real IME composition preview: dispatches a real bubbling,
+    /// non-cancelable `"compositionupdate"` `CompositionEvent`
+    /// (`data: text`) - no field mutation, matching a real IME only
+    /// previewing candidate text mid-composition. `text` must not contain
+    /// a newline (this crate's stdin/stdout protocol is
+    /// newline-delimited).
+    pub fn composition_update(&mut self, text: &str) -> std::io::Result<Result<(), String>> {
+        if text.contains('\n') {
+            return Ok(Err(
+                "composition text must not contain a newline".to_string()
+            ));
+        }
+        writeln!(self.stdin, "COMPOSITION_UPDATE {text}")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        let line = line.trim();
+        match line.strip_prefix("ERROR ") {
+            Some(message) => Ok(Err(message.to_string())),
+            None => Ok(Ok(())),
+        }
+    }
+
+    /// Real IME composition commit: dispatches a real bubbling,
+    /// non-cancelable `"compositionend"` `CompositionEvent`
+    /// (`data: text`), then the real default action always runs
+    /// (real spec: `compositionend` can't be prevented) - appends `text`
+    /// to the field's real `.value` and dispatches a real `"input"`
+    /// `InputEvent` (`inputType: "insertCompositionText"`). `text` must
+    /// not contain a newline, same as [`composition_update`](Self::composition_update).
+    pub fn composition_end(&mut self, text: &str) -> std::io::Result<Result<(), String>> {
+        if text.contains('\n') {
+            return Ok(Err(
+                "composition text must not contain a newline".to_string()
+            ));
+        }
+        writeln!(self.stdin, "COMPOSITION_END {text}")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        let line = line.trim();
+        match line.strip_prefix("ERROR ") {
+            Some(message) => Ok(Err(message.to_string())),
+            None => Ok(Ok(())),
+        }
+    }
+
     /// Types `key` into whichever real `<input>`/`<textarea>` the most
     /// recent [`click_at`](Self::click_at) focused - `"Backspace"` is a
     /// real delete-last-character, anything else is appended as typed

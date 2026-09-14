@@ -4,7 +4,8 @@
 use std::io::Write;
 
 use super::super::input_commands::{
-    dispatch_click, dispatch_click_at, dispatch_context_menu_at, dispatch_mouse_move, fill_element,
+    dispatch_click, dispatch_click_at, dispatch_composition_end, dispatch_composition_start,
+    dispatch_composition_update, dispatch_context_menu_at, dispatch_mouse_move, fill_element,
     tab_focus, type_key, TabOutcome,
 };
 use super::{Handled, WorkerState};
@@ -146,6 +147,90 @@ impl<'rt> WorkerState<'rt> {
                 }
                 None => {
                     let _ = writeln!(stdout, "ERROR MOUSE_MOVE requires two numeric coordinates");
+                }
+            }
+            let _ = stdout.flush();
+        } else if line == "COMPOSITION_START" {
+            match &self.focused_id {
+                Some(id) => {
+                    let result = dispatch_composition_start(&self.page.ctx, id);
+                    self.sync_scroll();
+                    self.writer.publish(&self.page.render(
+                        &self.renderer,
+                        self.width,
+                        self.height,
+                        self.scroll_top,
+                    ));
+                    match result {
+                        Ok(()) => {
+                            let _ = writeln!(stdout, "COMPOSITION_STARTED");
+                        }
+                        Err(message) => {
+                            let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
+                        }
+                    }
+                }
+                None => {
+                    let _ = writeln!(
+                        stdout,
+                        "ERROR no element focused - CLICK_AT an <input>/<textarea> first"
+                    );
+                }
+            }
+            let _ = stdout.flush();
+        } else if let Some(text) = line.strip_prefix("COMPOSITION_UPDATE ") {
+            match &self.focused_id {
+                Some(id) => {
+                    let result = dispatch_composition_update(&self.page.ctx, id, text);
+                    self.sync_scroll();
+                    self.writer.publish(&self.page.render(
+                        &self.renderer,
+                        self.width,
+                        self.height,
+                        self.scroll_top,
+                    ));
+                    match result {
+                        Ok(()) => {
+                            let _ = writeln!(stdout, "COMPOSITION_UPDATED");
+                        }
+                        Err(message) => {
+                            let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
+                        }
+                    }
+                }
+                None => {
+                    let _ = writeln!(
+                        stdout,
+                        "ERROR no element focused - CLICK_AT an <input>/<textarea> first"
+                    );
+                }
+            }
+            let _ = stdout.flush();
+        } else if let Some(text) = line.strip_prefix("COMPOSITION_END ") {
+            match &self.focused_id {
+                Some(id) => {
+                    let result = dispatch_composition_end(&self.page.ctx, id, text);
+                    self.sync_scroll();
+                    self.writer.publish(&self.page.render(
+                        &self.renderer,
+                        self.width,
+                        self.height,
+                        self.scroll_top,
+                    ));
+                    match result {
+                        Ok(()) => {
+                            let _ = writeln!(stdout, "COMPOSITION_ENDED");
+                        }
+                        Err(message) => {
+                            let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
+                        }
+                    }
+                }
+                None => {
+                    let _ = writeln!(
+                        stdout,
+                        "ERROR no element focused - CLICK_AT an <input>/<textarea> first"
+                    );
                 }
             }
             let _ = stdout.flush();

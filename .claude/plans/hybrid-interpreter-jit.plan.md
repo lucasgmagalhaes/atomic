@@ -4,7 +4,7 @@ Status: **speculative, not scheduled** (no P0–P5 slot yet). Written 2026-09-13
 
 ## Conflict with existing decision (read first)
 
-`spec/ROADMAP.md:571-588` already benchmarked QuickJS-ng interpreter-only against a JIT'd swap and concluded **no case for it** — 5M+ transcendental ops/sec from the plain interpreter is way past idle-game tick needs (1-60Hz). `CLAUDE.md`'s positioning section says the defensible axis is idle memory/CPU/cold-start *per profile*, not raw JS throughput, and explicitly says not to chase beating Chromium/V8 on execution speed.
+`spec/architecture/performance.md:573-588` (§21.6) already benchmarked QuickJS-ng interpreter-only against a JIT'd swap and concluded **no case for it** — 5M+ transcendental ops/sec from the plain interpreter is way past idle-game tick needs (1-60Hz). `CLAUDE.md`'s positioning section says the defensible axis is idle memory/CPU/cold-start *per profile*, not raw JS throughput, and explicitly says not to chase beating Chromium/V8 on execution speed.
 
 A JIT adds per-profile cost (code cache memory, larger binary, warm-up allocation) — the opposite of what "many light profiles" needs. So this plan is written as an **opt-in, feature-flagged tier**, off by default, only justified if a future real workload (not synthetic bench) shows the interpreter is actually the bottleneck. Don't build this speculatively — build it when a profiled workload demands it.
 

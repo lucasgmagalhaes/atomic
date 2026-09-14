@@ -5,6 +5,8 @@
 //! see that doc's §6 for why.
 
 pub mod ast;
+pub mod bytecode;
+pub mod compiler;
 pub mod error;
 pub mod lexer;
 pub mod parser;

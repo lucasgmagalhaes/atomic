@@ -4,8 +4,8 @@
 use std::io::Write;
 
 use super::super::input_commands::{
-    dispatch_click, dispatch_click_at, dispatch_mouse_move, fill_element, tab_focus, type_key,
-    TabOutcome,
+    dispatch_click, dispatch_click_at, dispatch_context_menu_at, dispatch_mouse_move, fill_element,
+    tab_focus, type_key, TabOutcome,
 };
 use super::{Handled, WorkerState};
 
@@ -67,6 +67,47 @@ impl<'rt> WorkerState<'rt> {
                 }
                 None => {
                     let _ = writeln!(stdout, "ERROR CLICK_AT requires two numeric coordinates");
+                }
+            }
+            let _ = stdout.flush();
+        } else if let Some(rest) = line.strip_prefix("CONTEXT_MENU_AT ") {
+            let mut parts = rest.split_whitespace();
+            let coords = parts
+                .next()
+                .zip(parts.next())
+                .and_then(|(x, y)| Some((x.parse::<f64>().ok()?, y.parse::<f64>().ok()?)));
+            match coords {
+                Some((x, y)) => {
+                    let result = dispatch_context_menu_at(
+                        &mut self.page,
+                        self.width,
+                        self.height,
+                        x,
+                        y,
+                        self.scroll_top,
+                    );
+                    self.sync_scroll();
+                    self.writer.publish(&self.page.render(
+                        &self.renderer,
+                        self.width,
+                        self.height,
+                        self.scroll_top,
+                    ));
+                    self.navigate_if_requested();
+                    match result {
+                        Ok(()) => {
+                            let _ = writeln!(stdout, "CONTEXT_MENUED");
+                        }
+                        Err(message) => {
+                            let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
+                        }
+                    }
+                }
+                None => {
+                    let _ = writeln!(
+                        stdout,
+                        "ERROR CONTEXT_MENU_AT requires two numeric coordinates"
+                    );
                 }
             }
             let _ = stdout.flush();

@@ -19,7 +19,7 @@ use super::document_creation::{
     document_create_element, document_create_text_node, document_get_element_by_id,
     document_import_node,
 };
-use super::document_parsers::{dom_parser_constructor, xml_serializer_constructor};
+use super::document_parsers::{dom_parser_constructor, install_write, xml_serializer_constructor};
 use super::document_properties::{
     document_base_uri_get, document_forms_get, document_images_get, document_links_get,
     document_scripts_get, document_url_get,
@@ -156,6 +156,8 @@ pub(super) unsafe fn install(ctx: *mut sys::JSContext) {
         );
         sys::JS_FreeAtom(ctx, atom);
     }
+
+    install_write(ctx, document);
 
     sys::JS_FreeValue(ctx, document);
 }

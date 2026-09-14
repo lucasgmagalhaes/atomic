@@ -35,6 +35,33 @@ Full rationale and crate breakdown: [`mockup/browser-idle-spec.md`](mockup/brows
 | 5 | Hardening: per-platform process sandboxing, on-disk session encryption, signed updater |
 | 6 | On-demand: Wake Lock, big-number formatting, ResizeObserver/IntersectionObserver, Service Worker/PWA, Gamepad, MutationObserver |
 
+## Agent tooling (Claude Code)
+
+This repo is worked on with [Claude Code](https://claude.com/claude-code), and two pieces of agent tooling are part of that workflow:
+
+### ECC ([affaan-m/ECC](https://github.com/affaan-m/ECC))
+
+A plugin bundle of agents, skills, hooks and rules for Claude Code (and other harnesses) — planning, code review, build-repair, and security agents, plus the plan → test → implement → review → verify loop this project's own contribution workflow follows. Recommended for anyone doing substantial work in this repo: it gives Claude Code the same reviewer/build-fixer agents already used when landing features here (see `spec/RULES.md` and this repo's own commit history for the workflow it enforces).
+
+Install (either path installs the same `ecc@ecc` plugin — don't run both):
+
+```bash
+/plugin marketplace add https://github.com/affaan-m/ECC
+/plugin install ecc@ecc
+```
+
+or, for a guided multi-harness setup (Claude Code, Codex, Kimi Code):
+
+```bash
+npx ecc-universal@2.2.1 setup
+```
+
+See the [ECC README](https://github.com/affaan-m/ECC) for the full agent/skill catalog and configuration options.
+
+### impeccable
+
+A frontend design skill (`shape`/`audit`/`critique`/`polish`/`harden`/... — see [`.agents/skills/impeccable/SKILL.md`](.agents/skills/impeccable/SKILL.md) for the full verb list) for UI work on `apps/shell`'s `egui` interface and the mockup HTML prototype. It's vendored directly in this repo under `.agents/skills/impeccable/` (plus Codex agent definitions under `.codex/agents/`), so there's nothing to install — cloning the repo and opening it in Claude Code or Codex is enough; the skill is auto-discovered from the project directory. Invoke it with `/impeccable <verb> <target>` (e.g. `/impeccable audit apps/shell`).
+
 ## Status
 
 Well past the phase table above now — every crate listed under "Architecture" has a real, tested implementation (JS engine, DOM, CSS/layout, GPU render, networking/TLS, per-profile process isolation, workers, storage). See [`CLAUDE.md`](CLAUDE.md)'s "Implementation status" section for the current detail, and [`spec/INDEX.md`](spec/INDEX.md) for what's left on the JS-engine side specifically.

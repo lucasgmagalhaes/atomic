@@ -653,6 +653,52 @@ That document also now cross-references
 Worth reading before any post-green-signal scope conversation, not before or during the
 spike itself.
 
+## Results (2026-09-14)
+
+First real cross-engine numbers, from a Darwin dev machine, release builds, `hyperfine
+--warmup 5 --runs 50` for elapsed time (§7.2) and a 10-run mean of each binary's own
+printed `maxrss_bytes` for memory (§7.1). All five reference programs pass their exact
+expected value (§4) — correctness gate cleared before any of this was trusted.
+
+| Program | atomicjs elapsed (mean ± σ) | quickjs-ng elapsed (mean ± σ) | Slowdown vs. quickjs-ng | atomicjs RSS (mean) | quickjs-ng RSS (mean) | RSS ratio |
+| --- | --- | --- | --- | --- | --- | --- |
+| `sum` | 39.4 ms ± 25.2 ms | 32.4 ms ± 20.0 ms | **1.22×** | 1.61 MB | 10.46 MB | **6.5× smaller** |
+| `props` | 108.2 ms ± 57.4 ms | 21.3 ms ± 19.2 ms | **5.08×** | 1.64 MB | 10.46 MB | **6.4× smaller** |
+| `closures` | 124.7 ms ± 27.5 ms | 43.5 ms ± 13.1 ms | **2.87×** | 1.67 MB | 10.45 MB | **6.2× smaller** |
+
+**Caveat on precision:** `hyperfine` flagged statistical outliers on 2 of 3 runs (σ is
+large relative to the mean throughout) — this sandbox isn't a quiet, dedicated
+benchmarking machine. The *direction* of every result here is clear enough not to be
+noise (a 5× or 6× gap doesn't hide inside that variance), but treat the exact ratios as
+directionally right, not lab-grade precise — rerun on a quiet machine before treating
+any of these numbers as final.
+
+**Reading against §9's criteria — a real mixed signal, not a clean green or red:**
+
+- **Memory: a clear, consistent win for `atomicjs`** — roughly 6× smaller resident set
+  across all three programs, exactly the axis the product's own competitive claim rests
+  on (`spec/ROADMAP.md`'s 2026-08-26 decision). This part of the thesis holds up.
+- **Execution time: `sum` clears the 2× guardrail (1.22×), `props` and `closures` don't**
+  (5.08× and 2.87×). §9's red criterion — "execution time far worse than QuickJS-ng" —
+  is squarely met by `props`, and `closures` sits past the stated 2× line too. This
+  isn't a rounding error to wave off.
+- **Likely cause, not yet investigated (§7.4's job, not done here):** `props`'s gap is
+  the most suspicious single number — property access is the one thing `atomicjs`'s
+  object model does with zero optimization (`JsObject`'s `HashMap<String, Value>`, a
+  fresh hash + string comparison per `GET_PROP`, vs. QuickJS-ng's shape/inline-cache
+  machinery). This is a real, plausible explanation, not an excuse — it hasn't been
+  confirmed with a profiler, and reporting it as fact rather than a hypothesis would be
+  exactly the "trust the story instead of the number" mistake this methodology exists to
+  prevent.
+
+**Verdict: not a green light as specified.** §9's green criteria require *all three* —
+lower cold-start, lower memory, and execution time within 2× — to hold. Memory holds
+decisively; execution time fails outright on two of three programs. This is reported to
+the user as-is, per §8 step 8 and §9's own instruction not to decide unilaterally — the
+options from here (investigate the `props` gap with `samply` before concluding anything
+further, accept the red-flag reading and archive per §9, or re-scope the comparison) are
+the user's call, not something to resolve by continuing to build.
+
 ## Appendix — salvaged principles from the rejected proposal
 
 These remain correct engineering principles *if* this spike (or, contingent on a green

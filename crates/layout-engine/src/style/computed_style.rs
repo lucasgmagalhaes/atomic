@@ -153,6 +153,12 @@ pub struct ComputedStyle {
     /// See [`ListStylePosition`]'s own doc — real initial value
     /// (`outside`), but has no distinct effect in this crate.
     pub list_style_position: ListStylePosition,
+    /// Real `column-count` (2026-09-14, `crate::columns`) — `None` is the
+    /// initial value (`auto`, no columns). `column-width`/`columns`
+    /// shorthand aren't modeled; see `crate::columns`'s own module doc
+    /// for the exact layout scope (count-based chunking, not real height
+    /// balancing).
+    pub column_count: Option<u32>,
 }
 
 impl ComputedStyle {
@@ -205,6 +211,7 @@ impl ComputedStyle {
             transform: (0.0, 0.0),
             list_style_type: None,
             list_style_position: ListStylePosition::Outside,
+            column_count: None,
         }
     }
 }

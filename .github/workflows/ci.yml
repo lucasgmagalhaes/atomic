@@ -109,7 +109,7 @@ jobs:
       # outage doesn't fail an otherwise-green build; the coverage numbers
       # themselves still come from the real `lcov.info` above either way.
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}

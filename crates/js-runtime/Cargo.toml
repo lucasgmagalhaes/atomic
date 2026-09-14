@@ -15,7 +15,7 @@ url = "2.5.8"
 urlencoding = "2.1"
 
 [dev-dependencies]
-criterion = "0.5"
+criterion = "0.8"
 
 [[bench]]
 name = "hot_loop"

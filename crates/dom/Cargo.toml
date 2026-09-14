@@ -7,7 +7,7 @@ edition = "2021"
 atoms = { path = "../atoms" }
 
 [dev-dependencies]
-criterion = "0.5"
+criterion = "0.8"
 
 [[bench]]
 name = "dom_bench"

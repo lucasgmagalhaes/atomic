@@ -15,6 +15,7 @@ security = { path = "../security" }
 js-runtime = { path = "../js-runtime" }
 net = { path = "../net" }
 storage = { path = "../storage" }
+platform-apis = { path = "../platform-apis" }
 url = "2.5.8"
 
 [dev-dependencies]

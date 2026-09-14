@@ -3615,6 +3615,7 @@ dependencies = [
  "js-runtime",
  "layout-engine",
  "net",
+ "platform-apis",
  "render",
  "security",
  "storage",

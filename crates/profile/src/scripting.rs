@@ -42,13 +42,21 @@ impl Profile {
         self.stdin.flush()?;
         let mut line = String::new();
         self.stdout.read_line(&mut line)?;
-        let line = line.trim();
+        // Only the line terminator, not `.trim()`'s full whitespace strip -
+        // the worker's own `EVALUATED {value}` (`page_nav.rs`) always
+        // includes a trailing space before `value`, even when `value` is
+        // the empty string (a real, common completion value - e.g. an
+        // empty `<input>`'s `.value`). Trimming that space away before
+        // `strip_prefix("EVALUATED ")` runs made the prefix itself fail to
+        // match (no space left to match against), falling through to the
+        // `unwrap_or(line)` branch and returning the literal string
+        // `"EVALUATED"` instead of `""` - a real bug this fixes.
+        let line = line.trim_end_matches(['\r', '\n']);
         match line.strip_prefix("ERROR ") {
             Some(message) => Ok(Err(message.to_string())),
             None => Ok(Ok(line
                 .strip_prefix("EVALUATED ")
                 .unwrap_or(line)
-                .trim()
                 .to_string())),
         }
     }

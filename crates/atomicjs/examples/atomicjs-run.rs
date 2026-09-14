@@ -30,6 +30,7 @@ fn script_for(name: &str) -> &'static str {
         "closure" => CLOSURE,
         "props" => PROPS,
         "closures" => CLOSURES,
+        "hot_loop" => HOT_LOOP,
         "empty" => "",
         other => panic!("unknown script name: {other}"),
     }
@@ -86,4 +87,8 @@ for (let i = 0; i < 1000000; i++) {
     total += counter();
 }
 total;
+"#;
+
+const HOT_LOOP: &str = r#"
+(function () { let gold=1.0; let gems=1.0; let energy=1.0; let goldMult=1.0001; let gemsMult=1.00005; let energyMult=1.00002; let ticks=200000; for (let i=0; i<ticks; i++) { gold=gold*goldMult+Math.sqrt(i%997+1); gems=gems*gemsMult+(gold%13); energy=energy*energyMult+Math.log(gems+1); if (gold>1e12) { gold=gold/1e6; goldMult*=1.0000001; } if (gems>1e12) { gems=gems/1e6; gemsMult*=1.0000001; } if (energy>1e12) { energy=energy/1e6; energyMult*=1.0000001; } } return gold+gems+energy; })();
 "#;

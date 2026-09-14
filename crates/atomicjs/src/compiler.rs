@@ -356,9 +356,7 @@ impl Compiler {
             Expr::Binary { op, left, right } => {
                 self.compile_expr(left, fb, parent, upvalues)?;
                 self.compile_expr(right, fb, parent, upvalues)?;
-                fb.borrow_mut().code.push(match op {
-                    _ => bin_instr(*op),
-                });
+                fb.borrow_mut().code.push(bin_instr(*op));
             }
             Expr::Call { callee, args } => {
                 if args.len() == 1 {

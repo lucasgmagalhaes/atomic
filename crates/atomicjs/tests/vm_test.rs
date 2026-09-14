@@ -157,3 +157,8 @@ fn executes_hot_loop_language_subset_and_native_math() {
     "#;
     assert_eq!(number(source), 10.0);
 }
+
+#[test]
+fn hot_loop_matches_quickjs_golden_value_exactly() {
+    assert_eq!(number(common::HOT_LOOP), 3_022_237_872.307_638_6);
+}

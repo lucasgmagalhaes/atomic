@@ -2,9 +2,9 @@
 
 ## 0. Status
 
-Not scheduled work yet — a draft scope for the next milestone, per the user's explicit
-request after [`ATOMIC_JS_SPIKE.md`](ATOMIC_JS_SPIKE.md)'s final verdict ("green,
-conditional," 2026-09-14). No deadline (the user's own instruction) — the boundary here
+Completed 2026-09-14, per the user's explicit request after
+[`ATOMIC_JS_SPIKE.md`](ATOMIC_JS_SPIKE.md)'s final verdict ("green, conditional,"). No
+deadline (the user's own instruction) — the boundary here
 is **scope, not time**: this milestone is done when its one reference workload runs
 correctly and is benchmarked, not when a clock runs out. Don't add anything beyond what
 this document lists, even if it looks trivial — that's exactly how the spike stayed
@@ -175,7 +175,32 @@ Reuse `ATOMIC_JS_SPIKE.md` §9's shape, applied to this one additional workload:
 - Either way: report to the user, same as before — this document doesn't pre-authorize
   what happens next any more than the spike's own verdict did.
 
-## 8. What this milestone deliberately does not decide
+## 8. Results
+
+The implementation added only the gap listed in §3: multiplicative operators and
+precedence, `>`, `*=`, scientific literals, single-branch `if`, and narrow compiler
+lowering for `Math.sqrt`/`Math.log` to native VM opcodes. It does not add a general
+`Math` object or general-purpose native-function dispatch.
+
+Correctness gate: AtomicJS and QuickJS-ng both return exactly
+`3022237872.3076386` for the 200,000-tick script. The AtomicJS integration test pins
+that value, and the two comparison binaries expose the workload as `hot_loop`.
+
+Release measurements used `hyperfine --shell=none --warmup 10` on this shared machine:
+
+| Session | Runs | AtomicJS mean | QuickJS-ng mean | Relative result |
+| --- | ---: | ---: | ---: | --- |
+| 1 | 100 | 51.6 ms ± 21.3 | 49.0 ms ± 13.3 | QuickJS-ng 1.05× faster ± 0.52 |
+| 2 | 50 | 39.3 ms ± 3.6 | 43.6 ms ± 5.7 | AtomicJS 1.11× faster ± 0.18 |
+| 3 | 50 | 45.7 ms ± 19.2 | 46.5 ms ± 13.2 | AtomicJS 1.02× faster ± 0.51 |
+
+The timing direction is inconclusive because the ranges overlap and two sessions have
+large outliers, but every result is far below the 370 ms no-go guardrail. This is a
+**green, conditional** result: the bounded milestone is complete and competitive on
+this workload, while a quiet, pinned-core environment is required before claiming a
+durable lead over QuickJS-ng.
+
+## 9. What this milestone deliberately does not decide
 
 Whether AtomicJS ever gets wired into `profile-worker`/`js-runtime` for real. That's a
 larger, separate decision (`ATOMIC_JS_SPIKE.md` §10) this milestone doesn't bring any

@@ -641,6 +641,12 @@ scheduling:**
 
 ## 11. Related design notes
 
+[`ATOMIC_JS_MILESTONE_2.md`](ATOMIC_JS_MILESTONE_2.md) drafts the next bounded milestone
+(2026-09-14, per the user's request after this spike's final verdict) — not scheduled
+work, a scope-bounded (not time-boxed) follow-up targeting
+`crates/js-runtime/benches/hot_loop.rs`'s real idle-tick-shaped script instead of the
+five toy reference programs here.
+
 [`ATOMIC_JS_TIERING.md`](ATOMIC_JS_TIERING.md) works through the interpret-vs-compile
 orchestrator ahead of time — not in scope for this spike (§3: no JIT), but the piece
 most likely to undermine the product's own memory-footprint thesis if a future baseline

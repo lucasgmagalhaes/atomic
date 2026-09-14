@@ -2632,6 +2632,7 @@ dependencies = [
  "css",
  "dom",
  "html",
+ "libc",
  "net",
  "platform-apis",
  "quickjs-sys",

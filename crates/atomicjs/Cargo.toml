@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+# intentionally empty `members` — this makes crates/atomicjs the root of its OWN
+# single-crate workspace, decoupled from the repo's root Cargo.toml. See
+# spec/proposals/ATOMIC_JS_SPIKE.md §6 for why: cargo build/test --workspace from
+# the repo root must never touch this crate while its thesis is unproven.
+
+[package]
+name = "atomicjs"
+version = "0.1.0"
+edition = "2021"
+
+[dev-dependencies]
+libc = "0.2"
+
+# `criterion` dev-dependency + `[[bench]]` target land in step 3 (§8) once
+# benches/atomicjs_bench.rs actually exists — declaring either before then
+# would either point at a nonexistent file or force a fresh dependency
+# resolution this crate's separate (non-root) workspace can't do offline
+# with confidence yet. See spec/proposals/ATOMIC_JS_SPIKE.md §6/§7.3.

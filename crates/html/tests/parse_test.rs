@@ -95,6 +95,48 @@ fn parse_to_html_element_finds_the_html_tag() {
 }
 
 #[test]
+fn template_content_is_a_real_isolated_fragment() {
+    let dom = html::parse("<div><template><p>hi</p></template></div>");
+    let div = find_first(&dom, dom.root(), "div").unwrap();
+    let template = find_first(&dom, div, "template").unwrap();
+
+    // The template's own light-DOM children must be empty - its parsed
+    // content was redirected into the content fragment, not appended as
+    // normal children.
+    assert!(
+        dom.get(template).unwrap().children.is_empty(),
+        "template's light-DOM children should be empty"
+    );
+
+    let content = dom
+        .template_content(template)
+        .expect("a <template> should always have a content fragment");
+    assert!(matches!(
+        dom.get(content).unwrap().data,
+        NodeData::DocumentFragment
+    ));
+    let p = find_first(&dom, content, "p");
+    assert!(
+        p.is_some(),
+        "the <p> should live inside the content fragment"
+    );
+    assert_eq!(dom.text_content(content), "hi");
+}
+
+#[test]
+fn nested_templates_each_get_their_own_content_fragment() {
+    let dom = html::parse("<template><template><span>inner</span></template></template>");
+    let outer = find_first(&dom, dom.root(), "template").unwrap();
+    let outer_content = dom.template_content(outer).unwrap();
+    let inner = find_first(&dom, outer_content, "template").unwrap();
+    let inner_content = dom.template_content(inner).unwrap();
+
+    assert_ne!(outer_content, inner_content);
+    assert!(dom.get(inner).unwrap().children.is_empty());
+    assert_eq!(dom.text_content(inner_content), "inner");
+}
+
+#[test]
 fn comments_become_comment_nodes() {
     let dom = html::parse("<div><!-- a comment --></div>");
     let div = find_first(&dom, dom.root(), "div").unwrap();

@@ -69,6 +69,7 @@ mod scroll_focus;
 mod select;
 mod selectors;
 mod shadow;
+mod template;
 mod tree_edit;
 mod util;
 mod validity;

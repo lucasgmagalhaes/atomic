@@ -8,12 +8,17 @@
 //!   discarded — `dom` has no Doctype node variant.
 //! - Processing instructions (`<?...?>`, only relevant to XML, not real
 //!   HTML) are stored as comment nodes.
-//! - `<template>` "template contents" aren't a separate isolated
-//!   fragment per spec — `get_template_contents` just returns the
-//!   `<template>` element itself, so its content lives as normal
-//!   children, visible to normal tree traversal instead of hidden until
-//!   cloned. No template-instantiation consumer exists anywhere in this
-//!   engine yet, so this doesn't currently matter in practice.
+//! - `<template>` content is real (`ROADMAP.md`'s "Default actions"
+//!   neighbor item): `get_template_contents` returns a real, separate
+//!   `DocumentFragment` (`dom::Dom::template_content`, eagerly created by
+//!   `Dom::create_element` for every `"template"` tag) instead of the
+//!   `<template>` element itself — `html5ever`'s own tree builder already
+//!   redirects every insertion under a `<template>` through this method
+//!   (`appropriate_place_for_insertion`), so no other sink change is
+//!   needed for parsed template content to land in the isolated fragment,
+//!   invisible to normal light-DOM traversal, exactly like a real
+//!   browser. Scope cut: no template-instantiation (`cloneNode` on a
+//!   `<template>` doesn't clone its content).
 //! - MathML/SVG foreign-content handling isn't implemented
 //!   (`is_mathml_annotation_xml_integration_point` always `false`) —
 //!   this engine doesn't render SVG/MathML at all, so foreign-content
@@ -199,7 +204,10 @@ impl TreeSink for Sink {
     fn mark_script_already_started(&self, _node: &NodeId) {}
 
     fn get_template_contents(&self, target: &NodeId) -> NodeId {
-        *target
+        self.dom
+            .borrow()
+            .template_content(*target)
+            .expect("get_template_contents is only ever called with a real <template> element")
     }
 
     fn same_node(&self, x: &NodeId, y: &NodeId) -> bool {

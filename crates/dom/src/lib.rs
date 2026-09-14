@@ -145,6 +145,21 @@ pub enum NodeData {
         /// (`childNodes`/`children`) never sees a shadow root. See
         /// [`Dom::attach_shadow`].
         shadow_root: Option<NodeId>,
+        /// This `<template>` element's real, isolated content
+        /// `DocumentFragment` — `Some` for every element created with tag
+        /// `"template"` (set eagerly at creation time in
+        /// [`Dom::create_element`], matching real spec behavior: a
+        /// `<template>` owns its content fragment from the moment it
+        /// exists, not lazily on first access), `None` for every other
+        /// tag. `html::Sink::get_template_contents` redirects all of
+        /// `html5ever`'s insertions under a `<template>` into this
+        /// fragment instead of the template's own `children`, so parsed
+        /// `<template>` content is real, inert markup — not visible to
+        /// normal light-DOM traversal — exactly like a real browser's
+        /// template content. Scope cut: `cloneNode`/`importNode` don't
+        /// clone this fragment (same "not cloned" treatment `shadow_root`
+        /// already documents above).
+        template_content: Option<NodeId>,
     },
     Text(String),
     Comment(String),

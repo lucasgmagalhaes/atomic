@@ -9,7 +9,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::bytecode::{BytecodeModule, Const, Instr};
+use crate::bytecode::{BytecodeModule, Const, Instr, NativeFn};
 use crate::error::AtomicJsError;
 use crate::value::{FunctionData, FunctionFeedback, JsObject, Value};
 
@@ -69,6 +69,40 @@ struct VmPools {
     args: RefCell<Vec<Vec<Value>>>,
 }
 
+/// Keeps profiling out of the normal execution path. `run_source` uses the
+/// zero-sized `NoFeedback` implementation, which LLVM can inline away;
+/// `run_source_with_feedback` opts into exact counters for tests and tooling.
+trait FeedbackSink {
+    fn on_function_call(&mut self, function_index: usize);
+    fn on_loop_backedge(&mut self, function_index: usize);
+}
+
+struct NoFeedback;
+
+impl FeedbackSink for NoFeedback {
+    #[inline(always)]
+    fn on_function_call(&mut self, _: usize) {}
+
+    #[inline(always)]
+    fn on_loop_backedge(&mut self, _: usize) {}
+}
+
+struct CollectingFeedback<'a> {
+    entries: &'a mut [FunctionFeedback],
+}
+
+impl FeedbackSink for CollectingFeedback<'_> {
+    #[inline(always)]
+    fn on_function_call(&mut self, function_index: usize) {
+        self.entries[function_index].call_count += 1;
+    }
+
+    #[inline(always)]
+    fn on_loop_backedge(&mut self, function_index: usize) {
+        self.entries[function_index].loop_count += 1;
+    }
+}
+
 impl VmPools {
     fn take_locals(&self) -> Vec<LocalSlot> {
         self.locals.borrow_mut().pop().unwrap_or_default()
@@ -126,7 +160,10 @@ fn as_number(value: &Value) -> f64 {
 }
 
 pub fn run_source(source: &str) -> Result<Value, AtomicJsError> {
-    run_source_with_feedback(source).map(|(value, _feedback)| value)
+    let module = compile_source(source)?;
+    let pools = VmPools::default();
+    let mut feedback = NoFeedback;
+    execute_function(&module, module.top_level, &[], &[], &mut feedback, &pools)
 }
 
 /// Same as `run_source`, but also returns the per-function
@@ -138,35 +175,35 @@ pub fn run_source(source: &str) -> Result<Value, AtomicJsError> {
 pub fn run_source_with_feedback(
     source: &str,
 ) -> Result<(Value, Vec<FunctionFeedback>), AtomicJsError> {
-    let tokens = crate::lexer::tokenize(source).map_err(|e| AtomicJsError(e.0))?;
-    let program = crate::parser::parse(tokens).map_err(|e| AtomicJsError(e.0))?;
-    let module = crate::compiler::compile(program).map_err(|e| AtomicJsError(e.0))?;
+    let module = compile_source(source)?;
 
     let mut feedback: Vec<FunctionFeedback> = (0..module.functions.len())
         .map(|_| FunctionFeedback::default())
         .collect();
     let pools = VmPools::default();
-    let value = execute_function(
-        &module,
-        module.top_level,
-        &[],
-        Vec::new(),
-        &mut feedback,
-        &pools,
-    )?;
+    let mut collector = CollectingFeedback {
+        entries: &mut feedback,
+    };
+    let value = execute_function(&module, module.top_level, &[], &[], &mut collector, &pools)?;
     Ok((value, feedback))
 }
 
-fn execute_function(
+fn compile_source(source: &str) -> Result<BytecodeModule, AtomicJsError> {
+    let tokens = crate::lexer::tokenize(source).map_err(|e| AtomicJsError(e.0))?;
+    let program = crate::parser::parse(tokens).map_err(|e| AtomicJsError(e.0))?;
+    crate::compiler::compile(program).map_err(|e| AtomicJsError(e.0))
+}
+
+fn execute_function<F: FeedbackSink>(
     module: &BytecodeModule,
     function_index: usize,
     args: &[Value],
-    upvalues: Vec<Rc<RefCell<Value>>>,
-    feedback: &mut [FunctionFeedback],
+    upvalues: &[Rc<RefCell<Value>>],
+    feedback: &mut F,
     pools: &VmPools,
 ) -> Result<Value, AtomicJsError> {
     let function = &module.functions[function_index];
-    feedback[function_index].call_count += 1;
+    feedback.on_function_call(function_index);
 
     let mut locals: Vec<LocalSlot> = pools.take_locals();
     for i in 0..function.local_count {
@@ -277,6 +314,18 @@ fn execute_function(
                 stack.push(Value::Number(as_number(&a) + as_number(&b)));
                 pc += 1;
             }
+            Instr::Mul => {
+                binary_number(&mut stack, |a, b| a * b);
+                pc += 1;
+            }
+            Instr::Div => {
+                binary_number(&mut stack, |a, b| a / b);
+                pc += 1;
+            }
+            Instr::Mod => {
+                binary_number(&mut stack, |a, b| a % b);
+                pc += 1;
+            }
             Instr::Lt => {
                 let b = stack.pop().expect("Lt needs two operands");
                 let a = stack.pop().expect("Lt needs two operands");
@@ -285,10 +334,10 @@ fn execute_function(
             }
             Instr::Jump(target) => {
                 // A jump whose target is at or before this instruction's own
-                // position is a loop back-edge - the cheap, sampled signal
-                // `FunctionFeedback::loop_count` exists for (§5.1).
+                // position is a loop back-edge. It is recorded only when the
+                // caller explicitly requested introspection feedback.
                 if *target <= pc {
-                    feedback[function_index].loop_count += 1;
+                    feedback.on_loop_backedge(function_index);
                 }
                 pc = *target;
             }
@@ -325,20 +374,6 @@ fn execute_function(
             Instr::Call(argc) => {
                 let callee = stack.pop().expect("Call needs a callee on the stack");
                 let argc = *argc as usize;
-                // Args were pushed left-to-right before the callee (compiler
-                // convention, compiler.rs's `Expr::Call` arm), so popping
-                // `argc` times yields them last-pushed-first; reverse to
-                // restore the original left-to-right order. `args` is a
-                // pooled buffer (`VmPools`, same treatment as
-                // `locals`/`stack`) rather than a fresh `Vec` per call — the
-                // next-biggest allocation profiling found once the
-                // locals/stack pooling landed (visible as `Vec::from_iter`
-                // in `closures`' profile, ATOMIC_JS_SPIKE.md's Results).
-                let mut args = pools.take_args();
-                for _ in 0..argc {
-                    args.push(stack.pop().expect("Call needs argc values on the stack"));
-                }
-                args.reverse();
                 let function_data = match callee {
                     Value::Function(f) => f,
                     other => {
@@ -347,16 +382,52 @@ fn execute_function(
                         )))
                     }
                 };
-                let result = execute_function(
-                    module,
-                    function_data.function_index,
-                    &args,
-                    function_data.captured_env.clone(),
-                    feedback,
-                    pools,
-                )?;
-                pools.return_args(args);
+                let result = if argc == 0 {
+                    // The closure benchmark calls a zero-argument function a
+                    // million times. Avoid both the pooled-argument-buffer
+                    // bookkeeping and cloning `captured_env`: the callee's
+                    // Rc keeps its environment alive throughout this call, so
+                    // a borrowed slice is sufficient.
+                    execute_function(
+                        module,
+                        function_data.function_index,
+                        &[],
+                        &function_data.captured_env,
+                        feedback,
+                        pools,
+                    )
+                } else {
+                    // Args were pushed left-to-right before the callee
+                    // (compiler.rs's `Expr::Call` convention), so popping
+                    // `argc` times yields them last-pushed-first; reverse to
+                    // restore their original order. Keep the buffer pooling
+                    // for non-zero-argument calls, where it avoids a real
+                    // allocation.
+                    let mut args = pools.take_args();
+                    for _ in 0..argc {
+                        args.push(stack.pop().expect("Call needs argc values on the stack"));
+                    }
+                    args.reverse();
+                    let result = execute_function(
+                        module,
+                        function_data.function_index,
+                        &args,
+                        &function_data.captured_env,
+                        feedback,
+                        pools,
+                    );
+                    pools.return_args(args);
+                    result
+                }?;
                 stack.push(result);
+                pc += 1;
+            }
+            Instr::CallNative(native) => {
+                let value = as_number(&stack.pop().expect("CallNative needs one operand"));
+                stack.push(Value::Number(match native {
+                    NativeFn::Sqrt => value.sqrt(),
+                    NativeFn::Log => value.ln(),
+                }));
                 pc += 1;
             }
             Instr::Return => {
@@ -371,4 +442,10 @@ fn execute_function(
             }
         }
     }
+}
+
+fn binary_number(stack: &mut Vec<Value>, op: impl FnOnce(f64, f64) -> f64) {
+    let b = stack.pop().expect("binary operation needs two operands");
+    let a = stack.pop().expect("binary operation needs two operands");
+    stack.push(Value::Number(op(as_number(&a), as_number(&b))));
 }

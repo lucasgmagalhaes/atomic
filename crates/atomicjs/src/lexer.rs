@@ -13,6 +13,7 @@ pub enum Token {
     Let,
     Const,
     For,
+    If,
     Return,
     LParen,
     RParen,
@@ -26,7 +27,12 @@ pub enum Token {
     PlusAssign,
     Increment,
     Plus,
+    Star,
+    Slash,
+    Percent,
     Less,
+    Greater,
+    StarAssign,
     Eof,
 }
 
@@ -61,6 +67,19 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, LexError> {
                     i += 1;
                 }
             }
+            if i < chars.len() && matches!(chars[i], 'e' | 'E') {
+                i += 1;
+                if i < chars.len() && matches!(chars[i], '+' | '-') {
+                    i += 1;
+                }
+                let exponent_start = i;
+                while i < chars.len() && chars[i].is_ascii_digit() {
+                    i += 1;
+                }
+                if exponent_start == i {
+                    return Err(LexError("invalid scientific number literal".into()));
+                }
+            }
             let text: String = chars[start..i].iter().collect();
             let value: f64 = text
                 .parse()
@@ -80,6 +99,7 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, LexError> {
                 "let" => Token::Let,
                 "const" => Token::Const,
                 "for" => Token::For,
+                "if" => Token::If,
                 "return" => Token::Return,
                 _ => Token::Identifier(text),
             };
@@ -122,6 +142,27 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, LexError> {
             }
             '<' => {
                 tokens.push(Token::Less);
+                i += 1;
+            }
+            '>' => {
+                tokens.push(Token::Greater);
+                i += 1;
+            }
+            '*' => {
+                if i + 1 < chars.len() && chars[i + 1] == '=' {
+                    tokens.push(Token::StarAssign);
+                    i += 2;
+                } else {
+                    tokens.push(Token::Star);
+                    i += 1;
+                }
+            }
+            '/' => {
+                tokens.push(Token::Slash);
+                i += 1;
+            }
+            '%' => {
+                tokens.push(Token::Percent);
                 i += 1;
             }
             '+' => {

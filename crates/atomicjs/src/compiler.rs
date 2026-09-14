@@ -16,7 +16,7 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use crate::ast::{BinOp, Expr, Stmt};
-use crate::bytecode::{BytecodeFunction, BytecodeModule, Const, Instr};
+use crate::bytecode::{BytecodeFunction, BytecodeModule, Const, Instr, NativeFn};
 
 #[derive(Debug, PartialEq)]
 pub struct CompileError(pub String);
@@ -134,6 +134,11 @@ fn collect_locals_stmt(stmt: &Stmt, locals: &mut Vec<String>) {
                 collect_locals_stmt(s, locals);
             }
         }
+        Stmt::If { then_branch, .. } => {
+            for s in then_branch {
+                collect_locals_stmt(s, locals);
+            }
+        }
         Stmt::Block(stmts) => {
             for s in stmts {
                 collect_locals_stmt(s, locals);
@@ -233,8 +238,7 @@ impl Compiler {
     ) -> Result<(), CompileError> {
         match stmt {
             Stmt::Expr(expr) => {
-                self.compile_expr(expr, fb, parent, upvalues)?;
-                fb.borrow_mut().code.push(Instr::Pop);
+                self.compile_discard_expr(expr, fb, parent, upvalues)?;
             }
             Stmt::Let { name, value } | Stmt::Const { name, value } => {
                 self.compile_expr(value, fb, parent, upvalues)?;
@@ -274,13 +278,25 @@ impl Compiler {
                 for s in body {
                     self.compile_stmt(s, fb, parent, upvalues)?;
                 }
-                self.compile_expr(update, fb, parent, upvalues)?;
-                fb.borrow_mut().code.push(Instr::Pop); // the update's value is always discarded
+                self.compile_discard_expr(update, fb, parent, upvalues)?;
                 fb.borrow_mut().code.push(Instr::Jump(loop_start));
                 let loop_end = fb.borrow().code.len();
                 match &mut fb.borrow_mut().code[jump_if_false_idx] {
                     Instr::JumpIfFalse(target) => *target = loop_end,
                     _ => unreachable!("jump_if_false_idx was recorded right after pushing it"),
+                }
+            }
+            Stmt::If { cond, then_branch } => {
+                self.compile_expr(cond, fb, parent, upvalues)?;
+                let jump = fb.borrow().code.len();
+                fb.borrow_mut().code.push(Instr::JumpIfFalse(usize::MAX));
+                for stmt in then_branch {
+                    self.compile_stmt(stmt, fb, parent, upvalues)?;
+                }
+                let end = fb.borrow().code.len();
+                match &mut fb.borrow_mut().code[jump] {
+                    Instr::JumpIfFalse(target) => *target = end,
+                    _ => unreachable!(),
                 }
             }
             Stmt::Return(value) => {
@@ -322,10 +338,10 @@ impl Compiler {
                 self.compile_expr(value, fb, parent, upvalues)?;
                 self.store_and_reload(target, fb, parent, upvalues)?;
             }
-            Expr::CompoundAssign { target, value } => {
+            Expr::CompoundAssign { op, target, value } => {
                 self.compile_expr(target, fb, parent, upvalues)?;
                 self.compile_expr(value, fb, parent, upvalues)?;
-                fb.borrow_mut().code.push(Instr::Add);
+                fb.borrow_mut().code.push(bin_instr(*op));
                 self.store_and_reload(target, fb, parent, upvalues)?;
             }
             Expr::Increment { target, .. } => {
@@ -341,11 +357,26 @@ impl Compiler {
                 self.compile_expr(left, fb, parent, upvalues)?;
                 self.compile_expr(right, fb, parent, upvalues)?;
                 fb.borrow_mut().code.push(match op {
-                    BinOp::Add => Instr::Add,
-                    BinOp::Less => Instr::Lt,
+                    _ => bin_instr(*op),
                 });
             }
             Expr::Call { callee, args } => {
+                if args.len() == 1 {
+                    if let Expr::Member { object, property } = &**callee {
+                        if matches!(&**object, Expr::Identifier(name) if name == "Math") {
+                            let native = match property.as_str() {
+                                "sqrt" => Some(NativeFn::Sqrt),
+                                "log" => Some(NativeFn::Log),
+                                _ => None,
+                            };
+                            if let Some(native) = native {
+                                self.compile_expr(&args[0], fb, parent, upvalues)?;
+                                fb.borrow_mut().code.push(Instr::CallNative(native));
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
                 for arg in args {
                     self.compile_expr(arg, fb, parent, upvalues)?;
                 }
@@ -382,6 +413,43 @@ impl Compiler {
         Ok(())
     }
 
+    /// Compile an expression whose value is provably discarded. Assignments
+    /// and increments otherwise reload the stored value only for the caller
+    /// to immediately `Pop` it; avoiding that pair removes two dispatches
+    /// per loop iteration in the spike's reference programs.
+    fn compile_discard_expr(
+        &mut self,
+        expr: &Expr,
+        fb: &Scope,
+        parent: Option<&Scope>,
+        upvalues: &mut Vec<u32>,
+    ) -> Result<(), CompileError> {
+        match expr {
+            Expr::Assign { target, value } => {
+                self.compile_expr(value, fb, parent, upvalues)?;
+                self.store(target, fb, parent, upvalues)?;
+            }
+            Expr::CompoundAssign { op, target, value } => {
+                self.compile_expr(target, fb, parent, upvalues)?;
+                self.compile_expr(value, fb, parent, upvalues)?;
+                fb.borrow_mut().code.push(bin_instr(*op));
+                self.store(target, fb, parent, upvalues)?;
+            }
+            Expr::Increment { target, .. } => {
+                self.compile_expr(target, fb, parent, upvalues)?;
+                let one_idx = fb.borrow_mut().push_const(Const::Number(1.0));
+                fb.borrow_mut().code.push(Instr::LoadConst(one_idx));
+                fb.borrow_mut().code.push(Instr::Add);
+                self.store(target, fb, parent, upvalues)?;
+            }
+            _ => {
+                self.compile_expr(expr, fb, parent, upvalues)?;
+                fb.borrow_mut().code.push(Instr::Pop);
+            }
+        }
+        Ok(())
+    }
+
     /// Assignment/increment targets are always a plain identifier in this
     /// spike's scope (checked against all five reference programs +
     /// variants — none assign through a member expression). Stores the
@@ -389,6 +457,17 @@ impl Compiler {
     /// the store also has a well-defined expression value (used by
     /// `Assign`/`CompoundAssign`/`Increment` alike).
     fn store_and_reload(
+        &mut self,
+        target: &Expr,
+        fb: &Scope,
+        parent: Option<&Scope>,
+        upvalues: &mut Vec<u32>,
+    ) -> Result<(), CompileError> {
+        self.store(target, fb, parent, upvalues)?;
+        self.compile_expr(target, fb, parent, upvalues)
+    }
+
+    fn store(
         &mut self,
         target: &Expr,
         fb: &Scope,
@@ -406,14 +485,22 @@ impl Compiler {
         match resolve(name, fb, parent, upvalues)? {
             SlotRef::Local(i) => {
                 fb.borrow_mut().code.push(Instr::StoreLocal(i));
-                fb.borrow_mut().code.push(Instr::LoadLocal(i));
             }
             SlotRef::Upvalue(i) => {
                 fb.borrow_mut().code.push(Instr::StoreUpvalue(i));
-                fb.borrow_mut().code.push(Instr::LoadUpvalue(i));
             }
         }
         Ok(())
+    }
+}
+
+fn bin_instr(op: BinOp) -> Instr {
+    match op {
+        BinOp::Add => Instr::Add,
+        BinOp::Mul => Instr::Mul,
+        BinOp::Div => Instr::Div,
+        BinOp::Mod => Instr::Mod,
+        BinOp::Less => Instr::Lt,
     }
 }
 

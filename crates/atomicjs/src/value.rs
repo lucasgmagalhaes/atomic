@@ -62,10 +62,9 @@ pub struct FunctionData {
     pub captured_env: Vec<Rc<RefCell<Value>>>,
 }
 
-/// Cheap, sampled-not-per-opcode counters a future tiering orchestrator would
-/// need (see ATOMIC_JS_TIERING.md §3) — defined now so `vm.rs` can increment
-/// them starting in step 4, without this spike building any consumer of the
-/// data. Nothing reads this in the spike itself.
+/// Optional exact counters exposed by `run_source_with_feedback` for tests
+/// and future tiering experiments. Normal `run_source` execution deliberately
+/// pays no profiling cost while this spike has no feedback consumer.
 #[derive(Debug, Default)]
 pub struct FunctionFeedback {
     pub call_count: u32,

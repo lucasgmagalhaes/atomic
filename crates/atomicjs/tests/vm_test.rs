@@ -146,3 +146,14 @@ fn feedback_is_zero_for_a_function_that_is_never_called() {
     let (_value, feedback) = run_source_with_feedback(source).unwrap();
     assert_eq!(feedback[0].call_count, 0);
 }
+
+#[test]
+fn executes_hot_loop_language_subset_and_native_math() {
+    let source = r#"
+        let x = 5e0;
+        x = x * 2 / 2 % 7;
+        if (x > 3) { x *= Math.sqrt(4) + Math.log(1); }
+        x;
+    "#;
+    assert_eq!(number(source), 10.0);
+}

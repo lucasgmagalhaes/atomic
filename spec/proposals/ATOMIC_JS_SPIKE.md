@@ -909,6 +909,37 @@ request to decide on the numbers as they stand.
 **Next step, per §10:** raise this with the user explicitly as a new scope decision,
 same weight as 2026-08-26's — not auto-promoted into `spec/ROADMAP.md`.
 
+### Post-verdict implementation update: interpreter fast paths
+
+Following a focused performance review, three in-scope interpreter changes were applied
+without adding Shapes, inline caches, a GC, or a JIT:
+
+1. Normal `run_source` execution now uses a zero-cost feedback sink; exact call/loop
+   counters remain available through `run_source_with_feedback` for tests and tooling.
+2. `CALL 0` borrows a closure's captured environment instead of cloning its
+   `Vec<Rc<...>>`, and bypasses argument-buffer-pool bookkeeping that has no work to do
+   for zero arguments.
+3. The compiler has an effect-only path for discarded assignments and increments, so it
+   no longer emits `StoreLocal`/`LoadLocal`/`Pop` when the reload is provably unused.
+
+All 52 AtomicJS tests pass, including the exact-feedback and closure-isolation tests.
+On the same Darwin development machine, with release builds and
+`hyperfine --shell=none --warmup 10 --runs 100`, the latest comparison was:
+
+| Program | atomicjs elapsed (mean ± σ) | quickjs-ng elapsed (mean ± σ) | Slowdown |
+| --- | --- | --- | --- |
+| `sum` | 32.5 ms ± 8.2 ms | 30.0 ms ± 13.0 ms | 1.08× |
+| `props` | 52.1 ms ± 12.3 ms | 32.6 ms ± 10.6 ms | 1.60× |
+| `closures` | 61.9 ms ± 14.5 ms | 56.4 ms ± 19.5 ms | 1.10× |
+
+The `closures` result is the expected causal win: compared with the prior ~88 ms local
+round, it is materially lower after removing the per-call environment clone and
+unneeded instrumentation. `sum` and `props` also remain within the guardrail, but their
+run-to-run variance is still too high to claim a precise percentage improvement. A quiet,
+dedicated host remains necessary for a final comparative claim. The remaining structural
+cost for `props` is still the deliberately simple `HashMap<String, Value>` object model;
+solving that requires a separately authorized Shapes/inline-cache milestone.
+
 ## Appendix — salvaged principles from the rejected proposal
 
 These remain correct engineering principles *if* this spike (or, contingent on a green

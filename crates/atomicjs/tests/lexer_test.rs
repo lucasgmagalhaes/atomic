@@ -81,6 +81,30 @@ fn tokenizes_less_than_and_assign() {
 }
 
 #[test]
+fn tokenizes_hot_loop_operators_and_scientific_numbers() {
+    assert_eq!(
+        tokenize("if x > 1e12 { x *= 2 / 3 % 4; }").unwrap(),
+        vec![
+            Token::If,
+            Token::Identifier("x".into()),
+            Token::Greater,
+            Token::Number(1e12),
+            Token::LBrace,
+            Token::Identifier("x".into()),
+            Token::StarAssign,
+            Token::Number(2.0),
+            Token::Slash,
+            Token::Number(3.0),
+            Token::Percent,
+            Token::Number(4.0),
+            Token::Semicolon,
+            Token::RBrace,
+            Token::Eof,
+        ]
+    );
+}
+
+#[test]
 fn skips_whitespace_including_newlines_and_tabs() {
     let tokens = tokenize("  1\n\t2  ").unwrap();
     assert_eq!(

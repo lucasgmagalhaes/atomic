@@ -112,6 +112,21 @@ fn for_loop_compiles_a_backward_jump_and_a_patched_forward_jump() {
 }
 
 #[test]
+fn discards_assignment_values_without_reloading_them() {
+    let module = compile_source("let i = 0; i++; 0;");
+    let top_level = &module.functions[module.top_level];
+    assert!(
+        !top_level.code.windows(3).any(|window| matches!(
+            window,
+            [Instr::Add, Instr::StoreLocal(_), Instr::LoadLocal(_)]
+                | [Instr::Add, Instr::StoreUpvalue(_), Instr::LoadUpvalue(_)]
+        )),
+        "discarded assignment should not reload a value only to pop it: {:?}",
+        top_level.code
+    );
+}
+
+#[test]
 fn rejects_assignment_target_that_is_not_an_identifier() {
     // Not reachable from any of the five reference programs, but the
     // compiler must still fail closed rather than silently mis-compile.

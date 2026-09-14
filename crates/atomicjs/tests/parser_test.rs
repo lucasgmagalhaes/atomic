@@ -129,7 +129,8 @@ fn parses_return_with_and_without_value() {
 fn parses_compound_assignment() {
     let program = parse_source("total += i;");
     match &program[0] {
-        Stmt::Expr(Expr::CompoundAssign { target, value }) => {
+        Stmt::Expr(Expr::CompoundAssign { op, target, value }) => {
+            assert_eq!(*op, BinOp::Add);
             assert!(matches!(**target, Expr::Identifier(ref n) if n == "total"));
             assert!(matches!(**value, Expr::Identifier(ref n) if n == "i"));
         }

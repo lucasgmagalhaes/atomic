@@ -65,6 +65,7 @@ impl Parser {
             Token::Const => self.parse_const(),
             Token::Function => self.parse_function_decl(),
             Token::For => self.parse_for(),
+            Token::If => self.parse_if(),
             Token::Return => self.parse_return(),
             Token::LBrace => self.parse_block(),
             _ => {
@@ -168,6 +169,20 @@ impl Parser {
         }
     }
 
+    fn parse_if(&mut self) -> Result<Stmt, ParseError> {
+        self.expect(&Token::If)?;
+        self.expect(&Token::LParen)?;
+        let cond = self.parse_expr()?;
+        self.expect(&Token::RParen)?;
+        self.expect(&Token::LBrace)?;
+        let mut then_branch = Vec::new();
+        while !self.check(&Token::RBrace) {
+            then_branch.push(self.parse_statement()?);
+        }
+        self.expect(&Token::RBrace)?;
+        Ok(Stmt::If { cond, then_branch })
+    }
+
     fn parse_block(&mut self) -> Result<Stmt, ParseError> {
         self.expect(&Token::LBrace)?;
         let mut stmts = Vec::new();
@@ -194,10 +209,16 @@ impl Parser {
                 value: Box::new(value),
             });
         }
-        if self.check(&Token::PlusAssign) {
+        if self.check(&Token::PlusAssign) || self.check(&Token::StarAssign) {
+            let op = if self.check(&Token::PlusAssign) {
+                BinOp::Add
+            } else {
+                BinOp::Mul
+            };
             self.advance();
             let value = self.parse_assignment()?;
             return Ok(Expr::CompoundAssign {
+                op,
                 target: Box::new(left),
                 value: Box::new(value),
             });
@@ -207,11 +228,35 @@ impl Parser {
 
     fn parse_relational(&mut self) -> Result<Expr, ParseError> {
         let mut left = self.parse_additive()?;
-        while self.check(&Token::Less) {
+        while self.check(&Token::Less) || self.check(&Token::Greater) {
+            let greater = self.check(&Token::Greater);
             self.advance();
             let right = self.parse_additive()?;
+            let previous = left;
+            left = if greater {
+                Expr::Binary {
+                    op: BinOp::Less,
+                    left: Box::new(right),
+                    right: Box::new(previous),
+                }
+            } else {
+                Expr::Binary {
+                    op: BinOp::Less,
+                    left: Box::new(previous),
+                    right: Box::new(right),
+                }
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_additive(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_multiplicative()?;
+        while self.check(&Token::Plus) {
+            self.advance();
+            let right = self.parse_multiplicative()?;
             left = Expr::Binary {
-                op: BinOp::Less,
+                op: BinOp::Add,
                 left: Box::new(left),
                 right: Box::new(right),
             };
@@ -219,13 +264,18 @@ impl Parser {
         Ok(left)
     }
 
-    fn parse_additive(&mut self) -> Result<Expr, ParseError> {
+    fn parse_multiplicative(&mut self) -> Result<Expr, ParseError> {
         let mut left = self.parse_unary()?;
-        while self.check(&Token::Plus) {
-            self.advance();
+        while self.check(&Token::Star) || self.check(&Token::Slash) || self.check(&Token::Percent) {
+            let op = match self.advance() {
+                Token::Star => BinOp::Mul,
+                Token::Slash => BinOp::Div,
+                Token::Percent => BinOp::Mod,
+                _ => unreachable!(),
+            };
             let right = self.parse_unary()?;
             left = Expr::Binary {
-                op: BinOp::Add,
+                op,
                 left: Box::new(left),
                 right: Box::new(right),
             };

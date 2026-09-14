@@ -35,6 +35,9 @@ pub enum Instr {
     SetProp(u32),
     NewObject,
     Add,
+    Mul,
+    Div,
+    Mod,
     Lt,
     Jump(usize),
     JumpIfFalse(usize),
@@ -46,8 +49,15 @@ pub enum Instr {
         captures: Vec<u32>,
     },
     Call(u32),
+    CallNative(NativeFn),
     Return,
     Pop,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum NativeFn {
+    Sqrt,
+    Log,
 }
 
 #[derive(Debug, Clone, PartialEq)]

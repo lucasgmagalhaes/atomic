@@ -4,6 +4,9 @@
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BinOp {
     Add,
+    Mul,
+    Div,
+    Mod,
     Less,
 }
 
@@ -25,6 +28,7 @@ pub enum Expr {
         value: Box<Expr>,
     },
     CompoundAssign {
+        op: BinOp,
         target: Box<Expr>,
         value: Box<Expr>,
     },
@@ -73,6 +77,10 @@ pub enum Stmt {
         cond: Expr,
         update: Expr,
         body: Vec<Stmt>,
+    },
+    If {
+        cond: Expr,
+        then_branch: Vec<Stmt>,
     },
     Return(Option<Expr>),
     Block(Vec<Stmt>),

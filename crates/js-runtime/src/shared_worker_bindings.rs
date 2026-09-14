@@ -40,12 +40,13 @@
 //!
 //! No cross-context close-tracking ("close the shared worker once every
 //! connected context has gone away") — a `SharedWorker`'s underlying OS
-//! thread stays alive until every `Sender` clone into it is dropped,
-//! which only happens once the owning `JSRuntime` itself is torn down
-//! (real spec's own reference-counted close semantics would need a live
-//! connection-count per instance with each `Context::drop` decrementing
-//! it; left for a follow-up, same "documented, narrower than full spec"
-//! shape every other partial feature here already has). No
+//! thread stays alive for as long as its owning `JSRuntime` does; it's
+//! only actually torn down (its `Sender` dropped and its thread joined)
+//! by [`evict_runtime`], called from `Runtime::drop` — real spec's own
+//! reference-counted close semantics would need a live connection-count
+//! per instance with each `Context::drop` decrementing it; left for a
+//! follow-up, same "documented, narrower than full spec" shape every
+//! other partial feature here already has. No
 //! `.port.close()` telling the *worker side* a connection is gone. No
 //! `importScripts`, no nested workers — same cuts
 //! [`crate::worker_bindings`] already documents. A message aimed at a
@@ -83,11 +84,6 @@ enum ToWorker {
 struct SharedInstance {
     to_worker: mpsc::Sender<ToWorker>,
     from_worker: mpsc::Receiver<(u32, Value)>,
-    // Only read by `shutdown_all_for_tests` (`#[cfg(test)]`) — a real host
-    // has no per-Context place to join this from (see this module's own
-    // doc: an instance has no single owning `Context`), so it's left to
-    // join implicitly at process exit outside tests.
-    #[cfg_attr(not(test), allow(dead_code))]
     join: Option<thread::JoinHandle<()>>,
 }
 
@@ -564,9 +560,8 @@ pub(crate) unsafe fn pump(ctx: *mut sys::JSContext) -> usize {
 /// `cleanup_standard_globals`, same ordering requirement every other
 /// module's `cleanup(ctx)` already documents. An instance whose last
 /// connection was just removed here still isn't torn down (see this
-/// module's own doc's scope-cut section): its OS thread only stops once
-/// every `Sender` clone into it is dropped, which happens implicitly when
-/// the owning `JSRuntime` itself frees every `Context` sharing it.
+/// module's own doc's scope-cut section): its OS thread only stops when
+/// [`evict_runtime`] runs, at `Runtime::drop`.
 pub(crate) unsafe fn cleanup(ctx: *mut sys::JSContext) {
     let owned: Vec<u32> = CONNECTIONS.with(|conns| {
         conns
@@ -583,21 +578,33 @@ pub(crate) unsafe fn cleanup(ctx: *mut sys::JSContext) {
     }
 }
 
-/// Joins and drops every instance still registered on this thread. Real
-/// `SharedWorker` instances have no natural single owning `Context` to
-/// tear them down from (that's the whole point of "shared"), so this is
-/// deliberately not wired into any automatic per-`Context` teardown path —
-/// exposed only for tests that want every spawned worker OS thread joined
-/// before the test process exits, rather than left blocked on `recv()`
-/// until the process itself ends.
-#[cfg(test)]
-pub(crate) fn shutdown_all_for_tests() {
-    let all: Vec<((usize, String), SharedInstance)> =
-        INSTANCES.with(|inst| inst.borrow_mut().drain().collect());
-    for (_, mut instance) in all {
-        drop(instance.to_worker);
-        if let Some(join) = instance.join.take() {
-            let _ = join.join();
+/// Joins and drops every instance keyed to `rt` — called from
+/// [`crate::Runtime`]'s own `Drop` impl, alongside `class_registry::
+/// cleanup_runtime`, for the exact same reason: `rt` (a raw `JSRuntime`
+/// pointer) can be reused by a later `JS_NewRuntime()` call once this one
+/// is freed (`CLAUDE.md`'s own documented gotcha on this class of bug),
+/// and [`INSTANCES`] is keyed by that same raw pointer. Without this, a
+/// later, logically-unrelated `Runtime` allocated at the same address
+/// could silently collide with — and receive messages from — a worker
+/// thread left over from this one. Real `SharedWorker` instances have no
+/// natural single owning `Context` to tear them down from (that's the
+/// whole point of "shared"), so `Runtime::drop` is the only correct
+/// teardown point; every `Context` sharing `rt` is necessarily already
+/// gone by the time a `Runtime` itself drops.
+pub(crate) fn evict_runtime(rt: usize) {
+    let keys: Vec<(usize, String)> = INSTANCES.with(|inst| {
+        inst.borrow()
+            .keys()
+            .filter(|(owner_rt, _)| *owner_rt == rt)
+            .cloned()
+            .collect()
+    });
+    for key in keys {
+        if let Some(mut instance) = INSTANCES.with(|inst| inst.borrow_mut().remove(&key)) {
+            drop(instance.to_worker);
+            if let Some(join) = instance.join.take() {
+                let _ = join.join();
+            }
         }
     }
 }

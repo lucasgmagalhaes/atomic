@@ -15,10 +15,12 @@ use quickjs_sys as sys;
 use std::ffi::CString;
 use std::os::raw::c_int;
 
+mod composition;
 mod custom_keyboard_input;
 mod focus_submit_drag_touch;
 mod pointer_mouse_wheel;
 
+use composition::composition_event_constructor;
 use custom_keyboard_input::{
     custom_event_constructor, input_event_constructor, keyboard_event_constructor,
 };
@@ -284,4 +286,5 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     register_subclass(ctx, "SubmitEvent", submit_event_constructor);
     register_subclass(ctx, "DragEvent", drag_event_constructor);
     register_subclass(ctx, "TouchEvent", touch_event_constructor);
+    register_subclass(ctx, "CompositionEvent", composition_event_constructor);
 }

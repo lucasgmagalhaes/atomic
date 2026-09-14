@@ -8,22 +8,22 @@
 // `#create` always had) via the `active` prop instead of a bundle-local
 // class.
 function AddProfile() {
-    const field = (id, label) => Row({}, Label({}, label), Input({ id, type: 'text' }));
+  const field = (id, label) => Row({}, Label({}, label), Input({ id, type: "text" }));
 
-    return Div(
-        { id: 'modal' },
-        field('field-name', 'Name'),
-        field('field-start-url', 'Start URL'),
-        field('field-email', 'Email'),
-        field('field-password', 'Password'),
-        field('field-proxy', 'Proxy'),
-        Div({ id: 'error', className: 'error' }),
-        Div(
-            { id: 'buttons' },
-            Button({ id: 'create', active: true, onClick: atomic.createProfileSubmit }, 'Create'),
-            Button({ id: 'cancel', onClick: atomic.cancelAddProfile }, 'Cancel')
-        )
-    );
+  return Div(
+    { id: "modal" },
+    field("field-name", "Name"),
+    field("field-start-url", "Start URL"),
+    field("field-email", "Email"),
+    field("field-password", "Password"),
+    field("field-proxy", "Proxy"),
+    Div({ id: "error", className: "error" }),
+    Div(
+      { id: "buttons" },
+      Button({ id: "create", active: true, onClick: atomic.createProfileSubmit }, "Create"),
+      Button({ id: "cancel", onClick: atomic.cancelAddProfile }, "Cancel"),
+    ),
+  );
 }
 
-mount('root', AddProfile());
+mount("root", AddProfile());

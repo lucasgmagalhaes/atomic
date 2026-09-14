@@ -17,7 +17,7 @@
 
 **Needed**
 
-- [ ] `location`/`history` write-side navigation (`location.href = ...`, `assign`/`replace`/`reload`) — no channel yet for JS to ask its host to actually navigate.
+- [x] `location`/`history` write-side navigation (`location.href = ...`, `assign`/`replace`/`reload`) — done (`crates/js-runtime/src/location.rs`): `location.href`'s setter and `assign(url)`/`replace(url)`/`reload()` all write into `HostState.pending_navigation`, the same real "JS requests navigation, host performs it" channel a real `<a href>` click's default action already used (`dom_bindings::forms::run_default_click_action`), consumed by `profile-worker`'s `navigate_if_requested`. Scope cut: `assign`/`replace` request the identical real navigation — no distinct "replace this history entry" vs "push a new one" treatment (same-document `history.pushState`/`replaceState` remain the genuinely different, same-document-only mechanism this doesn't touch); same pre-existing limitation every `pending_navigation` writer has — only consumed after a command that calls `navigate_if_requested`, so a bare timer callback setting `location.href` with no follow-up command won't navigate until the next one runs.
 - [ ] Viewport APIs (`visualViewport`, resize-driven re-layout wiring).
 - [ ] `pagehide`, visibility/focus lifecycle beyond the `page_visibility` static placeholder, bfcache policy.
 - [ ] Sandboxed documents, multiple browsing contexts: no `iframe`/frame tree exists anywhere in `dom` — popup policy and cross-window messaging are structurally blocked on this.

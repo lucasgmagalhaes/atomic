@@ -16,10 +16,13 @@ use super::helpers::js_string_literal;
 /// real bubbling `"mouseover"` on the new one, via the nearest
 /// id-addressable ancestor *element* of each (same real limitation
 /// `input_commands::helpers::nearest_id_ancestor`'s own doc already gives
-/// `CLICK_AT`). No-op (no dispatch at all) when the hit-tested node
-/// resolves to the same id-addressable ancestor as before, matching a real
-/// browser not re-firing `mouseover`/`mouseout` for movement within the
-/// same element.
+/// `CLICK_AT`) — plus real non-bubbling `"mouseleave"`/`"mouseenter"` on
+/// every id-addressable ancestor that dropped out of / entered the hover
+/// chain (see [`id_chain`]), same real "diff the whole ancestor set, not
+/// just the nearest node" semantics a real browser uses for these two. No
+/// dispatch at all when the hit-tested node resolves to the same
+/// id-addressable ancestor as before, matching a real browser not
+/// re-firing any of these four for movement within the same element.
 ///
 /// Hover is tracked by that ancestor *element*'s own `NodeId`, not the raw
 /// hit-tested leaf — real, deliberate: a leaf hit-test can land on a text
@@ -33,13 +36,11 @@ use super::helpers::js_string_literal;
 /// correct (CSS `:hover` matches elements, never text nodes) and stable
 /// across a listener's own DOM writes.
 ///
-/// Scope cuts (`spec/matrix/events.md` line 17): `relatedTarget` stays
-/// `null` on both events — `Context`'s only entry point is
+/// Scope cut (`spec/matrix/events.md` line 17): `relatedTarget` stays
+/// `null` on all four events — `Context`'s only entry point is
 /// `eval(source: &str)` (see `js_string_literal`'s own doc), so
 /// cross-referencing two live JS element objects inside one generated
-/// eval string isn't supported without a new binding. Non-bubbling
-/// `mouseenter`/`mouseleave` are NOT dispatched here — they need an
-/// ancestor-*set* diff, not a single-node dispatch.
+/// eval string isn't supported without a new binding.
 pub(crate) fn dispatch_mouse_move(
     page: &mut Page,
     width: u32,
@@ -71,20 +72,67 @@ pub(crate) fn dispatch_mouse_move(
     }
 
     if previous_node != new_node {
+        let (old_chain, new_chain) = {
+            let dom_ref = page.ctx.dom().ok_or("no DOM available")?;
+            (
+                previous_node
+                    .map(|n| id_chain(dom_ref, n))
+                    .unwrap_or_default(),
+                new_node.map(|n| id_chain(dom_ref, n)).unwrap_or_default(),
+            )
+        };
+
         if let Some(node) = previous_node {
             let dom_ref = page.ctx.dom().ok_or("no DOM available")?;
             if let Some(id) = dom_ref.attribute(node, "id").map(str::to_string) {
-                dispatch_hover_event(&page.ctx, &id, "mouseout")?;
+                dispatch_hover_event(&page.ctx, &id, "mouseout", true)?;
             }
         }
+        // Non-bubbling mouseleave: every id-addressable ancestor that was
+        // in the old chain but isn't in the new one (real spec order -
+        // innermost first - doesn't matter here since each dispatch is
+        // target-phase-only, no bubbling to interact with).
+        for (node, id) in &old_chain {
+            if !new_chain.iter().any(|(n, _)| n == node) {
+                dispatch_hover_event(&page.ctx, id, "mouseleave", false)?;
+            }
+        }
+
         if let Some(node) = new_node {
             let dom_ref = page.ctx.dom().ok_or("no DOM available")?;
             if let Some(id) = dom_ref.attribute(node, "id").map(str::to_string) {
-                dispatch_hover_event(&page.ctx, &id, "mouseover")?;
+                dispatch_hover_event(&page.ctx, &id, "mouseover", true)?;
+            }
+        }
+        // Non-bubbling mouseenter: symmetric - every id-addressable
+        // ancestor newly in the hover chain.
+        for (node, id) in &new_chain {
+            if !old_chain.iter().any(|(n, _)| n == node) {
+                dispatch_hover_event(&page.ctx, id, "mouseenter", false)?;
             }
         }
     }
     Ok(())
+}
+
+/// Walks every ancestor of `node` (including `node` itself) up to the
+/// root, collecting each one that carries a real `id` attribute - unlike
+/// `nearest_id_ancestor_node`, this doesn't stop at the first match, since
+/// `mouseenter`/`mouseleave` needs the *whole* id-addressable ancestor
+/// chain to diff against the previous hover's chain (`dispatch_mouse_move`
+/// itself only ever anchors hover to the *nearest* one, so a caller
+/// passing that anchor node in here still walks upward through every
+/// further id'd ancestor above it).
+fn id_chain(dom: &Dom, node: NodeId) -> Vec<(NodeId, String)> {
+    let mut chain = Vec::new();
+    let mut current = Some(node);
+    while let Some(id) = current {
+        if let Some(value) = dom.attribute(id, "id") {
+            chain.push((id, value.to_string()));
+        }
+        current = dom.get(id).and_then(|n| n.parent);
+    }
+    chain
 }
 
 /// Same walk `input_commands::helpers::nearest_id_ancestor` does, but
@@ -102,12 +150,13 @@ fn nearest_id_ancestor_node(dom: &Dom, node: NodeId) -> Option<NodeId> {
     None
 }
 
-fn dispatch_hover_event(ctx: &Context, id: &str, kind: &str) -> Result<(), String> {
+fn dispatch_hover_event(ctx: &Context, id: &str, kind: &str, bubbles: bool) -> Result<(), String> {
     let script = format!(
-        "(function(){{ var el = document.getElementById({id}); if (el === null) throw {missing}; el.dispatchEvent(new MouseEvent({kind}, {{ bubbles: true, cancelable: true }})); }})();",
+        "(function(){{ var el = document.getElementById({id}); if (el === null) throw {missing}; el.dispatchEvent(new MouseEvent({kind}, {{ bubbles: {bubbles}, cancelable: {bubbles} }})); }})();",
         id = js_string_literal(id),
         missing = js_string_literal(&format!("no element with id \"{id}\"")),
         kind = js_string_literal(kind),
+        bubbles = bubbles,
     );
     ctx.eval(&script, "<pane hover>")
         .map(|_| ())

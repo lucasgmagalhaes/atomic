@@ -1,3 +1,4 @@
+pub mod columns;
 pub mod flex;
 pub mod grid;
 pub mod hit_test;
@@ -11,6 +12,7 @@ pub mod tree;
 pub use hit_test::hit_test;
 pub use stacking::{establishes_stacking_context, find_layer_roots};
 
+pub use columns::layout_column_children;
 pub use flex::layout_flex_children;
 pub use grid::layout_grid_children;
 pub use layout::layout_block;

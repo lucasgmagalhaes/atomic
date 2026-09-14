@@ -497,6 +497,13 @@ pub(super) fn apply_declaration(style: &mut ComputedStyle, decl: &Declaration) {
                 style.font_family = Some(f);
             }
         }
+        "column-count" => {
+            if let Some(Token::Number(n)) = decl.value.first() {
+                if *n >= 1.0 {
+                    style.column_count = Some(*n as u32);
+                }
+            }
+        }
         "list-style-type" => {
             if let Some(Token::Ident(v)) = decl.value.first() {
                 if let Some(t) = parse_list_style_type(v) {

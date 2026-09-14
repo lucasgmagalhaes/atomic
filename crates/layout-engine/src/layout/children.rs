@@ -85,6 +85,23 @@ pub(crate) fn layout_children(
     } else if box_.style.display == Display::Table {
         let result = crate::table::layout_table_children(box_, content_width, content_x, content_y);
         result.height
+    } else if let Some(column_count) = box_.style.column_count {
+        // Real `column-count` (`crate::columns`) - checked on `column_count`
+        // itself, not `display`, since real multicol isn't a `display`
+        // keyword (unlike `Flex`/`Grid`/`Table` above) - it applies to any
+        // block container. Checked last among these so `display: flex`/
+        // `grid`/`table` combined with `column-count` (a real, rare edge
+        // case) keeps using its own display's own layout, matching this
+        // crate's existing precedence for every other combination of
+        // simultaneously-set layout-mode properties.
+        let result = crate::columns::layout_column_children(
+            box_,
+            column_count,
+            content_width,
+            content_x,
+            content_y,
+        );
+        result.height
     } else {
         let mut cursor_y = content_y;
         let mut left_edge_y = content_y;

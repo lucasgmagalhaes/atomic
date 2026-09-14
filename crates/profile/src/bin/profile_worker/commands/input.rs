@@ -45,6 +45,7 @@ impl<'rt> WorkerState<'rt> {
                         x,
                         y,
                         self.scroll_top,
+                        &mut self.last_click,
                     );
                     self.sync_scroll();
                     self.writer.publish(&self.page.render(

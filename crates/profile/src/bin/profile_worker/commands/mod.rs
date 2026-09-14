@@ -46,6 +46,10 @@ pub(super) struct WorkerState<'rt> {
     pub(super) renderer: GpuRenderer,
     pub(super) writer: ipc::FrameWriter,
     pub(super) focused_id: Option<String>,
+    /// Last `CLICK_AT` target id + timestamp, for real `dblclick`
+    /// detection - see `input_commands::click::dispatch_click_at`'s own
+    /// doc.
+    pub(super) last_click: Option<(String, Instant)>,
     pub(super) scroll_top: f64,
     pub(super) resize_count: u32,
     pub(super) frame_interval: Duration,

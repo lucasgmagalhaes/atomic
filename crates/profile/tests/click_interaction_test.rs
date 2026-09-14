@@ -213,6 +213,82 @@ fn get_bounding_client_rect_reflects_the_real_rendered_layout() {
 }
 
 #[test]
+fn two_quick_clicks_on_the_same_element_dispatch_a_real_dblclick() {
+    let page_addr = serve_html_once(
+        r##"<div id="target">click me</div>
+        <style>#target { width: 100px; height: 40px; }</style>
+        <script>document.getElementById("target").addEventListener("dblclick", function(){ document.getElementById("target").textContent = "double-clicked!"; });</script>"##,
+    );
+
+    let name = unique_shmem_name("dblclick");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+    profile
+        .navigate(&format!("http://{page_addr}/"))
+        .expect("protocol should not fail")
+        .expect("navigate should succeed");
+
+    profile
+        .click_at(10.0, 10.0)
+        .expect("protocol should not fail")
+        .expect("first click should succeed");
+    let frame_after_first = profile.latest_frame().unwrap();
+
+    let result = profile
+        .click_at(10.0, 10.0)
+        .expect("protocol should not fail");
+    assert!(
+        result.is_ok(),
+        "second quick click should succeed: {result:?}"
+    );
+
+    assert_ne!(
+        frame_after_first,
+        profile.latest_frame().unwrap(),
+        "the dblclick listener's real textContent mutation should visibly change rendered pixels"
+    );
+
+    profile.quit();
+}
+
+#[test]
+fn a_third_click_does_not_redispatch_dblclick() {
+    let page_addr = serve_html_once(
+        r##"<div id="target">click me</div>
+        <style>#target { width: 100px; height: 40px; }</style>
+        <script>
+          let count = 0;
+          document.getElementById("target").addEventListener("dblclick", function(){
+            count += 1;
+            document.getElementById("target").textContent = "count:" + count;
+          });
+        </script>"##,
+    );
+
+    let name = unique_shmem_name("dblclick-third");
+    let mut profile = Profile::spawn(worker_path(), &name, 300, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+    profile
+        .navigate(&format!("http://{page_addr}/"))
+        .expect("protocol should not fail")
+        .expect("navigate should succeed");
+
+    profile.click_at(10.0, 10.0).unwrap().unwrap();
+    profile.click_at(10.0, 10.0).unwrap().unwrap();
+    let frame_after_double = profile.latest_frame().unwrap();
+
+    profile.click_at(10.0, 10.0).unwrap().unwrap();
+
+    assert_eq!(
+        frame_after_double,
+        profile.latest_frame().unwrap(),
+        "a third click right after a real dblclick should not immediately fire another one"
+    );
+
+    profile.quit();
+}
+
+#[test]
 fn click_at_then_type_key_types_into_a_real_focused_input() {
     let page_addr = serve_html_once(
         r##"<input id="field"><style>#field { width: 150px; height: 30px; }</style>"##,

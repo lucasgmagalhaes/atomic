@@ -267,6 +267,11 @@ fn main() {
         // fresh DOM the old id might not even exist in anymore (a fresh
         // `dom::Dom` starts with no focus of its own either).
         focused_id: None,
+        // Real dblclick-window state - see `WorkerState::last_click`'s own
+        // doc. Starts empty; nothing to reset on `RELOAD`/`NAVIGATE` beyond
+        // the natural fact that a stale id from before simply won't match
+        // a `click_id` computed against the fresh DOM.
+        last_click: None,
         // Real viewport scroll offset (see `SCROLL`'s own handling and
         // `Page::render`/`hit_test_at`'s docs) - reset to `0.0` on
         // `RELOAD`/`NAVIGATE` same as `focused_id`, since a fresh page always

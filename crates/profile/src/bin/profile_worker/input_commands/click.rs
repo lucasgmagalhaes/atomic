@@ -1,11 +1,18 @@
 //! `dispatch_click`/`dispatch_click_at` — split out from `input_commands.rs`.
 
+use std::time::{Duration, Instant};
+
 use js_runtime::Context;
 
 use crate::page::Page;
 
 use super::focus::{blur_element, focus_element};
 use super::helpers::{is_input_like, js_string_literal, nearest_id_ancestor, require_id_selector};
+
+/// Real, common OS/browser double-click window - no config surface here,
+/// same "one reasonable constant" convention `MAX_BUBBLE_DEPTH` etc.
+/// already use elsewhere in this engine.
+const DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(500);
 
 /// Dispatches a real `"click"` event at the `#id` element via the
 /// already-real `Node.prototype.dispatchEvent` JS binding - if the page's
@@ -49,6 +56,7 @@ pub(crate) fn dispatch_click_at(
     x: f64,
     y: f64,
     scroll_top: f64,
+    last_click: &mut Option<(String, Instant)>,
 ) -> Result<Option<String>, String> {
     let node = page
         .hit_test_at(width, height, x, y, scroll_top)
@@ -59,6 +67,22 @@ pub(crate) fn dispatch_click_at(
             .ok_or("no id-addressable element at or above that point")?
     };
     dispatch_click(&page.ctx, &format!("#{click_id}"))?;
+
+    // Real double-click: same id-addressable target, within the window,
+    // as the immediately preceding click. Fires right after the second
+    // "click" (real browser order), then resets - a third click starts a
+    // fresh sequence rather than firing another dblclick immediately.
+    let now = Instant::now();
+    let is_double = matches!(
+        last_click,
+        Some((id, at)) if id == &click_id && now.duration_since(*at) <= DOUBLE_CLICK_WINDOW
+    );
+    if is_double {
+        *last_click = None;
+        dispatch_double_click(&page.ctx, &click_id)?;
+    } else {
+        *last_click = Some((click_id.clone(), now));
+    }
 
     // Re-borrow fresh rather than reusing the pre-dispatch `dom_ref` - the
     // click listener that just ran (real JS, via `dispatch_click` above)
@@ -92,4 +116,20 @@ pub(crate) fn dispatch_click_at(
         }
     }
     Ok(focus_id)
+}
+
+/// Dispatches a real bubbling, cancelable `"dblclick"` `MouseEvent` at the
+/// `#id` element - same generated-eval-string shape `dispatch_click` uses,
+/// separate function since a `dblclick` needs a real `MouseEvent` object
+/// (for `instanceof MouseEvent`/`detail` etc to hold), not the bare-string
+/// dispatch shorthand `dispatch_click`'s own `"click"` argument uses.
+fn dispatch_double_click(ctx: &Context, id: &str) -> Result<(), String> {
+    let script = format!(
+        "(function(){{ var el = document.getElementById({id}); if (el === null) throw {missing}; el.dispatchEvent(new MouseEvent(\"dblclick\", {{ bubbles: true, cancelable: true }})); }})();",
+        id = js_string_literal(id),
+        missing = js_string_literal(&format!("no element with id \"{id}\"")),
+    );
+    ctx.eval(&script, "<pane dblclick>")
+        .map(|_| ())
+        .map_err(|_| format!("no element with id \"{id}\" (or its dblclick handler threw)"))
 }

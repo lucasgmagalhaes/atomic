@@ -5,7 +5,7 @@
 use quickjs_sys as sys;
 
 use super::node_registry::{dom_opaque, node_class_id_for, node_object};
-use super::selectors::{matching_by_tag, matching_nodes};
+use super::selectors::matching_nodes;
 use super::util::{new_js_string, read_js_string};
 
 pub(super) unsafe extern "C" fn document_active_element_get(
@@ -112,17 +112,20 @@ pub(super) unsafe extern "C" fn document_base_uri_get(
     }
 }
 
-/// Returns a live snapshot JS array of all matching elements under the
-/// document root — shared helper for `forms`/`images`/`links`/`scripts`.
+/// Returns a real *live* `HTMLCollection` (`collections::live`'s real
+/// `Proxy`-backed re-query, same one `getElementsByTagName` now uses —
+/// see that module's own doc) of every `tag` element under the document
+/// root — shared helper for `forms`/`images`/`scripts`. `include_start:
+/// true` matches `document.getElementsByTagName`'s own convention
+/// (root is the document itself, which a tag query still needs to
+/// consider even though a `Document` node can never itself match a real
+/// tag name).
 unsafe fn document_elements_by_tag(ctx: *mut sys::JSContext, tag: &str) -> sys::JSValue {
     let dom = dom_opaque(ctx);
     if dom.is_null() {
         return sys::JS_NewArray(ctx);
     }
-    match matching_by_tag(&*dom, (*dom).root(), tag, false) {
-        Ok(nodes) => super::collections::html_collection(ctx, nodes),
-        Err(_) => sys::JS_NewArray(ctx),
-    }
+    super::collections::live_elements_by_tag_name(ctx, (*dom).root(), tag, true)
 }
 
 /// Real `document.forms` — all `<form>` elements in the document.
@@ -142,7 +145,9 @@ pub(super) unsafe extern "C" fn document_images_get(
 }
 
 /// Real `document.links` — all `<a>` and `<area>` elements with an `href`
-/// attribute in the document.
+/// attribute in the document. Real *live* `HTMLCollection` (see
+/// `document_elements_by_tag`'s own doc) via `collections::live`'s
+/// `Query::Links`.
 pub(super) unsafe extern "C" fn document_links_get(
     ctx: *mut sys::JSContext,
     _this_val: sys::JSValue,
@@ -151,22 +156,7 @@ pub(super) unsafe extern "C" fn document_links_get(
     if dom.is_null() {
         return sys::JS_NewArray(ctx);
     }
-    let mut result = Vec::new();
-    if let Ok(a_nodes) = matching_by_tag(&*dom, (*dom).root(), "a", false) {
-        for id in a_nodes {
-            if (*dom).attribute(id, "href").is_some() {
-                result.push(id);
-            }
-        }
-    }
-    if let Ok(area_nodes) = matching_by_tag(&*dom, (*dom).root(), "area", false) {
-        for id in area_nodes {
-            if (*dom).attribute(id, "href").is_some() {
-                result.push(id);
-            }
-        }
-    }
-    super::collections::html_collection(ctx, result)
+    super::collections::live_links(ctx, (*dom).root(), true)
 }
 
 /// Real `document.scripts` — all `<script>` elements in the document.

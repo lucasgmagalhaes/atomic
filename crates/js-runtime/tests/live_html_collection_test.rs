@@ -116,6 +116,107 @@ fn indexed_access_through_the_proxy_returns_a_real_node_with_live_methods() {
 }
 
 #[test]
+fn document_forms_is_also_real_and_live() {
+    let (mut d, body) = dom_with_body();
+    let form1 = d.create_element("form");
+    d.set_attribute(form1, "id", "f1");
+    d.append_child(body, form1);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { \
+                const c = document.forms; \
+                const before = c.length; \
+                const el = document.createElement('form'); \
+                el.id = 'f2'; \
+                document.body.appendChild(el); \
+                return `${before},${c.length},${c.namedItem('f2').id}`; \
+            })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "1,2,f2");
+}
+
+#[test]
+fn document_images_is_also_real_and_live() {
+    let (mut d, body) = dom_with_body();
+    let img1 = d.create_element("img");
+    d.append_child(body, img1);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { \
+                const c = document.images; \
+                const before = c.length; \
+                document.body.appendChild(document.createElement('img')); \
+                return `${before},${c.length}`; \
+            })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "1,2");
+}
+
+#[test]
+fn document_scripts_is_also_real_and_live() {
+    let (mut d, body) = dom_with_body();
+    let script1 = d.create_element("script");
+    d.append_child(body, script1);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { \
+                const c = document.scripts; \
+                const before = c.length; \
+                document.body.appendChild(document.createElement('script')); \
+                return `${before},${c.length}`; \
+            })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "1,2");
+}
+
+#[test]
+fn document_links_is_real_live_and_filters_by_href() {
+    let (mut d, body) = dom_with_body();
+    let a1 = d.create_element("a");
+    d.set_attribute(a1, "href", "https://example.com");
+    d.set_attribute(a1, "id", "l1");
+    d.append_child(body, a1);
+    let a_no_href = d.create_element("a");
+    d.append_child(body, a_no_href);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { \
+                const c = document.links; \
+                const before = c.length; \
+                const area = document.createElement('area'); \
+                area.setAttribute('href', '/x'); \
+                area.id = 'l2'; \
+                document.body.appendChild(area); \
+                return `${before},${c.length},${c[0].id},${c[1].id}`; \
+            })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(
+        result, "1,2,l1,l2",
+        "document.links should filter to href-bearing a/area, live, unioning both tags"
+    );
+}
+
+#[test]
 fn array_from_a_live_collection_still_works_via_the_array_like_path() {
     let (mut d, body) = dom_with_body();
     let div1 = d.create_element("div");

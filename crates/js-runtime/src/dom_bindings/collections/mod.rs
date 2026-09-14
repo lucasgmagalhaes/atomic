@@ -18,6 +18,7 @@ mod queries;
 mod shared;
 
 pub(super) use html_collection::html_collection;
+pub(super) use live::{live_elements_by_tag_name, live_links};
 pub(super) use methods::define_selector_methods;
 pub(super) use node_list::node_list;
 pub(super) use queries::{elements_by_class_name, elements_by_tag_name, query_selector_all};

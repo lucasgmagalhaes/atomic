@@ -46,6 +46,9 @@ const LIVE_COLLECTION_CLASS_KIND: &str = "LiveHTMLCollection";
 enum Query {
     Tag(String),
     Class(String),
+    /// Real `document.links`: the union of `<a href>` and `<area href>`
+    /// elements — not a plain tag match, so it doesn't fit `Tag`.
+    Links,
 }
 
 struct LiveCollectionState {
@@ -94,13 +97,28 @@ unsafe fn resolve(ctx: *mut sys::JSContext, target: sys::JSValue) -> Vec<dom::No
         return Vec::new();
     }
     let include_start = (*state).include_start;
-    let result = match &(*state).query {
-        Query::Tag(tag) => matching_by_tag(&*dom_ptr, (*state).root, tag, include_start),
+    match &(*state).query {
+        Query::Tag(tag) => {
+            matching_by_tag(&*dom_ptr, (*state).root, tag, include_start).unwrap_or_default()
+        }
         Query::Class(class_name) => {
             matching_by_class(&*dom_ptr, (*state).root, class_name, include_start)
+                .unwrap_or_default()
         }
-    };
-    result.unwrap_or_default()
+        Query::Links => {
+            let mut result = Vec::new();
+            for tag in ["a", "area"] {
+                if let Ok(nodes) = matching_by_tag(&*dom_ptr, (*state).root, tag, include_start) {
+                    result.extend(
+                        nodes
+                            .into_iter()
+                            .filter(|&id| (*dom_ptr).attribute(id, "href").is_some()),
+                    );
+                }
+            }
+            result
+        }
+    }
 }
 
 /// `id`/`name` match, same rule `html_collection.rs`'s own `namedItem`
@@ -342,4 +360,17 @@ pub(in super::super) unsafe fn live_elements_by_class_name(
         Query::Class(class_name.to_string()),
         include_start,
     )
+}
+
+/// Real live `document.links` - see `Query::Links`'s own doc.
+/// `include_start` matches `live_elements_by_tag_name`'s own convention
+/// (the document root itself is never an `<a>`/`<area>`, so this is
+/// harmless either way, kept for consistency with every other
+/// document-rooted live collection here).
+pub(in super::super) unsafe fn live_links(
+    ctx: *mut sys::JSContext,
+    root: dom::NodeId,
+    include_start: bool,
+) -> sys::JSValue {
+    build(ctx, root, Query::Links, include_start)
 }

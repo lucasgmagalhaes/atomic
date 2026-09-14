@@ -699,6 +699,80 @@ options from here (investigate the `props` gap with `samply` before concluding a
 further, accept the red-flag reading and archive per §9, or re-scope the comparison) are
 the user's call, not something to resolve by continuing to build.
 
+### Update, same day: `props` investigated with `samply`, one real bug fixed
+
+Profiled `props` with `samply` (required rebuilding with `--config profile.release.debug=true
+--config profile.release.strip=false` — the plain release build had no debug info to
+symbolicate against — and `--unstable-presymbolicate` to bake symbol names into the
+saved profile rather than relying on `samply`'s live local-server symbolication).
+
+**Self-time breakdown (excluding `mach_absolute_time` at 33.5% — almost certainly
+sampling-profiler observer effect at 8kHz on a ~100ms program, not real application
+time; the interpreter never calls it directly):**
+
+| Self-time | Function |
+| --- | --- |
+| 27.0% | `atomicjs::vm::execute_function` (the dispatch loop itself) |
+| 5.5% | `JsObject::get` |
+| 4.6% | `SipHash::write` (hashing the key) |
+| 3.2% | `RandomState::hash_one::<&str>` |
+| 2.4% + 2.3% | `memmove` / `memcmp` |
+| 1.1% | `String::clone` |
+
+**Real bug found, not just the hypothesized "HashMap is inherently slower":**
+`vm.rs`'s `GetProp`/`SetProp` cloned the property-name `String` out of the constant pool
+on *every single access*, even though it's a compile-time constant already borrowable
+from `function.constants` for the whole call's lifetime — pure wasted heap allocation.
+Fixed by borrowing `&str` instead (`GetProp` only; `SetProp`'s allocation is inherent —
+`JsObject`'s `HashMap<String, Value>` needs an owned key on first insert, and that only
+happens once per object literal, not per loop iteration).
+
+**Re-measured after the fix** (`hyperfine --warmup 5 --runs 50`, same methodology):
+
+| Program | Before | After | 
+| --- | --- | --- |
+| `props` | 108.2 ms (**5.08×** slower) | **54.3 ms (1.89× slower)** |
+| `closures` (unaffected — no `GetProp` at all) | 124.7 ms (2.87×) | 137.6 ms (2.68×, noise) |
+
+One clone removed roughly halved `props`'s time and pulled it from a clear red result to
+inside §9's 2× guardrail. The remaining ~1.89× on `props` is the honest, inherent cost of
+`HashMap<String, Value>` property access (SipHash + string comparison, confirmed by the
+profile above) with no Shapes/inline caches — exactly what §3's hard scope limits say
+not to build for this spike.
+
+**`closures` profiled too, different bottleneck:** 41.2% self-time in
+`execute_function`, plus several `Vec`-allocation/`malloc` frames
+(`Vec<LocalSlot>`/`Vec<Value>` growth and drop). `execute_function` allocates a fresh
+`Vec<LocalSlot>` (locals) and `Vec<Value>` (operand stack) on *every function call* —
+`closures` calls the same closure 1,000,000 times in its loop, so that's 2,000,000+ heap
+allocations attributable purely to the calling convention, not to upvalues/`Rc<RefCell>`
+specifically.
+
+### Performance-improvement survey (evidence-based, not yet acted on beyond the one fix above)
+
+Ordered by expected impact, each checked against whether it's actually in scope for a
+spike (§3) before being suggested as something to do next:
+
+1. **Done:** remove `GetProp`'s unnecessary `String` clone — confirmed via before/after
+   measurement above, not just theorized.
+2. **Strongest remaining candidate, in scope:** reduce or reuse the per-call
+   `Vec<LocalSlot>`/`Vec<Value>` allocations in `execute_function`. This is the
+   profiler-identified bottleneck behind `closures`'s remaining 2.68×, doesn't require
+   Shapes/GC/a JIT (still just an allocation-reuse change to the existing interpreter
+   loop, well within §3's scope), and is the most promising next lever precisely because
+   it's evidence-backed rather than guessed.
+3. **Not recommended now — inherent to the design, not a bug:** `HashMap<String, Value>`
+   property access's remaining ~1.89× cost. Fixing this for real needs Shapes/inline
+   caches, which §3 explicitly excludes from this spike. This cost is exactly what the
+   spike exists to reveal honestly, not optimize away before it's even been reported.
+4. **Not recommended now — same reason:** `Rc<RefCell<Value>>` indirection for captured
+   locals (upvalues). Part of the deliberate no-GC design (§3); optimizing it would mean
+   building GC-aware allocation machinery, out of scope.
+
+Item 2 is the only one of these that's both evidence-backed and in scope — worth a
+deliberate decision before touching it, same as the `GetProp` fix, rather than being
+folded in silently.
+
 ## Appendix — salvaged principles from the rejected proposal
 
 These remain correct engineering principles *if* this spike (or, contingent on a green

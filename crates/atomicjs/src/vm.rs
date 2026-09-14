@@ -155,15 +155,23 @@ fn execute_function(
                 pc += 1;
             }
             Instr::GetProp(idx) => {
-                let name = match &function.constants[*idx as usize] {
-                    Const::String(s) => s.clone(),
+                // Borrowed, not cloned (fixed 2026-09-14 — see this file's
+                // module doc / ATOMIC_JS_SPIKE.md's Results section): the
+                // property name is a compile-time constant living in
+                // `function.constants`, which already outlives this whole
+                // call — cloning a fresh `String` (a heap allocation) on
+                // every single GET_PROP was pure waste, confirmed by
+                // profiling `props` with samply (~15% of inclusive time in
+                // `String::clone`, mostly its own allocation).
+                let name: &str = match &function.constants[*idx as usize] {
+                    Const::String(s) => s.as_str(),
                     other => {
                         panic!("internal error: GetProp's constant must be a String, got {other:?}")
                     }
                 };
                 let object = stack.pop().expect("GetProp needs an object on the stack");
                 let value = match object {
-                    Value::Object(obj) => obj.borrow().get(&name),
+                    Value::Object(obj) => obj.borrow().get(name),
                     // Reading off a non-object stays total rather than
                     // panicking: none of the reference programs hit this,
                     // but nothing about GET_PROP's own semantics (§5.3)

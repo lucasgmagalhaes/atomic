@@ -1,9 +1,19 @@
 //! `Rect`, `build_display_list`, and background/border/box-shadow
 //! collection — split out from `display_list.rs`.
 
-use layout_engine::{BorderStyle, Color, LayoutBox, Overflow, Position};
+use layout_engine::{BorderStyle, Color, LayoutBox, Length, Overflow, Position};
 
 use super::helpers::{clip_rect, paint_order, scale_alpha, tighten_clip, ClipRect};
+
+/// `box_.style.top` as a real pixel value, or `None` for `Auto`/`Percent`
+/// (see `Position::Sticky`'s own doc — an unresolvable `top` means this
+/// box just doesn't engage sticky behavior at all).
+pub(super) fn resolve_sticky_top(top: Length) -> Option<f32> {
+    match top {
+        Length::Px(px) => Some(px as f32),
+        Length::Auto | Length::Percent(_) => None,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Rect {
@@ -39,6 +49,25 @@ pub struct Rect {
     /// `profile-worker`'s own page-scroll shift is the one consumer,
     /// skipping the `-scroll_top` shift for a tagged rect.
     pub fixed: bool,
+    /// Real `position: sticky` (`layout_engine::Position::Sticky`, see its
+    /// own doc) — `Some((natural_y, top_px))` for this rect, or any rect
+    /// belonging to a descendant of the nearest enclosing `Sticky` box
+    /// (propagated down through `collect` like `fixed`, but the innermost
+    /// `Sticky` ancestor's own values win over an outer one, not OR'd -
+    /// each sticky box needs its own natural position/threshold, not a
+    /// simple boolean). `natural_y` is that ancestor's own unstuck
+    /// document-space `y` (its real `Dimensions::y` — sticky boxes stay in
+    /// normal flow, unlike `Fixed`, so this is already correct with no
+    /// extra layout work); `top_px` is its resolved `top` inset. Not
+    /// consulted anywhere in `render` itself — `profile-worker`'s own
+    /// page-scroll shift is the one consumer: for a tagged rect it
+    /// computes `extra_shift = (top_px - (natural_y - scroll_top)).max
+    /// (0.0)` (how much extra lift, beyond the normal page-scroll shift,
+    /// keeps the ancestor's own top edge from crossing `top_px`) and
+    /// applies that *same* `extra_shift` to every rect under that
+    /// ancestor, so the whole subtree moves together, rigidly, exactly
+    /// like a real sticky element's children do.
+    pub sticky: Option<(f32, f32)>,
 }
 
 /// Walks `box_` in paint order (parent before children, so later-painted
@@ -48,7 +77,7 @@ pub struct Rect {
 /// rect — nothing downstream needs to know they exist.
 pub fn build_display_list(box_: &LayoutBox) -> Vec<Rect> {
     let mut list = Vec::new();
-    collect(box_, &mut list, None, 1.0, (0.0, 0.0), false);
+    collect(box_, &mut list, None, 1.0, (0.0, 0.0), false, None);
     list
 }
 
@@ -61,6 +90,7 @@ pub fn build_display_list(box_: &LayoutBox) -> Vec<Rect> {
 /// module doc's own opacity paragraph) - see
 /// `layout_engine::ComputedStyle::transform`'s doc for the translate-only
 /// scope and why this never affects layout, only where things paint.
+#[allow(clippy::too_many_arguments)]
 fn collect(
     box_: &LayoutBox,
     out: &mut Vec<Rect>,
@@ -68,6 +98,7 @@ fn collect(
     parent_opacity: f64,
     parent_translate: (f64, f64),
     parent_fixed: bool,
+    parent_sticky: Option<(f32, f32)>,
 ) {
     let opacity = parent_opacity * box_.style.opacity;
     let translate = (
@@ -78,9 +109,20 @@ fn collect(
     // `Rect::fixed`'s own doc. Propagates down like `opacity`/`translate`
     // so a `Fixed` box's whole subtree stays tagged together.
     let fixed = parent_fixed || box_.style.position == Position::Fixed;
+    // Real `position: sticky` — see `Rect::sticky`'s own doc. The
+    // innermost `Sticky` ancestor's own values win (not OR'd like
+    // `fixed`); a `Sticky` box with no usable `top` just falls through to
+    // whatever ancestor context (if any) was already in effect.
+    let sticky = if box_.style.position == Position::Sticky {
+        resolve_sticky_top(box_.style.top)
+            .map(|top_px| (box_.dimensions.y as f32, top_px))
+            .or(parent_sticky)
+    } else {
+        parent_sticky
+    };
     if let Some(shadow) = box_.style.box_shadow {
         if shadow.color.a > 0 {
-            push_box_shadow_rect(box_, shadow, out, clip, opacity, translate, fixed);
+            push_box_shadow_rect(box_, shadow, out, clip, opacity, translate, fixed, sticky);
         }
     }
     if box_.style.background_color.a > 0 || box_.style.background_image.is_some() {
@@ -100,13 +142,14 @@ fn collect(
             radius: box_.style.border_radius as f32,
             gradient,
             fixed,
+            sticky,
         };
         if let Some(clipped) = clip_rect(rect, clip) {
             out.push(clipped);
         }
     }
     if box_.style.border_style != BorderStyle::None && box_.style.border_color.a > 0 {
-        push_border_rects(box_, out, clip, opacity, translate, fixed);
+        push_border_rects(box_, out, clip, opacity, translate, fixed, sticky);
     }
     let (child_clip, child_translate) = if box_.style.overflow == Overflow::Hidden {
         (
@@ -128,7 +171,15 @@ fn collect(
         (clip, translate)
     };
     for child in paint_order(&box_.children) {
-        collect(child, out, child_clip, opacity, child_translate, fixed);
+        collect(
+            child,
+            out,
+            child_clip,
+            opacity,
+            child_translate,
+            fixed,
+            sticky,
+        );
     }
 }
 
@@ -140,6 +191,7 @@ fn collect(
 /// the shadow) falls out naturally from this pipeline's existing
 /// "later rects paint over earlier ones" convention - no explicit
 /// z-ordering needed.
+#[allow(clippy::too_many_arguments)]
 fn push_box_shadow_rect(
     box_: &LayoutBox,
     shadow: layout_engine::BoxShadow,
@@ -148,6 +200,7 @@ fn push_box_shadow_rect(
     opacity: f64,
     translate: (f64, f64),
     fixed: bool,
+    sticky: Option<(f32, f32)>,
 ) {
     let d = box_.dimensions;
     let rect = Rect {
@@ -163,6 +216,7 @@ fn push_box_shadow_rect(
         radius: 0.0,
         gradient: None,
         fixed,
+        sticky,
     };
     if let Some(clipped) = clip_rect(rect, clip) {
         out.push(clipped);
@@ -186,6 +240,7 @@ fn push_box_shadow_rect(
 /// - see `render::gpu`) - an acceptable seam at typical border widths,
 /// where a strip is thin enough that its "wrong" rounded corner is
 /// mostly hidden under the background rect it sits on top of.
+#[allow(clippy::too_many_arguments)]
 fn push_border_rects(
     box_: &LayoutBox,
     out: &mut Vec<Rect>,
@@ -193,6 +248,7 @@ fn push_border_rects(
     opacity: f64,
     translate: (f64, f64),
     fixed: bool,
+    sticky: Option<(f32, f32)>,
 ) {
     let d = box_.dimensions;
     let b = box_.border;
@@ -215,6 +271,7 @@ fn push_border_rects(
             radius,
             gradient: None,
             fixed,
+            sticky,
         });
     }
     if b.bottom > 0.0 {
@@ -227,6 +284,7 @@ fn push_border_rects(
             radius,
             gradient: None,
             fixed,
+            sticky,
         });
     }
     if b.left > 0.0 {
@@ -239,6 +297,7 @@ fn push_border_rects(
             radius,
             gradient: None,
             fixed,
+            sticky,
         });
     }
     if b.right > 0.0 {
@@ -251,6 +310,7 @@ fn push_border_rects(
             radius,
             gradient: None,
             fixed,
+            sticky,
         });
     }
 }

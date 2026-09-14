@@ -38,6 +38,7 @@ fn paints_a_solid_rect_at_the_right_pixels() {
         radius: 0.0,
         gradient: None,
         fixed: false,
+        sticky: None,
     }];
     let pixels = renderer.render_to_rgba(&rects, 8, 8, [0.0, 0.0, 0.0, 1.0]);
 
@@ -66,6 +67,7 @@ fn later_rects_paint_over_earlier_ones_at_the_same_pixel() {
             radius: 0.0,
             gradient: None,
             fixed: false,
+            sticky: None,
         },
         Rect {
             x: 0.0,
@@ -81,6 +83,7 @@ fn later_rects_paint_over_earlier_ones_at_the_same_pixel() {
             radius: 0.0,
             gradient: None,
             fixed: false,
+            sticky: None,
         },
     ];
     let pixels = renderer.render_to_rgba(&rects, 8, 8, [0.0, 0.0, 0.0, 1.0]);
@@ -160,6 +163,7 @@ fn a_90_degree_gradient_varies_only_left_to_right() {
         radius: 0.0,
         gradient: Some((RED, BLUE, 90.0)),
         fixed: false,
+        sticky: None,
     }];
     let pixels = renderer.render_to_rgba(&rects, 8, 8, [0.0, 0.0, 0.0, 1.0]);
 
@@ -194,6 +198,7 @@ fn a_gradient_with_no_direction_defaults_to_top_to_bottom() {
         radius: 0.0,
         gradient: Some((RED, BLUE, 180.0)),
         fixed: false,
+        sticky: None,
     }];
     let pixels = renderer.render_to_rgba(&rects, 8, 8, [0.0, 0.0, 0.0, 1.0]);
 

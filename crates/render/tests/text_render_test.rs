@@ -115,6 +115,7 @@ fn clip_restricts_which_pixels_a_glyph_can_paint() {
             }),
             opacity: 1.0,
             fixed: false,
+            sticky: None,
         })
         .collect();
 
@@ -149,6 +150,7 @@ fn zero_opacity_paints_no_glyph_pixels() {
             clip: None,
             opacity: 0.0,
             fixed: false,
+            sticky: None,
         })
         .collect();
 

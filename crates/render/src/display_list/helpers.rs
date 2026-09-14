@@ -107,6 +107,7 @@ pub(super) fn clip_rect(rect: super::Rect, clip: Option<ClipRect>) -> Option<sup
             // - it has no memory of a pre-clip size to anchor against).
             gradient: rect.gradient,
             fixed: rect.fixed,
+            sticky: rect.sticky,
         })
     }
 }

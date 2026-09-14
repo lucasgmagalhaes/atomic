@@ -3,6 +3,7 @@
 use layout_engine::{LayoutBox, Overflow, Position};
 
 use super::helpers::{paint_order, tighten_clip, ClipRect};
+use super::rects::resolve_sticky_top;
 
 /// One decoded `<img>`, positioned at its box's painted rect - the
 /// destination the real pixel data should be scaled/blitted into (see
@@ -30,6 +31,10 @@ pub struct ImageQuad {
     /// `position: fixed` propagation, applied to images instead of
     /// background rects.
     pub fixed: bool,
+    /// See `super::rects::Rect::sticky`'s own doc — identical real
+    /// `position: sticky` propagation, applied to images instead of
+    /// background rects.
+    pub sticky: Option<(f32, f32)>,
 }
 
 /// Same paint-order walk as [`super::build_display_list`]/
@@ -40,10 +45,11 @@ pub struct ImageQuad {
 /// transparent background contributes no `Rect`.
 pub fn build_image_list(box_: &LayoutBox) -> Vec<ImageQuad> {
     let mut list = Vec::new();
-    collect_images(box_, &mut list, None, 1.0, (0.0, 0.0), false);
+    collect_images(box_, &mut list, None, 1.0, (0.0, 0.0), false, None);
     list
 }
 
+#[allow(clippy::too_many_arguments)]
 fn collect_images(
     box_: &LayoutBox,
     out: &mut Vec<ImageQuad>,
@@ -51,6 +57,7 @@ fn collect_images(
     parent_opacity: f64,
     parent_translate: (f64, f64),
     parent_fixed: bool,
+    parent_sticky: Option<(f32, f32)>,
 ) {
     let opacity = parent_opacity * box_.style.opacity;
     let translate = (
@@ -58,6 +65,13 @@ fn collect_images(
         parent_translate.1 + box_.style.transform.1,
     );
     let fixed = parent_fixed || box_.style.position == Position::Fixed;
+    let sticky = if box_.style.position == Position::Sticky {
+        resolve_sticky_top(box_.style.top)
+            .map(|top_px| (box_.dimensions.y as f32, top_px))
+            .or(parent_sticky)
+    } else {
+        parent_sticky
+    };
     if let Some(image) = &box_.image {
         out.push(ImageQuad {
             x: (box_.dimensions.x + translate.0) as f32,
@@ -68,6 +82,7 @@ fn collect_images(
             clip,
             opacity,
             fixed,
+            sticky,
         });
     }
     let (child_clip, child_translate) = if box_.style.overflow == Overflow::Hidden {
@@ -85,6 +100,14 @@ fn collect_images(
         (clip, translate)
     };
     for child in paint_order(&box_.children) {
-        collect_images(child, out, child_clip, opacity, child_translate, fixed);
+        collect_images(
+            child,
+            out,
+            child_clip,
+            opacity,
+            child_translate,
+            fixed,
+            sticky,
+        );
     }
 }

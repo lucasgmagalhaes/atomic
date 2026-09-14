@@ -28,3 +28,11 @@ graphify-out/
 # (see apps/shell/src/browser_view.rs's BrowserView::spawn_with_identity)
 atomic-profile-*
 atomic-shell-*
+
+# impeccable design skill's own compiled binary (platform-specific, ~15MB)
+# and generated font-index caches - regenerable local artifacts, not source,
+# same reasoning graphify-out/ above already documents. The skill's real
+# source (SKILL.md, reference/*.md, the JS scripts themselves) stays
+# tracked.
+.agents/skills/impeccable/scripts/bin/
+.agents/skills/impeccable/scripts/data/font-index*.json

@@ -5,8 +5,8 @@ use std::io::Write;
 
 use super::super::input_commands::{
     dispatch_click, dispatch_click_at, dispatch_composition_end, dispatch_composition_start,
-    dispatch_composition_update, dispatch_context_menu_at, dispatch_mouse_move, fill_element,
-    tab_focus, type_key, TabOutcome,
+    dispatch_composition_update, dispatch_context_menu_at, dispatch_drag_start, dispatch_drop_at,
+    dispatch_mouse_move, fill_element, tab_focus, type_key, TabOutcome,
 };
 use super::{Handled, WorkerState};
 
@@ -68,6 +68,87 @@ impl<'rt> WorkerState<'rt> {
                 }
                 None => {
                     let _ = writeln!(stdout, "ERROR CLICK_AT requires two numeric coordinates");
+                }
+            }
+            let _ = stdout.flush();
+        } else if let Some(rest) = line.strip_prefix("DRAG_START ") {
+            let mut parts = rest.split_whitespace();
+            let coords = parts
+                .next()
+                .zip(parts.next())
+                .and_then(|(x, y)| Some((x.parse::<f64>().ok()?, y.parse::<f64>().ok()?)));
+            match coords {
+                Some((x, y)) => {
+                    let result = dispatch_drag_start(
+                        &mut self.page,
+                        self.width,
+                        self.height,
+                        x,
+                        y,
+                        self.scroll_top,
+                        &mut self.drag_source,
+                    );
+                    self.sync_scroll();
+                    self.writer.publish(&self.page.render(
+                        &self.renderer,
+                        self.width,
+                        self.height,
+                        self.scroll_top,
+                    ));
+                    self.navigate_if_requested();
+                    match result {
+                        Ok(()) => {
+                            let _ = writeln!(stdout, "DRAG_STARTED");
+                        }
+                        Err(message) => {
+                            let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
+                        }
+                    }
+                }
+                None => {
+                    let _ = writeln!(stdout, "ERROR DRAG_START requires two numeric coordinates");
+                }
+            }
+            let _ = stdout.flush();
+        } else if let Some(rest) = line.strip_prefix("DROP_AT ") {
+            let mut parts = rest.split_whitespace();
+            let coords = parts
+                .next()
+                .zip(parts.next())
+                .and_then(|(x, y)| Some((x.parse::<f64>().ok()?, y.parse::<f64>().ok()?)));
+            match coords {
+                Some((x, y)) => {
+                    let result = dispatch_drop_at(
+                        &mut self.page,
+                        self.width,
+                        self.height,
+                        x,
+                        y,
+                        self.scroll_top,
+                        &mut self.drag_source,
+                    );
+                    self.sync_scroll();
+                    self.writer.publish(&self.page.render(
+                        &self.renderer,
+                        self.width,
+                        self.height,
+                        self.scroll_top,
+                    ));
+                    self.navigate_if_requested();
+                    match result {
+                        Ok(true) => {
+                            let _ = writeln!(stdout, "DROPPED");
+                        }
+                        Ok(false) => {
+                            let _ = writeln!(stdout, "ERROR not a valid drop target");
+                        }
+                        Err(message) => {
+                            let _ = writeln!(stdout, "ERROR {}", message.replace('\n', " "));
+                        }
+                    }
+                }
+                None => {
+                    let _ = writeln!(stdout, "ERROR DROP_AT requires two numeric coordinates");
                 }
             }
             let _ = stdout.flush();

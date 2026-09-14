@@ -50,6 +50,12 @@ pub(super) struct WorkerState<'rt> {
     /// detection - see `input_commands::click::dispatch_click_at`'s own
     /// doc.
     pub(super) last_click: Option<(String, Instant)>,
+    /// Real in-progress drag: `(source_id, carried "text/plain" data)`,
+    /// set by a real, uncanceled `DRAG_START` and consumed by the next
+    /// `DROP_AT` (`input_commands::drag`'s own doc has the full real
+    /// `dragstart`/`dragover`/`drop`/`dragend` sequence). `None` when no
+    /// drag is in progress.
+    pub(super) drag_source: Option<(String, String)>,
     pub(super) scroll_top: f64,
     pub(super) resize_count: u32,
     pub(super) frame_interval: Duration,

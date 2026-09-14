@@ -46,6 +46,7 @@ mod request_response;
 mod screen;
 mod script_limits;
 mod selection;
+mod shared_worker_bindings;
 mod timers;
 mod trusted_types;
 mod url_bindings;

@@ -4,8 +4,8 @@
 
 use super::types::{
     AlignItems, BorderStyle, BoxShadow, Clear, Color, Display, EdgeSizes, FlexDirection, Float,
-    GridTracks, JustifyContent, Length, LinearGradient, ListStylePosition, ListStyleType, Overflow,
-    Position,
+    FontFamily, GridTracks, JustifyContent, Length, LinearGradient, ListStylePosition,
+    ListStyleType, Overflow, Position,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -84,7 +84,7 @@ pub struct ComputedStyle {
     /// as before this field existed. See [`LinearGradient`]'s own doc for
     /// the real scope cut. Not inherited (matches real `background`).
     pub background_image: Option<LinearGradient>,
-    /// The two *inherited* properties this crate models (`resolve_style`
+    /// The three *inherited* properties this crate models (`resolve_style`
     /// takes the parent's resolved values as the starting point instead of
     /// the fixed initial values, per CSS inheritance rules) - every other
     /// property resolves independently of the parent.
@@ -92,6 +92,22 @@ pub struct ComputedStyle {
     pub font_size: f64,
     /// Text color - initial value is black, matching the real spec.
     pub color: Color,
+    /// `None` means "not set by this element's own cascade, keep
+    /// inheriting" — `resolve_style` itself never fills this in from a
+    /// parent (unlike `font_size`/`color`, which are always fully
+    /// resolved values by the time `resolve_style` returns): real
+    /// multi-level inheritance is applied one layer up, in
+    /// `tree::snapshot::resolve_element_style`, since threading a
+    /// `parent_font_family` into `resolve_style`'s own public signature
+    /// would break every existing direct caller (the many `*_style_test.rs`
+    /// files that test one property's cascade resolution in isolation via
+    /// `resolve_style(matched, font_size, color)`, none of which care
+    /// about font inheritance) - see [`FontFamily`]'s own doc for the
+    /// real, narrower-than-spec scope of what's modeled once resolved.
+    /// By the time a `LayoutBox` exists, this is always `Some(...)` - the
+    /// box-tree build chain fills in the inherited-from-parent value the
+    /// same way it already does for `font_size`/`color`.
+    pub font_family: Option<FontFamily>,
     /// Real, but per-primitive rather than per-group: real CSS renders a
     /// box's whole subtree to an offscreen layer once, then blends that
     /// *one* flattened result at `opacity` - this crate has no offscreen
@@ -183,6 +199,7 @@ impl ComputedStyle {
                 b: 0,
                 a: 255,
             },
+            font_family: None,
             opacity: 1.0,
             z_index: None,
             transform: (0.0, 0.0),

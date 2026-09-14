@@ -5,7 +5,7 @@
 use css::{matching_declarations_indexed, ElementSnapshot, SelectorIndex, Stylesheet};
 use dom::{Dom, NodeData, NodeId};
 
-use crate::style::{apply_inline_declarations, resolve_style, Color, ComputedStyle};
+use crate::style::{apply_inline_declarations, resolve_style, Color, ComputedStyle, FontFamily};
 
 /// Tags a real browser's UA stylesheet gives `display: none` unconditionally
 /// (their content is metadata/source text, never part of the rendered
@@ -50,6 +50,7 @@ pub(super) fn resolve_element_style<'a>(
     chain: &mut Vec<ElementSnapshot<'a>>,
     parent_font_size: f64,
     parent_color: Color,
+    parent_font_family: FontFamily,
 ) -> ComputedStyle {
     let _ = tag; // already folded into build_element_snapshot's own dom lookup
     chain.push(build_element_snapshot(dom, node));
@@ -60,6 +61,12 @@ pub(super) fn resolve_element_style<'a>(
     );
     if let Some(inline) = attributes.get("style") {
         apply_inline_declarations(&mut style, &css::parse_inline_style(inline));
+    }
+    // Real `font-family` inheritance - see `ComputedStyle::font_family`'s
+    // own doc for why this one layer up from `resolve_style` itself is
+    // where it happens.
+    if style.font_family.is_none() {
+        style.font_family = Some(parent_font_family);
     }
     style
 }

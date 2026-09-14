@@ -4,7 +4,7 @@
 use css::{ElementSnapshot, SelectorIndex, Stylesheet};
 use dom::{Dom, NodeData, NodeId};
 
-use crate::style::{Color, ComputedStyle, Display, ListStyleType};
+use crate::style::{Color, ComputedStyle, Display, FontFamily, ListStyleType};
 
 use super::inline::{collect_inline_spans, is_inline_level};
 use super::snapshot::{is_never_rendered, resolve_element_style};
@@ -60,6 +60,7 @@ fn merge_marker_into_li(li_box: &mut LayoutBox, marker: &str) {
                 text: marker.to_string(),
                 font_size: li_box.style.font_size,
                 color: li_box.style.color,
+                font_family: li_box.style.font_family.unwrap_or_default(),
             },
         );
     } else {
@@ -146,6 +147,7 @@ fn build_children<'a>(
     chain: &mut Vec<ElementSnapshot<'a>>,
     parent_font_size: f64,
     parent_color: Color,
+    parent_font_family: FontFamily,
 ) -> Vec<LayoutBox> {
     let mut result = Vec::new();
     let mut pending_inline_run: Vec<NodeId> = Vec::new();
@@ -168,6 +170,7 @@ fn build_children<'a>(
                     chain,
                     parent_font_size,
                     parent_color,
+                    parent_font_family,
                 ) {
                     result.push(b);
                 }
@@ -189,6 +192,7 @@ fn build_children<'a>(
                 chain,
                 parent_font_size,
                 parent_color,
+                parent_font_family,
                 &mut spans,
             );
         }
@@ -205,6 +209,7 @@ fn build_children<'a>(
             let mut style = ComputedStyle::initial();
             style.font_size = parent_font_size;
             style.color = parent_color;
+            style.font_family = Some(parent_font_family);
             result.push(LayoutBox {
                 node: first_node,
                 style,
@@ -231,6 +236,7 @@ fn build_children<'a>(
             chain,
             parent_font_size,
             parent_color,
+            parent_font_family,
         ) {
             pending_inline_run.push(child);
         } else {
@@ -245,6 +251,7 @@ fn build_children<'a>(
                 chain,
                 parent_font_size,
                 parent_color,
+                parent_font_family,
             ) {
                 result.push(b);
             }
@@ -266,6 +273,7 @@ pub(super) fn build<'a>(
     chain: &mut Vec<ElementSnapshot<'a>>,
     parent_font_size: f64,
     parent_color: Color,
+    parent_font_family: FontFamily,
 ) -> Option<LayoutBox> {
     let n = dom.get(node)?;
 
@@ -276,6 +284,7 @@ pub(super) fn build<'a>(
         let mut style = ComputedStyle::initial();
         style.font_size = parent_font_size;
         style.color = parent_color;
+        style.font_family = Some(parent_font_family);
         return Some(LayoutBox {
             node,
             style,
@@ -312,6 +321,7 @@ pub(super) fn build<'a>(
         chain,
         parent_font_size,
         parent_color,
+        parent_font_family,
     );
 
     let mut children = if style.display == Display::None {
@@ -327,6 +337,7 @@ pub(super) fn build<'a>(
             chain,
             style.font_size,
             style.color,
+            style.font_family.unwrap_or(parent_font_family),
         )
     };
     chain.pop();

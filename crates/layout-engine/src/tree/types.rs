@@ -3,7 +3,7 @@
 
 use dom::NodeId;
 
-use crate::style::{Color, ComputedStyle};
+use crate::style::{Color, ComputedStyle, FontFamily};
 use crate::text::PositionedGlyph;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -39,6 +39,7 @@ pub struct InlineSpanSource {
     pub text: String,
     pub font_size: f64,
     pub color: Color,
+    pub font_family: FontFamily,
 }
 
 #[derive(Debug, Clone)]

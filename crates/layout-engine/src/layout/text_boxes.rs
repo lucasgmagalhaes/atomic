@@ -16,6 +16,7 @@ pub(super) fn layout_text_box(box_: &mut LayoutBox, containing_width: f64, x: f6
         box_.style.font_size as f32,
         Some(containing_width as f32),
         box_.style.color,
+        box_.style.font_family.unwrap_or_default(),
     );
 
     box_.dimensions.x = x;
@@ -45,6 +46,7 @@ pub(super) fn layout_inline_box(
             text: &s.text,
             font_size: s.font_size as f32,
             color: s.color,
+            font_family: s.font_family,
         })
         .collect();
     let result = layout_inline(&spans, Some(containing_width as f32));

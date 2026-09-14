@@ -195,6 +195,17 @@ extern "C" {
     ) -> JSValue;
 
     pub fn JS_NewArray(ctx: *mut JSContext) -> JSValue;
+    /// Real ES2015 `Proxy` construction - `target`/`handler` are
+    /// `JSValueConst` (not consumed; the proxy dups its own references,
+    /// so the caller still owns and must free its `target`/`handler`
+    /// locals same as any other `JSValueConst`-typed call).
+    pub fn JS_NewProxy(ctx: *mut JSContext, target: JSValue, handler: JSValue) -> JSValue;
+    /// Real `target` of a value returned by `JS_NewProxy` - used inside a
+    /// trap's own native implementation to recover the opaque state
+    /// stashed on that target, since a trap's `this_val` is the proxy
+    /// itself (the real receiver a script calls a returned method
+    /// through), not the target.
+    pub fn JS_GetProxyTarget(ctx: *mut JSContext, proxy: JSValue) -> JSValue;
     /// `true`/`false` reflect `Array.isArray`-shaped intent, but per
     /// quickjs-ng's own doc comment this no longer punches through
     /// proxies - fine for this crate's use (only ever called on values it

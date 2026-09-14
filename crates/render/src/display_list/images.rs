@@ -1,6 +1,6 @@
 //! `ImageQuad`/`build_image_list` — split out from `display_list.rs`.
 
-use layout_engine::{LayoutBox, Overflow};
+use layout_engine::{LayoutBox, Overflow, Position};
 
 use super::helpers::{paint_order, tighten_clip, ClipRect};
 
@@ -26,6 +26,10 @@ pub struct ImageQuad {
     pub image: std::rc::Rc<image_decode::DecodedImage>,
     pub clip: Option<ClipRect>,
     pub opacity: f64,
+    /// See `super::rects::Rect::fixed`'s own doc — identical real
+    /// `position: fixed` propagation, applied to images instead of
+    /// background rects.
+    pub fixed: bool,
 }
 
 /// Same paint-order walk as [`super::build_display_list`]/
@@ -36,7 +40,7 @@ pub struct ImageQuad {
 /// transparent background contributes no `Rect`.
 pub fn build_image_list(box_: &LayoutBox) -> Vec<ImageQuad> {
     let mut list = Vec::new();
-    collect_images(box_, &mut list, None, 1.0, (0.0, 0.0));
+    collect_images(box_, &mut list, None, 1.0, (0.0, 0.0), false);
     list
 }
 
@@ -46,12 +50,14 @@ fn collect_images(
     clip: Option<ClipRect>,
     parent_opacity: f64,
     parent_translate: (f64, f64),
+    parent_fixed: bool,
 ) {
     let opacity = parent_opacity * box_.style.opacity;
     let translate = (
         parent_translate.0 + box_.style.transform.0,
         parent_translate.1 + box_.style.transform.1,
     );
+    let fixed = parent_fixed || box_.style.position == Position::Fixed;
     if let Some(image) = &box_.image {
         out.push(ImageQuad {
             x: (box_.dimensions.x + translate.0) as f32,
@@ -61,6 +67,7 @@ fn collect_images(
             image: image.clone(),
             clip,
             opacity,
+            fixed,
         });
     }
     let (child_clip, child_translate) = if box_.style.overflow == Overflow::Hidden {
@@ -78,6 +85,6 @@ fn collect_images(
         (clip, translate)
     };
     for child in paint_order(&box_.children) {
-        collect_images(child, out, child_clip, opacity, child_translate);
+        collect_images(child, out, child_clip, opacity, child_translate, fixed);
     }
 }

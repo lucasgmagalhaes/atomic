@@ -282,13 +282,22 @@ impl GridTracks {
     }
 }
 
-/// `Fixed`/`Sticky` aren't modeled — see `layout::layout_children`'s own
-/// doc on the real, narrower-than-spec scope `Absolute` gets here.
+/// `Sticky` isn't modeled — see `layout::layout_children`'s own doc on the
+/// real, narrower-than-spec scope `Absolute` (and now `Fixed`) get here.
+/// `Fixed` is real (2026-09-14): resolved by `layout::layout_children`
+/// exactly like `Absolute` (this crate already resolves `Absolute` against
+/// the page's own origin, not a positioned ancestor - see
+/// `offset_from_edges`'s own doc - so `Fixed`'s layout math is identical;
+/// the real difference is paint-time only, where `render`'s own display-
+/// list builders tag every primitive under a `Fixed` box as such so
+/// `profile-worker`'s page-scroll shift can skip it, keeping it glued to
+/// the viewport while the rest of the page scrolls underneath).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Position {
     Static,
     Relative,
     Absolute,
+    Fixed,
 }
 
 /// `dashed`/`dotted`/`double`/`groove`/... aren't modeled — a border only

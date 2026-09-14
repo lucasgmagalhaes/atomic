@@ -137,3 +137,31 @@ fn absolute_position_still_resolves_its_own_width_against_the_parent_content_wid
     // own doc for the exact scope).
     assert_eq!(tree.children[0].dimensions.width, 300.0);
 }
+
+#[test]
+fn fixed_position_removes_the_box_from_flow_same_as_absolute() {
+    let mut d = Dom::new();
+    let root = d.root();
+    let container = d.create_element("div");
+    let a = d.create_element("div");
+    let b = d.create_element("div");
+    d.append_child(root, container);
+    d.append_child(container, a);
+    d.append_child(container, b);
+    d.set_attribute(a, "id", "a");
+
+    let sheet =
+        parse_stylesheet("div { height: 30px; } #a { position: fixed; top: 100px; left: 50px; }");
+    let mut tree = build_box_tree(&d, container, &sheet).unwrap();
+    layout_block(&mut tree, 800.0, 0.0, 0.0);
+
+    // `layout_engine`'s own layout math treats `fixed` identically to
+    // `absolute` - both already resolve against the page's own origin
+    // (see `offset_from_edges`'s own doc) - the real difference between
+    // them is paint-time only (`render`/`profile-worker`'s page-scroll
+    // shift), which this crate doesn't know about.
+    assert_eq!(tree.children[0].dimensions.x, 50.0);
+    assert_eq!(tree.children[0].dimensions.y, 100.0);
+    assert_eq!(tree.children[1].dimensions.y, 0.0);
+    assert_eq!(tree.dimensions.height, 30.0);
+}

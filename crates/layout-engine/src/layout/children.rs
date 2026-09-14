@@ -16,12 +16,17 @@ use super::offsets::{offset_from_edges, resolve_outer_width};
 /// via `flex::layout_flex_children`, everything else stacks them as block
 /// boxes via `layout_block`.
 ///
-/// Real `position: absolute` in the non-flex (block) branch: a child with
-/// `Position::Absolute` is skipped by the normal stacking cursor entirely
-/// (contributes `0` to the returned content height, doesn't push later
-/// siblings down) and instead laid out via `layout_block` with
+/// Real `position: absolute`/`position: fixed` in the non-flex (block)
+/// branch: a child with either is skipped by the normal stacking cursor
+/// entirely (contributes `0` to the returned content height, doesn't push
+/// later siblings down) and instead laid out via `layout_block` with
 /// [`offset_from_edges`] used directly as its `(x, y)` — real removal
-/// from flow, positioned independently. Scope cut: a `Flex` container's
+/// from flow, positioned independently. `Fixed` gets identical layout math
+/// to `Absolute` (both already resolve against the page's own origin, not
+/// a positioned ancestor - see [`offset_from_edges`]'s own doc); the real
+/// difference between them is paint-time only, in `render`/`profile-
+/// worker`'s page-scroll shift - see `style::Position`'s own doc. Scope
+/// cut: a `Flex` container's
 /// own children never get this treatment (an absolutely positioned flex
 /// item still participates in flex sizing/placement as if it were a
 /// normal item) - the flex algorithm has no equivalent "skip me" path,
@@ -82,7 +87,8 @@ pub(crate) fn layout_children(
         let mut left_edge_y = content_y;
         let mut right_edge_y = content_y;
         for child in &mut box_.children {
-            if child.style.position == Position::Absolute {
+            if child.style.position == Position::Absolute || child.style.position == Position::Fixed
+            {
                 let (dx, dy) = offset_from_edges(&child.style);
                 layout_block(child, content_width, dx, dy);
                 continue;

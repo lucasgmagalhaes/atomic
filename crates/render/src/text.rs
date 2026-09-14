@@ -21,6 +21,7 @@ pub fn composite_glyphs(pixels: &mut [u8], width: u32, height: u32, glyphs: &[Cl
         glyph,
         clip,
         opacity,
+        ..
     } in glyphs
     {
         if *opacity <= 0.0 {

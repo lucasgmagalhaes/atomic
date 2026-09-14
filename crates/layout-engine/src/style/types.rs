@@ -389,6 +389,38 @@ pub enum AlignItems {
     Stretch,
 }
 
+/// `armenian`/`georgian`/custom `@counter-style` aren't modeled - the five
+/// real-world-common values only (`ROADMAP.md`'s own "scope to what real
+/// pages use" convention, same shape `GridTrackSize`'s own doc takes for
+/// track units). Painted as a real Unicode glyph through the existing
+/// `cosmic-text` shaping/rasterization path (`crate::text`) rather than a
+/// new paint primitive - `Disc`/`Circle`/`Square` are U+2022/U+25E6/U+25AA,
+/// `Decimal` is the item's 1-based ordinal among its list's real `<li>`
+/// children (no `<ol start>`/`value` attribute support - a documented cut,
+/// same shape as `grid`'s missing named lines). See `tree::build`'s own doc
+/// for exactly how/where a marker gets merged into its `<li>`'s box.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListStyleType {
+    Disc,
+    Circle,
+    Square,
+    Decimal,
+    None,
+}
+
+/// Real, but with no visible effect on its own — see `tree::build`'s doc:
+/// this crate merges a marker directly into its `<li>`'s own first line
+/// regardless of `Outside`/`Inside` (the real distinction — hanging in the
+/// margin vs. counted as ordinary inline content — needs either a margin-
+/// box concept or line-box narrowing this crate's simple block layout has
+/// neither of). Parsed and stored so `element.style.listStylePosition`
+/// round-trips correctly; not read by layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListStylePosition {
+    Outside,
+    Inside,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EdgeSizes {
     pub top: Length,

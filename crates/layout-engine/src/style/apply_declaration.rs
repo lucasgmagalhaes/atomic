@@ -11,8 +11,29 @@ use super::property_parsers::{
 };
 use super::types::{
     AlignItems, BorderStyle, Clear, Color, Display, FlexDirection, Float, GridTrackSize,
-    GridTracks, JustifyContent, Overflow, Position,
+    GridTracks, JustifyContent, ListStylePosition, ListStyleType, Overflow, Position,
 };
+
+/// Shared by `"list-style-type"` and the `"list-style"` shorthand.
+fn parse_list_style_type(v: &str) -> Option<ListStyleType> {
+    match v {
+        "disc" => Some(ListStyleType::Disc),
+        "circle" => Some(ListStyleType::Circle),
+        "square" => Some(ListStyleType::Square),
+        "decimal" => Some(ListStyleType::Decimal),
+        "none" => Some(ListStyleType::None),
+        _ => None,
+    }
+}
+
+/// Shared by `"list-style-position"` and the `"list-style"` shorthand.
+fn parse_list_style_position(v: &str) -> Option<ListStylePosition> {
+    match v {
+        "outside" => Some(ListStylePosition::Outside),
+        "inside" => Some(ListStylePosition::Inside),
+        _ => None,
+    }
+}
 
 /// Parses one `grid-template-columns`/`grid-template-rows` track token —
 /// `px` lengths and `fr` shares only, see [`GridTrackSize`]'s own doc.
@@ -307,6 +328,37 @@ pub(super) fn apply_declaration(style: &mut ComputedStyle, decl: &Declaration) {
             };
         }
         "transform" => apply_transform(style, &decl.value),
+        "list-style-type" => {
+            if let Some(Token::Ident(v)) = decl.value.first() {
+                if let Some(t) = parse_list_style_type(v) {
+                    style.list_style_type = Some(t);
+                }
+            }
+        }
+        "list-style-position" => {
+            if let Some(Token::Ident(v)) = decl.value.first() {
+                if let Some(p) = parse_list_style_position(v) {
+                    style.list_style_position = p;
+                }
+            }
+        }
+        "list-style" => {
+            // Real `list-style` also accepts a `list-style-image` (a
+            // `url(...)`), which this crate doesn't model — same
+            // "background-color only, no background-image" scope cut
+            // `apply_declaration`'s `"background"` arm above already has.
+            // Any `Ident` token here can only be a type or position
+            // keyword, so both are read from the same token list.
+            for token in &decl.value {
+                if let Token::Ident(v) = token {
+                    if let Some(t) = parse_list_style_type(v) {
+                        style.list_style_type = Some(t);
+                    } else if let Some(p) = parse_list_style_position(v) {
+                        style.list_style_position = p;
+                    }
+                }
+            }
+        }
         _ => {}
     }
 }

@@ -99,6 +99,26 @@ impl Profile {
         }
     }
 
+    /// Real coordinate-driven right-click: `x`/`y` are pixel coordinates in
+    /// the profile's own frame, same space [`click_at`](Self::click_at)
+    /// uses. The worker hit-tests its current layout and dispatches a real
+    /// bubbling, cancelable `"contextmenu"` `MouseEvent` (`button: 2`) on
+    /// the nearest id-addressable ancestor - see `profile-worker`'s
+    /// `dispatch_context_menu_at` for the exact scope cut (no focus
+    /// side-effect, unlike [`click_at`](Self::click_at)). `Ok(Err(message))`
+    /// means nothing was there to right-click.
+    pub fn context_menu_at(&mut self, x: f64, y: f64) -> std::io::Result<Result<(), String>> {
+        writeln!(self.stdin, "CONTEXT_MENU_AT {x} {y}")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        let line = line.trim();
+        match line.strip_prefix("ERROR ") {
+            Some(message) => Ok(Err(message.to_string())),
+            None => Ok(Ok(())),
+        }
+    }
+
     /// Types `key` into whichever real `<input>`/`<textarea>` the most
     /// recent [`click_at`](Self::click_at) focused - `"Backspace"` is a
     /// real delete-last-character, anything else is appended as typed

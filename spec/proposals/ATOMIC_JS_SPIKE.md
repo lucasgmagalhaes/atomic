@@ -823,6 +823,50 @@ remains the one open question, and it's a measurement-noise question at this poi
 an architecture one — the object-model cost behind it is already understood (this
 section's own profiling) and correctly out of scope to fix further (item 3 above).
 
+### Update, same day: `args` buffer pooled too — no clearly measurable win
+
+Re-profiling after the `locals`/`stack` pooling fix showed a smaller remaining
+allocation: `Instr::Call` still collected popped arguments into a fresh `Vec<Value>` on
+every call (`Vec::from_iter` + a handful of `malloc` frames in `closures`'s profile).
+Pooled it the same way (`VmPools` gained an `args` free-list; `execute_function` now
+takes `args: &[Value]` instead of an owned `Vec<Value>`). All 51 tests still pass.
+
+**Re-measured, three separate `closures` runs plus a final consolidated round of all
+three programs together (`hyperfine --warmup 10 --runs 100`):**
+
+| Run | `closures` |
+| --- | --- |
+| 1 | 2.07× |
+| 2 | 1.69× |
+| 3 | 2.05× |
+
+| Program (final consolidated round) | Slowdown |
+| --- | --- |
+| `sum` | **1.01×** |
+| `props` | **1.93×** |
+| `closures` | **2.05×** |
+
+**Honest read: no clearly attributable improvement from this specific fix.** Unlike the
+`locals`/`stack` pooling fix (a large, unambiguous, reproducible ~30% time reduction on
+`closures`), this one targets a much smaller allocation (`args` is usually 0-1 elements
+in these reference programs) — its effect, if any, is smaller than the ~20-50% run-to-run
+variance already visible throughout this session's measurements. Applying it was still
+worth doing (it's correct, it's free, and it removes one more real allocation from the
+hot path), but reporting it as "fixed the closures gap" would be exactly the kind of
+unearned optimism this methodology exists to prevent. `closures` remains at roughly the
+same ~1.7-2.1× range it was in immediately after the `locals`/`stack` fix — right at
+§9's guardrail, same open, noise-bound question `props` already was.
+
+**Where this leaves things:** two of the three concrete, in-scope, evidence-backed fixes
+from the performance survey are applied (`GetProp` clone removal, `locals`/`stack`/`args`
+pooling). Both `props` and `closures` now sit right at the 2× line, oscillating across
+it between measurement sessions in this non-dedicated environment — not clearly green,
+not clearly red. Further movement from here would need either a quiet, dedicated
+benchmarking machine (to actually resolve whether they're above or below 2×) or the
+larger, out-of-scope architectural work already named and explicitly not recommended
+(Shapes/inline caches for `props`, a different execution model for interpreter dispatch
+overhead generally) — not more micro-fixes hunted for their own sake.
+
 ## Appendix — salvaged principles from the rejected proposal
 
 These remain correct engineering principles *if* this spike (or, contingent on a green

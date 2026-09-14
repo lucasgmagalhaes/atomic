@@ -61,6 +61,12 @@ impl LocalSlot {
 struct VmPools {
     locals: RefCell<Vec<Vec<LocalSlot>>>,
     stack: RefCell<Vec<Vec<Value>>>,
+    /// Added after re-profiling post-locals/stack-pooling: `Instr::Call`
+    /// still collected popped arguments into a fresh `Vec<Value>` on every
+    /// call before handing them to the callee — the next-biggest allocation
+    /// left, visible in `closures`' profile as `Vec::from_iter` + a handful
+    /// of `malloc` frames. Same pooling treatment as `locals`/`stack`.
+    args: RefCell<Vec<Vec<Value>>>,
 }
 
 impl VmPools {
@@ -84,6 +90,15 @@ impl VmPools {
     fn return_stack(&self, mut v: Vec<Value>) {
         v.clear();
         self.stack.borrow_mut().push(v);
+    }
+
+    fn take_args(&self) -> Vec<Value> {
+        self.args.borrow_mut().pop().unwrap_or_default()
+    }
+
+    fn return_args(&self, mut v: Vec<Value>) {
+        v.clear();
+        self.args.borrow_mut().push(v);
     }
 }
 
@@ -134,7 +149,7 @@ pub fn run_source_with_feedback(
     let value = execute_function(
         &module,
         module.top_level,
-        Vec::new(),
+        &[],
         Vec::new(),
         &mut feedback,
         &pools,
@@ -145,7 +160,7 @@ pub fn run_source_with_feedback(
 fn execute_function(
     module: &BytecodeModule,
     function_index: usize,
-    args: Vec<Value>,
+    args: &[Value],
     upvalues: Vec<Rc<RefCell<Value>>>,
     feedback: &mut [FunctionFeedback],
     pools: &VmPools,
@@ -313,10 +328,16 @@ fn execute_function(
                 // Args were pushed left-to-right before the callee (compiler
                 // convention, compiler.rs's `Expr::Call` arm), so popping
                 // `argc` times yields them last-pushed-first; reverse to
-                // restore the original left-to-right order.
-                let mut args: Vec<Value> = (0..argc)
-                    .map(|_| stack.pop().expect("Call needs argc values on the stack"))
-                    .collect();
+                // restore the original left-to-right order. `args` is a
+                // pooled buffer (`VmPools`, same treatment as
+                // `locals`/`stack`) rather than a fresh `Vec` per call — the
+                // next-biggest allocation profiling found once the
+                // locals/stack pooling landed (visible as `Vec::from_iter`
+                // in `closures`' profile, ATOMIC_JS_SPIKE.md's Results).
+                let mut args = pools.take_args();
+                for _ in 0..argc {
+                    args.push(stack.pop().expect("Call needs argc values on the stack"));
+                }
                 args.reverse();
                 let function_data = match callee {
                     Value::Function(f) => f,
@@ -329,11 +350,12 @@ fn execute_function(
                 let result = execute_function(
                     module,
                     function_data.function_index,
-                    args,
+                    &args,
                     function_data.captured_env.clone(),
                     feedback,
                     pools,
                 )?;
+                pools.return_args(args);
                 stack.push(result);
                 pc += 1;
             }

@@ -1,4 +1,4 @@
-use layout_engine::{layout_text, rasterize_glyph, Color};
+use layout_engine::{layout_text, rasterize_glyph, Color, FontFamily};
 
 const BLACK: Color = Color {
     r: 0,
@@ -9,7 +9,7 @@ const BLACK: Color = Color {
 
 #[test]
 fn empty_text_has_zero_size_and_no_glyphs() {
-    let layout = layout_text("", 16.0, None, BLACK);
+    let layout = layout_text("", 16.0, None, BLACK, FontFamily::default());
     assert_eq!(layout.width, 0.0);
     assert_eq!(layout.height, 0.0);
     assert!(layout.glyphs.is_empty());
@@ -17,7 +17,7 @@ fn empty_text_has_zero_size_and_no_glyphs() {
 
 #[test]
 fn measures_a_single_unwrapped_line() {
-    let layout = layout_text("hello", 16.0, None, BLACK);
+    let layout = layout_text("hello", 16.0, None, BLACK, FontFamily::default());
     assert!(
         layout.width > 0.0,
         "width should be positive, got {}",
@@ -33,27 +33,34 @@ fn measures_a_single_unwrapped_line() {
 
 #[test]
 fn longer_text_measures_wider_than_shorter_text_at_the_same_size() {
-    let short = layout_text("hi", 16.0, None, BLACK);
-    let long = layout_text("hello world", 16.0, None, BLACK);
+    let short = layout_text("hi", 16.0, None, BLACK, FontFamily::default());
+    let long = layout_text("hello world", 16.0, None, BLACK, FontFamily::default());
     assert!(long.width > short.width);
 }
 
 #[test]
 fn larger_font_size_measures_wider_and_taller() {
-    let small = layout_text("hello", 12.0, None, BLACK);
-    let large = layout_text("hello", 32.0, None, BLACK);
+    let small = layout_text("hello", 12.0, None, BLACK, FontFamily::default());
+    let large = layout_text("hello", 32.0, None, BLACK, FontFamily::default());
     assert!(large.width > small.width);
     assert!(large.height > small.height);
 }
 
 #[test]
 fn wraps_onto_multiple_lines_when_narrower_than_the_text() {
-    let unwrapped = layout_text("hello world this is a long sentence", 16.0, None, BLACK);
+    let unwrapped = layout_text(
+        "hello world this is a long sentence",
+        16.0,
+        None,
+        BLACK,
+        FontFamily::default(),
+    );
     let wrapped = layout_text(
         "hello world this is a long sentence",
         16.0,
         Some(80.0),
         BLACK,
+        FontFamily::default(),
     );
 
     // Wrapping should never make a line wider than the constraint...
@@ -65,14 +72,14 @@ fn wraps_onto_multiple_lines_when_narrower_than_the_text() {
 
 #[test]
 fn glyphs_are_positioned_left_to_right() {
-    let layout = layout_text("ab", 16.0, None, BLACK);
+    let layout = layout_text("ab", 16.0, None, BLACK, FontFamily::default());
     assert_eq!(layout.glyphs.len(), 2);
     assert!(layout.glyphs[1].x > layout.glyphs[0].x);
 }
 
 #[test]
 fn rasterizes_a_visible_glyph_with_some_ink() {
-    let layout = layout_text("A", 32.0, None, BLACK);
+    let layout = layout_text("A", 32.0, None, BLACK, FontFamily::default());
     let bitmap = rasterize_glyph(&layout.glyphs[0])
         .expect("'A' at 32px should rasterize to a visible bitmap");
 
@@ -90,7 +97,7 @@ fn rasterizes_a_visible_glyph_with_some_ink() {
 
 #[test]
 fn rasterizing_a_space_yields_no_visible_bitmap() {
-    let layout = layout_text(" ", 16.0, None, BLACK);
+    let layout = layout_text(" ", 16.0, None, BLACK, FontFamily::default());
     // A space still shapes to one glyph (with advance width) but has no
     // ink - rasterize_glyph should say so rather than return an empty-but-
     // technically-present bitmap.
@@ -107,6 +114,6 @@ fn glyph_color_matches_the_requested_color() {
         b: 0,
         a: 255,
     };
-    let layout = layout_text("x", 16.0, None, red);
+    let layout = layout_text("x", 16.0, None, red, FontFamily::default());
     assert_eq!(layout.glyphs[0].color, red);
 }

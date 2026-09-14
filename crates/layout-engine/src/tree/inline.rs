@@ -3,7 +3,7 @@
 use css::{ElementSnapshot, SelectorIndex, Stylesheet};
 use dom::{Dom, NodeData, NodeId};
 
-use crate::style::{Color, Display};
+use crate::style::{Color, Display, FontFamily};
 
 use super::snapshot::{is_never_rendered, resolve_element_style};
 use super::types::InlineSpanSource;
@@ -25,6 +25,7 @@ pub(super) fn collect_inline_spans<'a>(
     chain: &mut Vec<ElementSnapshot<'a>>,
     parent_font_size: f64,
     parent_color: Color,
+    parent_font_family: FontFamily,
     out: &mut Vec<InlineSpanSource>,
 ) {
     let Some(n) = dom.get(node) else { return };
@@ -36,6 +37,7 @@ pub(super) fn collect_inline_spans<'a>(
                     text: text.clone(),
                     font_size: parent_font_size,
                     color: parent_color,
+                    font_family: parent_font_family,
                 });
             }
         }
@@ -57,6 +59,7 @@ pub(super) fn collect_inline_spans<'a>(
                 chain,
                 parent_font_size,
                 parent_color,
+                parent_font_family,
             );
             if style.display != Display::None {
                 for &child in &n.children {
@@ -70,6 +73,7 @@ pub(super) fn collect_inline_spans<'a>(
                         chain,
                         style.font_size,
                         style.color,
+                        style.font_family.unwrap_or(parent_font_family),
                         out,
                     );
                 }
@@ -105,6 +109,7 @@ pub(super) fn is_inline_level<'a>(
     chain: &mut Vec<ElementSnapshot<'a>>,
     parent_font_size: f64,
     parent_color: Color,
+    parent_font_family: FontFamily,
 ) -> bool {
     match dom.get(node).map(|n| &n.data) {
         Some(NodeData::Text(text)) => !text.trim().is_empty(),
@@ -126,6 +131,7 @@ pub(super) fn is_inline_level<'a>(
                 chain,
                 parent_font_size,
                 parent_color,
+                parent_font_family,
             );
             chain.pop();
             style.display == Display::Inline

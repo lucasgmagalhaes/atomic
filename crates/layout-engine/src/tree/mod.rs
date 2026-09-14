@@ -96,6 +96,7 @@ pub fn build_box_tree_with_viewport(
         &mut chain,
         initial.font_size,
         initial.color,
+        initial.font_family.unwrap_or_default(),
     )
 }
 

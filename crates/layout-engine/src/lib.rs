@@ -15,8 +15,8 @@ pub use grid::layout_grid_children;
 pub use layout::layout_block;
 pub use style::{
     resolve_style, AlignItems, BorderStyle, BoxShadow, Clear, Color, ComputedStyle, Display,
-    EdgeSizes, FlexDirection, Float, GridTrackSize, GridTracks, JustifyContent, Length,
-    LinearGradient, ListStylePosition, ListStyleType, Overflow, Position,
+    EdgeSizes, FlexDirection, Float, FontFamily, GenericFontFamily, GridTrackSize, GridTracks,
+    JustifyContent, Length, LinearGradient, ListStylePosition, ListStyleType, Overflow, Position,
 };
 pub use text::{
     layout_inline, layout_text, rasterize_glyph, GlyphBitmap, InlineSpan, PositionedGlyph,

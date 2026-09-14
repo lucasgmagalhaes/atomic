@@ -442,6 +442,103 @@ pub struct LinearGradient {
     pub to: Color,
 }
 
+/// The 5 CSS generic font families `cosmic-text`'s own `Family` enum
+/// already has a direct variant for — no custom `@font-face`-registered
+/// families (this engine fetches nothing over the network at box-tree/
+/// text-shaping time - see `crate::text`'s own module doc), same real
+/// scope this codebase's other gaps already document as a deliberate
+/// non-goal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GenericFontFamily {
+    Serif,
+    SansSerif,
+    Monospace,
+    Cursive,
+    Fantasy,
+}
+
+/// Longest ASCII font name this crate keeps - real names in practice
+/// (`"Helvetica Neue"`, `"Segoe UI"`) fit comfortably; a longer one is
+/// silently truncated, same "declared but unsupported past a cap, not a
+/// silent truncation nobody would notice" convention `MAX_GRID_TRACKS`'s
+/// own doc already takes elsewhere in this crate.
+pub const MAX_FONT_FAMILY_NAME_LEN: usize = 32;
+
+/// Real `font-family`, scoped to the CSS pattern real pages overwhelmingly
+/// use: one optional specific name plus a trailing generic fallback (e.g.
+/// `font-family: Arial, sans-serif`) - not a full comma-separated fallback
+/// *list* (only the first named entry and the last generic keyword in the
+/// declaration are kept, same "one value, not a list" scope cut
+/// `BoxShadow` already takes elsewhere in this crate). A fixed-capacity
+/// byte buffer, not a `String` - `ComputedStyle` is `Copy` (embedded by
+/// value in every `LayoutBox`, copied around freely by every recursive
+/// box-tree/layout function), and a heap-allocated field would force it
+/// to `Clone`-only, same reasoning `GridTracks`'s own doc already gives
+/// for using a fixed array instead of a `Vec`. ASCII-only; a non-ASCII
+/// font name is dropped (falls back to just the generic family) rather
+/// than mis-truncated mid-codepoint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FontFamily {
+    name: [u8; MAX_FONT_FAMILY_NAME_LEN],
+    name_len: u8,
+    pub generic: GenericFontFamily,
+}
+
+impl FontFamily {
+    /// A bare generic keyword, no specific name - e.g. `font-family:
+    /// sans-serif`, and this crate's own built-in default (`text::layout_
+    /// inline`'s previous hardcoded behavior before this type existed).
+    pub fn generic(generic: GenericFontFamily) -> Self {
+        FontFamily {
+            name: [0; MAX_FONT_FAMILY_NAME_LEN],
+            name_len: 0,
+            generic,
+        }
+    }
+
+    /// A specific name plus its generic fallback - e.g. `font-family:
+    /// Arial, sans-serif`. `name` is truncated to
+    /// [`MAX_FONT_FAMILY_NAME_LEN`] bytes and dropped entirely (falling
+    /// back to a bare generic, same as [`FontFamily::generic`]) if it
+    /// isn't plain ASCII - see this type's own doc for why.
+    pub fn named(name: &str, generic: GenericFontFamily) -> Self {
+        if !name.is_ascii() || name.is_empty() {
+            return FontFamily::generic(generic);
+        }
+        let bytes = name.as_bytes();
+        let len = bytes.len().min(MAX_FONT_FAMILY_NAME_LEN);
+        let mut buf = [0u8; MAX_FONT_FAMILY_NAME_LEN];
+        buf[..len].copy_from_slice(&bytes[..len]);
+        FontFamily {
+            name: buf,
+            name_len: len as u8,
+            generic,
+        }
+    }
+
+    /// The specific name, if one was set - `None` for a bare generic
+    /// keyword.
+    pub fn name(&self) -> Option<&str> {
+        if self.name_len == 0 {
+            return None;
+        }
+        // `named` only ever stores validated ASCII, so this is exact -
+        // never a lossy/replacement-character conversion.
+        std::str::from_utf8(&self.name[..self.name_len as usize]).ok()
+    }
+}
+
+impl Default for FontFamily {
+    /// Matches this crate's own pre-existing hardcoded default (`text::
+    /// layout_inline`'s `Family::SansSerif`, before `font-family` was a
+    /// real, settable property) - every text box that never resolves a
+    /// real `font-family` (from its own rules or an ancestor's) still
+    /// paints exactly as it did before this type existed.
+    fn default() -> Self {
+        FontFamily::generic(GenericFontFamily::SansSerif)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EdgeSizes {
     pub top: Length,

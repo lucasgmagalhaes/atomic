@@ -10,10 +10,61 @@ use super::property_parsers::{
     parse_edge_shorthand, parse_length,
 };
 use super::types::{
-    AlignItems, BorderStyle, Clear, Color, Display, FlexDirection, Float, GridTrackSize,
-    GridTracks, JustifyContent, LinearGradient, ListStylePosition, ListStyleType, Overflow,
-    Position,
+    AlignItems, BorderStyle, Clear, Color, Display, FlexDirection, Float, FontFamily,
+    GenericFontFamily, GridTrackSize, GridTracks, JustifyContent, LinearGradient,
+    ListStylePosition, ListStyleType, Overflow, Position,
 };
+
+/// `None` for anything but the 5 real CSS generic keywords this crate
+/// models - see [`GenericFontFamily`]'s own doc.
+fn parse_generic_font_family(v: &str) -> Option<GenericFontFamily> {
+    match v {
+        "serif" => Some(GenericFontFamily::Serif),
+        "sans-serif" => Some(GenericFontFamily::SansSerif),
+        "monospace" => Some(GenericFontFamily::Monospace),
+        "cursive" => Some(GenericFontFamily::Cursive),
+        "fantasy" => Some(GenericFontFamily::Fantasy),
+        _ => None,
+    }
+}
+
+/// Parses a `font-family` value - real CSS's own comma-separated fallback
+/// list, scoped down to the one real-world-common pattern (see
+/// [`FontFamily`]'s own doc): the first entry that isn't a generic keyword
+/// becomes the specific name, and the *last* generic keyword anywhere in
+/// the list becomes the fallback (real pages almost always put exactly one
+/// generic keyword last, e.g. `"Helvetica Neue", Arial, sans-serif`, so
+/// this reads the same as the real cascade would for that common shape).
+/// `None` only when the value has neither a usable name nor a recognized
+/// generic keyword (e.g. it's empty, or every entry is an unrecognized
+/// custom `@font-face` name with no generic fallback at all).
+fn parse_font_family(value: &[Token]) -> Option<FontFamily> {
+    let mut name: Option<String> = None;
+    let mut generic: Option<GenericFontFamily> = None;
+    for segment in value.split(|t| *t == Token::Comma) {
+        let Some(first) = segment.first() else {
+            continue;
+        };
+        let entry = match first {
+            Token::Ident(v) => v.as_str(),
+            Token::String(v) => v.as_str(),
+            _ => continue,
+        };
+        if let Some(g) = parse_generic_font_family(entry) {
+            generic = Some(g);
+        } else if name.is_none() {
+            name = Some(entry.to_string());
+        }
+    }
+    if name.is_none() && generic.is_none() {
+        return None;
+    }
+    let generic = generic.unwrap_or(GenericFontFamily::SansSerif);
+    match name {
+        Some(n) => Some(FontFamily::named(&n, generic)),
+        None => Some(FontFamily::generic(generic)),
+    }
+}
 
 /// Parses one `linear-gradient(...)` value - real, but 2-stop only, see
 /// [`LinearGradient`]'s own doc. `tokens` is everything strictly between
@@ -436,6 +487,11 @@ pub(super) fn apply_declaration(style: &mut ComputedStyle, decl: &Declaration) {
             };
         }
         "transform" => apply_transform(style, &decl.value),
+        "font-family" => {
+            if let Some(f) = parse_font_family(&decl.value) {
+                style.font_family = Some(f);
+            }
+        }
         "list-style-type" => {
             if let Some(Token::Ident(v)) = decl.value.first() {
                 if let Some(t) = parse_list_style_type(v) {

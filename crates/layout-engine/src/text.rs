@@ -14,7 +14,25 @@ use std::sync::{Mutex, OnceLock};
 
 use cosmic_text::{Attrs, Buffer, CacheKey, Family, FontSystem, Metrics, Shaping, SwashCache};
 
-use crate::style::Color;
+use crate::style::{Color, FontFamily, GenericFontFamily};
+
+/// Maps this crate's own [`FontFamily`] onto `cosmic-text`'s `Family` -
+/// its named form when one was set (real system-font-database matching by
+/// name, via `fontdb`, since `cosmic-text` isn't a stub), else the mapped
+/// generic keyword. See [`FontFamily`]'s own doc for the real scope cut
+/// (no `@font-face`, one name plus one generic, not a full fallback list).
+fn family_for(font_family: &FontFamily) -> Family<'_> {
+    if let Some(name) = font_family.name() {
+        return Family::Name(name);
+    }
+    match font_family.generic {
+        GenericFontFamily::Serif => Family::Serif,
+        GenericFontFamily::SansSerif => Family::SansSerif,
+        GenericFontFamily::Monospace => Family::Monospace,
+        GenericFontFamily::Cursive => Family::Cursive,
+        GenericFontFamily::Fantasy => Family::Fantasy,
+    }
+}
 
 struct TextContext {
     fonts: FontSystem,
@@ -62,6 +80,7 @@ pub struct InlineSpan<'a> {
     pub text: &'a str,
     pub font_size: f32,
     pub color: Color,
+    pub font_family: FontFamily,
 }
 
 /// Shapes and line-wraps `text` at `font_size`, constrained to `max_width`
@@ -71,12 +90,19 @@ pub struct InlineSpan<'a> {
 /// separate paint step for text yet (unlike boxes, which carry their own
 /// `background_color` and let `render` read it back off the style). A thin
 /// single-span wrapper over [`layout_inline`].
-pub fn layout_text(text: &str, font_size: f32, max_width: Option<f32>, color: Color) -> TextLayout {
+pub fn layout_text(
+    text: &str,
+    font_size: f32,
+    max_width: Option<f32>,
+    color: Color,
+    font_family: FontFamily,
+) -> TextLayout {
     layout_inline(
         &[InlineSpan {
             text,
             font_size,
             color,
+            font_family,
         }],
         max_width,
     )
@@ -109,6 +135,12 @@ pub fn layout_inline(spans: &[InlineSpan], max_width: Option<f32>) -> TextLayout
 
     buffer.set_size(max_width, None);
 
+    // `default_attrs` only backstops `set_rich_text`'s own "attributes for
+    // any gap between spans" parameter (there are none here, since
+    // `rich_spans` covers every span exactly) - every real span's own
+    // family/metrics/metadata are set per-span below via `family_for`,
+    // not shared from this default the way a single hardcoded
+    // `Family::SansSerif` used to be before real `font-family` existed.
     let default_attrs = Attrs::new().family(Family::SansSerif);
     let rich_spans: Vec<(&str, Attrs)> = spans
         .iter()
@@ -117,7 +149,10 @@ pub fn layout_inline(spans: &[InlineSpan], max_width: Option<f32>) -> TextLayout
             let span_metrics = Metrics::new(span.font_size, span.font_size * 1.2);
             (
                 span.text,
-                default_attrs.clone().metrics(span_metrics).metadata(i),
+                Attrs::new()
+                    .family(family_for(&span.font_family))
+                    .metrics(span_metrics)
+                    .metadata(i),
             )
         })
         .collect();

@@ -35,6 +35,7 @@ pub enum Instr {
     SetProp(u32),
     NewObject,
     Add,
+    Sub,
     Mul,
     Div,
     Mod,

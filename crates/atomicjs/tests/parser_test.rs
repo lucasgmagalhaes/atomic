@@ -56,6 +56,22 @@ fn parses_member_access_and_binary_add() {
 }
 
 #[test]
+fn parses_subtraction_at_additive_precedence() {
+    let program = parse_source("10 - 3 + 1;");
+    match &program[0] {
+        Stmt::Expr(Expr::Binary {
+            op: BinOp::Add,
+            left,
+            right,
+        }) => {
+            assert!(matches!(**left, Expr::Binary { op: BinOp::Sub, .. }));
+            assert!(matches!(**right, Expr::Number(n) if n == 1.0));
+        }
+        other => panic!("expected left-associative Add/Sub expression, got {other:?}"),
+    }
+}
+
+#[test]
 fn parses_function_declaration_with_params_and_body() {
     let program = parse_source(
         r#"

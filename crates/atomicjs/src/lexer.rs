@@ -27,6 +27,7 @@ pub enum Token {
     PlusAssign,
     Increment,
     Plus,
+    Minus,
     Star,
     Slash,
     Percent,
@@ -176,6 +177,10 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, LexError> {
                     tokens.push(Token::Plus);
                     i += 1;
                 }
+            }
+            '-' => {
+                tokens.push(Token::Minus);
+                i += 1;
             }
             '=' => {
                 tokens.push(Token::Assign);

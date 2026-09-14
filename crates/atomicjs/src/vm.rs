@@ -314,6 +314,10 @@ fn execute_function<F: FeedbackSink>(
                 stack.push(Value::Number(as_number(&a) + as_number(&b)));
                 pc += 1;
             }
+            Instr::Sub => {
+                binary_number(&mut stack, |a, b| a - b);
+                pc += 1;
+            }
             Instr::Mul => {
                 binary_number(&mut stack, |a, b| a * b);
                 pc += 1;

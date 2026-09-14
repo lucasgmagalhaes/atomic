@@ -68,6 +68,21 @@ pub const HOT_LOOP: &str = r#"
 (function () { let gold=1.0; let gems=1.0; let energy=1.0; let goldMult=1.0001; let gemsMult=1.00005; let energyMult=1.00002; let ticks=200000; for (let i=0; i<ticks; i++) { gold=gold*goldMult+Math.sqrt(i%997+1); gems=gems*gemsMult+(gold%13); energy=energy*energyMult+Math.log(gems+1); if (gold>1e12) { gold=gold/1e6; goldMult*=1.0000001; } if (gems>1e12) { gems=gems/1e6; gemsMult*=1.0000001; } if (energy>1e12) { energy=energy/1e6; energyMult*=1.0000001; } } return gold+gems+energy; })();
 "#;
 
+/// Milestone 3's recursion and independent named-function call graph.
+#[allow(dead_code)]
+pub const UPGRADE_COST: &str = r#"
+function cost(level) {
+    if (level < 1) { return 10; }
+    return cost(level - 1) * 1.15;
+}
+function affordableLevels(budget, level) {
+    let price = cost(level);
+    if (price > budget) { return level; }
+    return affordableLevels(budget - price, level + 1);
+}
+affordableLevels(1000, 0);
+"#;
+
 /// `(name, source)` pairs for every reference program, matching the CLI arg
 /// names both comparison binaries accept (§4.3).
 pub fn all() -> [(&'static str, &'static str); 5] {

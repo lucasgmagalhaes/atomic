@@ -66,6 +66,19 @@ fn distinguishes_plus_plus_assign_and_increment() {
 }
 
 #[test]
+fn tokenizes_binary_minus() {
+    assert_eq!(
+        tokenize("level - 1").unwrap(),
+        vec![
+            Token::Identifier("level".into()),
+            Token::Minus,
+            Token::Number(1.0),
+            Token::Eof,
+        ]
+    );
+}
+
+#[test]
 fn increment_has_no_space_dependent_ambiguity() {
     // `+++` must lex as Increment, Plus — not Plus, Increment — matching the
     // greedy-match order the lexer's `+` branch already uses (checks `++`

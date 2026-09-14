@@ -252,11 +252,16 @@ impl Parser {
 
     fn parse_additive(&mut self) -> Result<Expr, ParseError> {
         let mut left = self.parse_multiplicative()?;
-        while self.check(&Token::Plus) {
+        while self.check(&Token::Plus) || self.check(&Token::Minus) {
+            let op = if self.check(&Token::Plus) {
+                BinOp::Add
+            } else {
+                BinOp::Sub
+            };
             self.advance();
             let right = self.parse_multiplicative()?;
             left = Expr::Binary {
-                op: BinOp::Add,
+                op,
                 left: Box::new(left),
                 right: Box::new(right),
             };

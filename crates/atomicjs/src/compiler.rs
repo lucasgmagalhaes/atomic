@@ -495,6 +495,7 @@ impl Compiler {
 fn bin_instr(op: BinOp) -> Instr {
     match op {
         BinOp::Add => Instr::Add,
+        BinOp::Sub => Instr::Sub,
         BinOp::Mul => Instr::Mul,
         BinOp::Div => Instr::Div,
         BinOp::Mod => Instr::Mod,

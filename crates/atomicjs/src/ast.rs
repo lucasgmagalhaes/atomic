@@ -4,6 +4,7 @@
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BinOp {
     Add,
+    Sub,
     Mul,
     Div,
     Mod,

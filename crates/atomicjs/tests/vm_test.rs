@@ -80,6 +80,21 @@ fn two_independent_counters_do_not_share_captured_state() {
 }
 
 #[test]
+fn named_functions_can_call_another_named_function() {
+    let source = r#"
+        function add(a, b) { return a + b; }
+        function doubleSum(a, b) { return add(a, b) * 2; }
+        doubleSum(3, 4);
+    "#;
+    assert_eq!(number(source), 14.0);
+}
+
+#[test]
+fn recursive_upgrade_cost_matches_quickjs_golden_value() {
+    assert_eq!(number(common::UPGRADE_COST), 19.0);
+}
+
+#[test]
 fn empty_script_completes_to_undefined() {
     assert!(matches!(run_source("").unwrap(), Value::Undefined));
 }

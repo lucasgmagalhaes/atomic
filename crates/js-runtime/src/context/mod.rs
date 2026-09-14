@@ -42,7 +42,7 @@ use crate::{
     form_data, history, host_state, import_map, indexed_db_bindings, local_storage_bindings,
     location, message_channel, module_loader, mutation_observer, navigator, notifications,
     page_visibility, performance, request_response, screen, script_limits, selection, timers,
-    trusted_types, url_bindings, value_bridge, web_audio, window, window_registry,
+    trusted_types, url_bindings, value_bridge, web_audio, window, window_registry, worker_bindings,
 };
 
 /// Registers every global this crate exposes on a fresh `JSContext` —
@@ -85,6 +85,7 @@ pub(crate) unsafe fn register_standard_globals(ptr: *mut sys::JSContext) {
     screen::register(ptr);
     value_bridge::register(ptr);
     selection::register(ptr);
+    worker_bindings::register(ptr);
 }
 
 /// The exact inverse of [`register_standard_globals`] — every module's
@@ -102,6 +103,7 @@ pub(crate) unsafe fn cleanup_standard_globals(ptr: *mut sys::JSContext) {
     blob::cleanup(ptr);
     notifications::cleanup(ptr);
     selection::cleanup(ptr);
+    worker_bindings::cleanup(ptr);
 }
 
 /// Builds a fresh, unattached [`host_state::HostState`] wrapping `dom`
@@ -222,6 +224,7 @@ impl<'rt> Context<'rt> {
                 + message_channel::pump(self.ptr)
                 + window_delivered
                 + module_loader::pump(self.ptr)
+                + worker_bindings::pump(self.ptr)
                 + children_delivered
         }
     }

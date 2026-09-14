@@ -53,6 +53,7 @@ mod value_bridge;
 mod web_audio;
 mod window;
 mod window_registry;
+mod worker_bindings;
 
 mod context;
 mod runtime;

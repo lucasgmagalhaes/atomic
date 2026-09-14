@@ -215,12 +215,24 @@ pub enum Length {
     Auto,
 }
 
+/// `Table`/`TableRow`/`TableCell` are real (2026-09-14) — see
+/// `crate::table`'s own module doc for the exact layout scope. Only
+/// `Table` is itself special-cased in `layout::layout_children`'s own
+/// dispatch; a `TableRow`/`TableCell` box reached *outside* a `Table`
+/// ancestor's own layout (`crate::table::layout_table_children` never
+/// dispatches into `layout_children` for rows/cells at all — see that
+/// function's own doc) just falls through to plain block stacking, same
+/// "no anonymous box generation" cut `crate::table`'s own doc already
+/// takes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Display {
     Block,
     Inline,
     Flex,
     Grid,
+    Table,
+    TableRow,
+    TableCell,
     None,
 }
 

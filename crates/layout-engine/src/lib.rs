@@ -4,6 +4,7 @@ pub mod hit_test;
 pub mod layout;
 pub mod stacking;
 pub mod style;
+pub mod table;
 pub mod text;
 pub mod tree;
 
@@ -18,6 +19,7 @@ pub use style::{
     EdgeSizes, FlexDirection, Float, FontFamily, GenericFontFamily, GridTrackSize, GridTracks,
     JustifyContent, Length, LinearGradient, ListStylePosition, ListStyleType, Overflow, Position,
 };
+pub use table::layout_table_children;
 pub use text::{
     layout_inline, layout_text, rasterize_glyph, GlyphBitmap, InlineSpan, PositionedGlyph,
     TextLayout,

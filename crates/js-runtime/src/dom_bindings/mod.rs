@@ -65,6 +65,7 @@ mod iframe;
 mod mutation;
 mod navigation;
 mod node_registry;
+mod pointer_capture;
 mod scroll_focus;
 mod select;
 mod selectors;

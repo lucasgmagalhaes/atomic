@@ -210,12 +210,31 @@ impl<'rt> Page<'rt> {
         // the page scrolls underneath - no separate "fixed layer" needed,
         // since this is applied per-primitive at the exact point every
         // other primitive already gets shifted.
-        let shift_y = |y: f32, fixed: bool| if fixed { y } else { y - offset };
-        let shift_clip_if = |clip: Option<ClipRect>, fixed: bool| {
+        // Real `position: sticky` (`layout_engine::Position::Sticky`): see
+        // `Rect::sticky`'s own doc for the exact formula this implements.
+        // `extra_shift` is `0.0` whenever a tagged box hasn't crossed its
+        // own `top` threshold yet (the normal page shift alone already
+        // keeps it below `top_px`) - real sticky behavior only kicks in
+        // past that point, and un-sticks again just as smoothly on scroll
+        // back up, since this is recomputed fresh every frame from
+        // `scroll_top` alone (no stateful "is it currently stuck" flag
+        // needed).
+        let extra_shift = |sticky: Option<(f32, f32)>| match sticky {
+            Some((natural_y, top_px)) => (top_px - (natural_y - offset)).max(0.0),
+            None => 0.0,
+        };
+        let shift_y = |y: f32, fixed: bool, sticky: Option<(f32, f32)>| {
+            if fixed {
+                y
+            } else {
+                y - offset + extra_shift(sticky)
+            }
+        };
+        let shift_clip_if = |clip: Option<ClipRect>, fixed: bool, sticky: Option<(f32, f32)>| {
             if fixed {
                 clip
             } else {
-                shift_clip(clip, offset)
+                shift_clip(clip, offset - extra_shift(sticky))
             }
         };
 
@@ -265,15 +284,15 @@ impl<'rt> Page<'rt> {
         let rects: Vec<Rect> = build_display_list(&base_tree)
             .into_iter()
             .map(|r| Rect {
-                y: shift_y(r.y, r.fixed),
+                y: shift_y(r.y, r.fixed, r.sticky),
                 ..r
             })
             .collect();
         let images: Vec<ImageQuad> = build_image_list(&base_tree)
             .into_iter()
             .map(|q| ImageQuad {
-                y: shift_y(q.y, q.fixed),
-                clip: shift_clip_if(q.clip, q.fixed),
+                y: shift_y(q.y, q.fixed, q.sticky),
+                clip: shift_clip_if(q.clip, q.fixed, q.sticky),
                 ..q
             })
             .collect();
@@ -284,13 +303,14 @@ impl<'rt> Page<'rt> {
                     y: if g.fixed {
                         g.glyph.y
                     } else {
-                        g.glyph.y - scroll_top as i32
+                        g.glyph.y - scroll_top as i32 + extra_shift(g.sticky) as i32
                     },
                     ..g.glyph
                 },
-                clip: shift_clip_if(g.clip, g.fixed),
+                clip: shift_clip_if(g.clip, g.fixed, g.sticky),
                 opacity: g.opacity,
                 fixed: g.fixed,
+                sticky: g.sticky,
             })
             .collect();
 
@@ -328,15 +348,15 @@ impl<'rt> Page<'rt> {
                 let layer_rects: Vec<Rect> = build_display_list(layer_root)
                     .into_iter()
                     .map(|r| Rect {
-                        y: shift_y(r.y, r.fixed),
+                        y: shift_y(r.y, r.fixed, r.sticky),
                         ..r
                     })
                     .collect();
                 let layer_images: Vec<ImageQuad> = build_image_list(layer_root)
                     .into_iter()
                     .map(|q| ImageQuad {
-                        y: shift_y(q.y, q.fixed),
-                        clip: shift_clip_if(q.clip, q.fixed),
+                        y: shift_y(q.y, q.fixed, q.sticky),
+                        clip: shift_clip_if(q.clip, q.fixed, q.sticky),
                         ..q
                     })
                     .collect();
@@ -347,13 +367,14 @@ impl<'rt> Page<'rt> {
                             y: if g.fixed {
                                 g.glyph.y
                             } else {
-                                g.glyph.y - scroll_top as i32
+                                g.glyph.y - scroll_top as i32 + extra_shift(g.sticky) as i32
                             },
                             ..g.glyph
                         },
-                        clip: shift_clip_if(g.clip, g.fixed),
+                        clip: shift_clip_if(g.clip, g.fixed, g.sticky),
                         opacity: g.opacity,
                         fixed: g.fixed,
+                        sticky: g.sticky,
                     })
                     .collect();
 

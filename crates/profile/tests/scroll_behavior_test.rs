@@ -4,6 +4,48 @@ mod common;
 use common::*;
 
 #[test]
+fn a_sticky_header_stays_pinned_at_the_top_while_the_page_scrolls_past_it() {
+    let html = r#"<style>#header { position: sticky; top: 0px; z-index: 1; background-color: #ff0000; width: 100px; height: 20px; } #content { background-color: #0000ff; width: 100px; height: 400px; }</style><div id="header"></div><div id="content"></div>"#;
+    let addr = serve_html_once(html);
+    let page_url = format!("http://{addr}/");
+
+    let name = unique_shmem_name("sticky");
+    let mut profile = Profile::spawn(worker_path(), &name, 100, 150).expect("spawn should succeed");
+    wait_for_a_frame(&profile);
+
+    let result = profile
+        .navigate(&page_url)
+        .expect("protocol should not fail");
+    assert!(result.is_ok(), "navigate should succeed: {result:?}");
+
+    let before = profile.latest_frame().unwrap();
+    assert_eq!(
+        &before[0..4],
+        &[255, 0, 0, 255],
+        "unscrolled: the sticky header (red) should be at the very top"
+    );
+
+    // Scroll well past the header's own 20px height - a plain (non-
+    // sticky) box would have scrolled the header off-screen entirely by
+    // now, replaced at the top by the blue content underneath it.
+    let scroll_result = profile.scroll_by(300.0).expect("protocol should not fail");
+    assert!(
+        scroll_result.is_ok(),
+        "scroll should succeed: {scroll_result:?}"
+    );
+
+    let after = profile.latest_frame().unwrap();
+    assert_eq!(
+        &after[0..4],
+        &[255, 0, 0, 255],
+        "the sticky header should still be pinned at the top after scrolling past it, got {:?}",
+        &after[0..4]
+    );
+
+    profile.quit();
+}
+
+#[test]
 fn scroll_by_shifts_the_painted_viewport_through_taller_content() {
     let html = r#"<style>#a { background-color: #ff0000; width: 100px; height: 150px; } #b { background-color: #0000ff; width: 100px; height: 150px; }</style><div id="a"></div><div id="b"></div>"#;
     let addr = serve_html_once(html);

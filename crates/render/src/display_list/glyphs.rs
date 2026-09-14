@@ -3,6 +3,7 @@
 use layout_engine::{LayoutBox, Overflow, Position, PositionedGlyph};
 
 use super::helpers::{paint_order, tighten_clip, ClipRect};
+use super::rects::resolve_sticky_top;
 
 /// A shaped glyph plus the clip region in effect where it's painted
 /// (`None` when no `overflow`-clipping ancestor applies) and the real
@@ -24,6 +25,10 @@ pub struct ClippedGlyph {
     /// `position: fixed` propagation, applied to glyphs instead of
     /// background rects.
     pub fixed: bool,
+    /// See `super::rects::Rect::sticky`'s own doc — identical real
+    /// `position: sticky` propagation, applied to glyphs instead of
+    /// background rects.
+    pub sticky: Option<(f32, f32)>,
 }
 
 /// Same paint-order walk as [`super::build_display_list`], but collects
@@ -33,10 +38,11 @@ pub struct ClippedGlyph {
 /// `Dimensions`, so callers don't need to track box offsets themselves.
 pub fn build_glyph_list(box_: &LayoutBox) -> Vec<ClippedGlyph> {
     let mut list = Vec::new();
-    collect_glyphs(box_, &mut list, None, 1.0, (0.0, 0.0), false);
+    collect_glyphs(box_, &mut list, None, 1.0, (0.0, 0.0), false, None);
     list
 }
 
+#[allow(clippy::too_many_arguments)]
 fn collect_glyphs(
     box_: &LayoutBox,
     out: &mut Vec<ClippedGlyph>,
@@ -44,6 +50,7 @@ fn collect_glyphs(
     parent_opacity: f64,
     parent_translate: (f64, f64),
     parent_fixed: bool,
+    parent_sticky: Option<(f32, f32)>,
 ) {
     let opacity = parent_opacity * box_.style.opacity;
     let translate = (
@@ -51,6 +58,13 @@ fn collect_glyphs(
         parent_translate.1 + box_.style.transform.1,
     );
     let fixed = parent_fixed || box_.style.position == Position::Fixed;
+    let sticky = if box_.style.position == Position::Sticky {
+        resolve_sticky_top(box_.style.top)
+            .map(|top_px| (box_.dimensions.y as f32, top_px))
+            .or(parent_sticky)
+    } else {
+        parent_sticky
+    };
     let ox = (box_.dimensions.x + translate.0) as i32;
     let oy = (box_.dimensions.y + translate.1) as i32;
     out.extend(box_.glyphs.iter().map(|g| ClippedGlyph {
@@ -62,6 +76,7 @@ fn collect_glyphs(
         clip,
         opacity,
         fixed,
+        sticky,
     }));
     let (child_clip, child_translate) = if box_.style.overflow == Overflow::Hidden {
         // Real per-element scroll (`ROADMAP.md` item 22) - see
@@ -78,6 +93,14 @@ fn collect_glyphs(
         (clip, translate)
     };
     for child in paint_order(&box_.children) {
-        collect_glyphs(child, out, child_clip, opacity, child_translate, fixed);
+        collect_glyphs(
+            child,
+            out,
+            child_clip,
+            opacity,
+            child_translate,
+            fixed,
+            sticky,
+        );
     }
 }

@@ -379,6 +379,7 @@ pub(super) fn apply_declaration(style: &mut ComputedStyle, decl: &Declaration) {
                     "relative" => Position::Relative,
                     "absolute" => Position::Absolute,
                     "fixed" => Position::Fixed,
+                    "sticky" => Position::Sticky,
                     _ => return,
                 };
             }

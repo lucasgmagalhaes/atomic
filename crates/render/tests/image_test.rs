@@ -33,6 +33,7 @@ fn composites_a_real_image_at_1to1_scale() {
         clip: None,
         opacity: 1.0,
         fixed: false,
+        sticky: None,
     };
 
     composite_images(&mut pixels, 4, 4, &[quad]);
@@ -54,6 +55,7 @@ fn composites_at_an_offset_and_leaves_the_rest_untouched() {
         clip: None,
         opacity: 1.0,
         fixed: false,
+        sticky: None,
     };
 
     composite_images(&mut pixels, 8, 8, &[quad]);
@@ -86,6 +88,7 @@ fn nearest_neighbor_upscaling_samples_real_source_pixels() {
         clip: None,
         opacity: 1.0,
         fixed: false,
+        sticky: None,
     };
 
     let mut pixels = vec![0u8; 4 * 1 * 4];
@@ -112,6 +115,7 @@ fn transparent_source_pixels_do_not_overwrite_the_destination() {
         clip: None,
         opacity: 1.0,
         fixed: false,
+        sticky: None,
     };
 
     composite_images(&mut pixels, 2, 2, &[quad]);
@@ -132,6 +136,7 @@ fn a_zero_sized_quad_is_skipped_without_panicking() {
         clip: None,
         opacity: 1.0,
         fixed: false,
+        sticky: None,
     };
 
     composite_images(&mut pixels, 1, 1, &[quad]);
@@ -160,6 +165,7 @@ fn clip_restricts_the_painted_region_without_distorting_the_scale() {
         }),
         opacity: 1.0,
         fixed: false,
+        sticky: None,
     };
 
     composite_images(&mut pixels, 8, 8, &[quad]);
@@ -191,6 +197,7 @@ fn a_quad_entirely_outside_its_clip_paints_nothing() {
         }),
         opacity: 1.0,
         fixed: false,
+        sticky: None,
     };
 
     composite_images(&mut pixels, 4, 4, &[quad]);
@@ -210,6 +217,7 @@ fn opacity_scales_the_composited_alpha() {
         clip: None,
         opacity: 0.5,
         fixed: false,
+        sticky: None,
     };
 
     composite_images(&mut pixels, 4, 4, &[quad]);
@@ -230,6 +238,7 @@ fn zero_opacity_paints_nothing() {
         clip: None,
         opacity: 0.0,
         fixed: false,
+        sticky: None,
     };
 
     composite_images(&mut pixels, 4, 4, &[quad]);

@@ -282,8 +282,6 @@ impl GridTracks {
     }
 }
 
-/// `Sticky` isn't modeled — see `layout::layout_children`'s own doc on the
-/// real, narrower-than-spec scope `Absolute` (and now `Fixed`) get here.
 /// `Fixed` is real (2026-09-14): resolved by `layout::layout_children`
 /// exactly like `Absolute` (this crate already resolves `Absolute` against
 /// the page's own origin, not a positioned ancestor - see
@@ -292,11 +290,26 @@ impl GridTracks {
 /// list builders tag every primitive under a `Fixed` box as such so
 /// `profile-worker`'s page-scroll shift can skip it, keeping it glued to
 /// the viewport while the rest of the page scrolls underneath).
+/// `Sticky` is real too (2026-09-14), scoped to the one real-world-common
+/// case: a `top` inset, relative to the whole page's own scroll (not a
+/// nested `overflow: scroll` container's - a documented cut, same "page-
+/// level only" scope `profile-worker`'s own scroll model already has).
+/// `Sticky` needs **zero** layout changes - unlike `Absolute`/`Fixed`, a
+/// sticky box stays in normal flow (its `layout::layout_children` handling
+/// is identical to `Static`), so its own `Dimensions::y` already *is* its
+/// real "natural" (unstuck) document position; every bit of real sticky
+/// behavior happens at paint time in `render`'s display-list builders plus
+/// `profile-worker`'s scroll shift (see `render::Rect::sticky`'s own doc
+/// for the exact math). `bottom`/`left`/`right`-edge stickiness aren't
+/// modeled, and `top: auto` (real spec: no sticky effect for that edge)
+/// simply means this box never engages sticky behavior at all - it just
+/// behaves like `Static`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Position {
     Static,
     Relative,
     Absolute,
+    Sticky,
     Fixed,
 }
 

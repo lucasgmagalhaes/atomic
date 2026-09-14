@@ -40,6 +40,24 @@
 //! by `Context::set_viewport_size` whenever a host lays a page out against
 //! a real size. No setter — real `window.innerWidth`/`innerHeight` are
 //! spec-read-only.
+//!
+//! Also real `alert`/`confirm`/`prompt` (`spec/matrix/browser-apis.md`'s
+//! Device/UI row): each is a real, callable global that coerces its
+//! message argument to a string and records it via
+//! `console::push_message` (same `HostState.console_messages` sink
+//! `console.log` already feeds, tagged `[alert]`/`[confirm]`/`[prompt]`
+//! so a host draining that stream can tell a dialog call apart from
+//! ordinary logging) — deliberately scoped to a headless engine with no
+//! user to click a button: real spec's own dialogs block script
+//! execution until a person responds, which this engine has no UI or
+//! event loop to do, so each call returns immediately with real spec's
+//! own "no interactivity" default (`alert`: `undefined`; `confirm`:
+//! `false`, matching a real dialog a user never confirmed; `prompt`:
+//! `null`, matching a real dialog a user cancelled) rather than
+//! blocking or throwing. No host-settable override exists yet — a test
+//! that needs to simulate a user answering "OK" can't today; that's a
+//! real, narrower-than-spec limitation, not a silent gap (a page
+//! branching on `confirm()`'s result always takes the same branch here).
 use quickjs_sys as sys;
 use std::ffi::CString;
 use std::os::raw::c_int;
@@ -185,6 +203,76 @@ unsafe extern "C" fn window_scroll_by(
     sys::js_undefined()
 }
 
+unsafe fn read_message_arg(
+    ctx: *mut sys::JSContext,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> String {
+    if argc < 1 {
+        return "undefined".to_string();
+    }
+    let mut len: usize = 0;
+    let ptr = sys::JS_ToCStringLen2(ctx, &mut len, *argv, false);
+    if ptr.is_null() {
+        return String::new();
+    }
+    let bytes = std::slice::from_raw_parts(ptr as *const u8, len);
+    let s = String::from_utf8_lossy(bytes).into_owned();
+    sys::JS_FreeCString(ctx, ptr);
+    s
+}
+
+unsafe extern "C" fn window_alert(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let message = read_message_arg(ctx, argc, argv);
+    crate::console::push_message(
+        ctx,
+        crate::console::ConsoleMessage {
+            level: crate::console::ConsoleLevel::Log,
+            text: format!("[alert] {message}"),
+        },
+    );
+    sys::js_undefined()
+}
+
+unsafe extern "C" fn window_confirm(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let message = read_message_arg(ctx, argc, argv);
+    crate::console::push_message(
+        ctx,
+        crate::console::ConsoleMessage {
+            level: crate::console::ConsoleLevel::Log,
+            text: format!("[confirm] {message}"),
+        },
+    );
+    sys::js_bool(false)
+}
+
+unsafe extern "C" fn window_prompt(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let message = read_message_arg(ctx, argc, argv);
+    crate::console::push_message(
+        ctx,
+        crate::console::ConsoleMessage {
+            level: crate::console::ConsoleLevel::Log,
+            text: format!("[prompt] {message}"),
+        },
+    );
+    sys::js_null()
+}
+
 pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     let global = sys::JS_GetGlobalObject(ctx);
     alias(ctx, global, "window");
@@ -216,6 +304,9 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     }
     define_method(ctx, global, "scrollBy", window_scroll_by, 2);
     define_method(ctx, global, "open", window_open, 1);
+    define_method(ctx, global, "alert", window_alert, 1);
+    define_method(ctx, global, "confirm", window_confirm, 1);
+    define_method(ctx, global, "prompt", window_prompt, 2);
 
     sys::JS_FreeValue(ctx, global);
 

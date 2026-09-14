@@ -6,7 +6,7 @@ use std::ffi::CString;
 
 use quickjs_sys as sys;
 
-use super::collections::node_list;
+use super::collections::live_child_nodes;
 use super::node_registry::{dom_opaque, node_class_id_for, node_id, node_object};
 use super::util::{new_js_string, Getter};
 
@@ -85,6 +85,10 @@ unsafe extern "C" fn node_next_sibling_get(
     sibling(ctx, this_val, true)
 }
 
+/// Real *live* `NodeList` (`collections::live`'s real `Proxy`-backed
+/// re-query, same one `getElementsByTagName` uses - see that module's
+/// own doc) of `this`'s direct children, re-read from `dom::Dom` on
+/// every access rather than snapshotted once.
 unsafe extern "C" fn node_children_get(
     ctx: *mut sys::JSContext,
     this_val: sys::JSValue,
@@ -92,15 +96,7 @@ unsafe extern "C" fn node_children_get(
     let Some(id) = node_id(ctx, this_val) else {
         return sys::JS_NewArray(ctx);
     };
-    let dom = dom_opaque(ctx);
-    if dom.is_null() {
-        return sys::JS_NewArray(ctx);
-    }
-    let children = (*dom)
-        .get(id)
-        .map(|node| node.children.clone())
-        .unwrap_or_default();
-    node_list(ctx, children)
+    live_child_nodes(ctx, id)
 }
 
 unsafe extern "C" fn node_type_get(

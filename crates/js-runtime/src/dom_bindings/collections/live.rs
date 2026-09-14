@@ -49,12 +49,23 @@ enum Query {
     /// Real `document.links`: the union of `<a href>` and `<area href>`
     /// elements — not a plain tag match, so it doesn't fit `Tag`.
     Links,
+    /// Real `Node.childNodes`: `root`'s direct children, re-read from
+    /// `dom::Dom` on every access rather than the previous one-shot
+    /// `node.children.clone()` snapshot (`navigation.rs`'s
+    /// `node_children_get`).
+    Children,
 }
 
 struct LiveCollectionState {
     root: dom::NodeId,
     query: Query,
     include_start: bool,
+    /// Real spec shape difference: `HTMLCollection` has `namedItem`,
+    /// `NodeList` doesn't (`node_list.rs`'s own snapshot wrapper already
+    /// only adds `item`). `false` for a live `childNodes` (a real
+    /// `NodeList`); `true` for every other live collection here (all
+    /// real `HTMLCollection`s).
+    named_item: bool,
 }
 
 unsafe extern "C" fn finalizer(rt: *mut sys::JSRuntime, val: sys::JSValue) {
@@ -118,7 +129,21 @@ unsafe fn resolve(ctx: *mut sys::JSContext, target: sys::JSValue) -> Vec<dom::No
             }
             result
         }
+        Query::Children => (*dom_ptr)
+            .get((*state).root)
+            .map(|node| node.children.clone())
+            .unwrap_or_default(),
     }
+}
+
+/// Real spec shape check: does this live collection's `target` carry a
+/// real `namedItem` (an `HTMLCollection`) or not (a `NodeList`, e.g. live
+/// `childNodes`)? See `LiveCollectionState::named_item`'s own doc.
+unsafe fn has_named_item(ctx: *mut sys::JSContext, target: sys::JSValue) -> bool {
+    let class_id =
+        crate::class_registry::class_id_for(sys::JS_GetRuntime(ctx), LIVE_COLLECTION_CLASS_KIND);
+    let state = sys::JS_GetOpaque(target, class_id) as *mut LiveCollectionState;
+    !state.is_null() && (*state).named_item
 }
 
 /// `id`/`name` match, same rule `html_collection.rs`'s own `namedItem`
@@ -236,7 +261,7 @@ unsafe extern "C" fn get_trap(
         let name = CString::new("item").unwrap();
         return sys::JS_NewCFunction2(ctx, item_method, name.as_ptr(), 1, sys::JS_CFUNC_GENERIC, 0);
     }
-    if prop == "namedItem" {
+    if prop == "namedItem" && has_named_item(ctx, target) {
         let name = CString::new("namedItem").unwrap();
         return sys::JS_NewCFunction2(
             ctx,
@@ -276,8 +301,11 @@ unsafe extern "C" fn has_trap(
     let Some(prop) = read_js_string(ctx, *argv.add(1)) else {
         return sys::js_bool(false);
     };
-    if prop == "length" || prop == "item" || prop == "namedItem" {
+    if prop == "length" || prop == "item" {
         return sys::js_bool(true);
+    }
+    if prop == "namedItem" {
+        return sys::js_bool(has_named_item(ctx, target));
     }
     if let Ok(idx) = prop.parse::<usize>() {
         return sys::js_bool(idx < resolve(ctx, target).len());
@@ -290,6 +318,7 @@ unsafe fn build(
     root: dom::NodeId,
     query: Query,
     include_start: bool,
+    named_item: bool,
 ) -> sys::JSValue {
     let class_id = ensure_class(ctx);
     let target = sys::JS_NewObjectClass(ctx, class_id);
@@ -300,6 +329,7 @@ unsafe fn build(
         root,
         query,
         include_start,
+        named_item,
     });
     sys::JS_SetOpaque(target, Box::into_raw(state) as *mut std::ffi::c_void);
 
@@ -345,7 +375,7 @@ pub(in super::super) unsafe fn live_elements_by_tag_name(
     tag: &str,
     include_start: bool,
 ) -> sys::JSValue {
-    build(ctx, root, Query::Tag(tag.to_string()), include_start)
+    build(ctx, root, Query::Tag(tag.to_string()), include_start, true)
 }
 
 pub(in super::super) unsafe fn live_elements_by_class_name(
@@ -359,6 +389,7 @@ pub(in super::super) unsafe fn live_elements_by_class_name(
         root,
         Query::Class(class_name.to_string()),
         include_start,
+        true,
     )
 }
 
@@ -372,5 +403,16 @@ pub(in super::super) unsafe fn live_links(
     root: dom::NodeId,
     include_start: bool,
 ) -> sys::JSValue {
-    build(ctx, root, Query::Links, include_start)
+    build(ctx, root, Query::Links, include_start, true)
+}
+
+/// Real live `Node.childNodes` - see `Query::Children`'s own doc. Real
+/// `NodeList`, not `HTMLCollection` (`named_item: false` - no
+/// `namedItem`). `include_start` is irrelevant to `Query::Children` (it
+/// never reads that field), passed as `false` for consistency only.
+pub(in super::super) unsafe fn live_child_nodes(
+    ctx: *mut sys::JSContext,
+    root: dom::NodeId,
+) -> sys::JSValue {
+    build(ctx, root, Query::Children, false, false)
 }

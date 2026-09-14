@@ -217,6 +217,32 @@ fn document_links_is_real_live_and_filters_by_href() {
 }
 
 #[test]
+fn childnodes_is_also_real_and_live() {
+    let (mut d, body) = dom_with_body();
+    let div1 = d.create_element("div");
+    d.append_child(body, div1);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { \
+                const body = document.body; \
+                const c = body.childNodes; \
+                const before = c.length; \
+                body.appendChild(document.createElement('span')); \
+                return `${before},${c.length},${typeof c.namedItem}`; \
+            })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(
+        result, "1,2,undefined",
+        "childNodes should be real and live, and - unlike an HTMLCollection - carry no namedItem"
+    );
+}
+
+#[test]
 fn array_from_a_live_collection_still_works_via_the_array_like_path() {
     let (mut d, body) = dom_with_body();
     let div1 = d.create_element("div");

@@ -4,17 +4,20 @@
 //!
 //! Split into `helpers.rs` (small shared helpers), `focus.rs`
 //! (focus/blur), `click.rs` (`dispatch_click`/`dispatch_click_at`),
-//! `fill.rs` (`fill_element`), `keyboard.rs` (`type_key`), and `tab.rs`
-//! (`TabOutcome`/`tab_focus`).
+//! `fill.rs` (`fill_element`), `keyboard.rs` (`type_key`), `tab.rs`
+//! (`TabOutcome`/`tab_focus`), and `mouse_move.rs`
+//! (`dispatch_mouse_move`).
 
 mod click;
 mod fill;
 mod focus;
 mod helpers;
 mod keyboard;
+mod mouse_move;
 mod tab;
 
 pub(crate) use click::{dispatch_click, dispatch_click_at};
 pub(crate) use fill::fill_element;
 pub(crate) use keyboard::type_key;
+pub(crate) use mouse_move::dispatch_mouse_move;
 pub(crate) use tab::{tab_focus, TabOutcome};

@@ -75,6 +75,30 @@ impl Profile {
         }
     }
 
+    /// Real coordinate-driven hover: `x`/`y` are pixel coordinates in the
+    /// profile's own frame, same space [`click_at`](Self::click_at) uses.
+    /// The worker hit-tests its current layout, updates `dom::Dom`'s real
+    /// `:hover` state, and — when the hovered element actually changes —
+    /// dispatches a real bubbling `"mouseout"` on the previous
+    /// id-addressable target before a real bubbling `"mouseover"` on the
+    /// new one (see `profile-worker`'s `dispatch_mouse_move` for the exact
+    /// scope cuts: `relatedTarget` stays `null`, and non-bubbling
+    /// `mouseenter`/`mouseleave` aren't dispatched). `Ok(Ok(()))` covers
+    /// both "moved onto a real element" and "moved off everything" -
+    /// there's no real failure mode for a coordinate that hits nothing,
+    /// unlike [`click_at`](Self::click_at).
+    pub fn mouse_move(&mut self, x: f64, y: f64) -> std::io::Result<Result<(), String>> {
+        writeln!(self.stdin, "MOUSE_MOVE {x} {y}")?;
+        self.stdin.flush()?;
+        let mut line = String::new();
+        self.stdout.read_line(&mut line)?;
+        let line = line.trim();
+        match line.strip_prefix("ERROR ") {
+            Some(message) => Ok(Err(message.to_string())),
+            None => Ok(Ok(())),
+        }
+    }
+
     /// Types `key` into whichever real `<input>`/`<textarea>` the most
     /// recent [`click_at`](Self::click_at) focused - `"Backspace"` is a
     /// real delete-last-character, anything else is appended as typed

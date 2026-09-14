@@ -1,0 +1,65 @@
+## Codecov config for this workspace.
+##
+## Real measured baseline (2026-09-14, `cargo llvm-cov --workspace --exclude
+## shell --exclude xtask --summary-only`, locally): 87.61% line coverage.
+## `shell` (apps/shell, the egui GUI) and `xtask` are excluded from that
+## local measurement only because this machine's target dir had a stale
+## egui version mismatch at the time - CI's `cargo llvm-cov --workspace`
+## (`.github/workflows/ci.yml`) does include both, so the number Codecov
+## actually reports here may differ slightly; this config's targets are set
+## a few points below the local baseline specifically to leave that room
+## rather than pretend a number this file's own author couldn't fully
+## verify end-to-end.
+##
+## No 100% target: this workspace has real, permanent coverage gaps that
+## unit/integration tests can't reach without becoming fake tests of
+## nothing - `spec/RULES.md`'s "real, not fake" convention this whole repo
+## follows applies to tests too:
+##   - unsafe FFI/C bindings (quickjs-sys's cc-compiled QuickJS-ng, WebGL/
+##     wgpu driver calls) - correctness here is exercised by every test
+##     that runs a script or paints a frame, but raw binding glue itself
+##     (extern "C" signatures, opaque pointer plumbing) isn't independently
+##     coverable the way a pure-Rust branch is.
+##   - `security`'s Windows-only keychain/sandboxing (Credential Manager,
+##     Job Objects) - real, but CI's ubuntu-latest runner can't execute
+##     Windows-only code paths at all (see that crate's own `Unsupported`
+##     scope cuts on Linux/macOS).
+##   - `apps/shell`'s egui immediate-mode UI - real widget code, but a
+##     `TopBottomPanel`/`SidePanel` render call has no meaningful assertion
+##     surface without a full windowing+GPU harness beyond what
+##     `crates/render`'s own headless Canvas2D tests already cover for the
+##     actual rendering pipeline underneath it.
+##
+## Targets are set as "don't regress the real number", not "reach 100%".
+
+coverage:
+  precision: 2
+  round: down
+  range: "70...90"
+  status:
+    project:
+      default:
+        # A few points under the measured 87.61% local baseline - leaves
+        # room for `shell`'s real inclusion in CI's own full-workspace run
+        # without immediately failing on this config's first real report.
+        target: 85%
+        threshold: 2%
+        informational: false
+    patch:
+      default:
+        # New/changed code should meet a real bar, but not 100% - see this
+        # file's own header for why a hard 100% would be dishonest here.
+        target: 80%
+        threshold: 5%
+        informational: false
+
+comment:
+  layout: "reach, diff, flags, files"
+  behavior: default
+  require_changes: false
+
+ignore:
+  # Vendored C sources / build-script-generated bindings - not this repo's
+  # own Rust logic, not meaningfully coverable or ownable here.
+  - "crates/quickjs-sys/vendor/**"
+  - "crates/quickjs-sys/build.rs"

@@ -125,6 +125,7 @@ pub(crate) fn collect_computed_styles(
                 Position::Static => "static",
                 Position::Relative => "relative",
                 Position::Absolute => "absolute",
+                Position::Fixed => "fixed",
             }
             .to_string(),
         );

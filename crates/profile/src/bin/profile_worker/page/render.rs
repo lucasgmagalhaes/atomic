@@ -203,6 +203,21 @@ impl<'rt> Page<'rt> {
         let offset = scroll_top as f32;
         let shift_clip =
             |clip: Option<ClipRect>, dy: f32| clip.map(|c| ClipRect { y: c.y - dy, ..c });
+        // Real `position: fixed` (`layout_engine::Position::Fixed`): a
+        // primitive `render`'s own display-list builders tagged `fixed`
+        // (see `Rect::fixed`'s own doc) skips this page-scroll shift
+        // entirely, keeping it glued to the viewport while the rest of
+        // the page scrolls underneath - no separate "fixed layer" needed,
+        // since this is applied per-primitive at the exact point every
+        // other primitive already gets shifted.
+        let shift_y = |y: f32, fixed: bool| if fixed { y } else { y - offset };
+        let shift_clip_if = |clip: Option<ClipRect>, fixed: bool| {
+            if fixed {
+                clip
+            } else {
+                shift_clip(clip, offset)
+            }
+        };
 
         // Real compositing layers (`ROADMAP.md` item 28): boxes that
         // establish a stacking context (`layout_engine::find_layer_roots`)
@@ -250,15 +265,15 @@ impl<'rt> Page<'rt> {
         let rects: Vec<Rect> = build_display_list(&base_tree)
             .into_iter()
             .map(|r| Rect {
-                y: r.y - offset,
+                y: shift_y(r.y, r.fixed),
                 ..r
             })
             .collect();
         let images: Vec<ImageQuad> = build_image_list(&base_tree)
             .into_iter()
             .map(|q| ImageQuad {
-                y: q.y - offset,
-                clip: shift_clip(q.clip, offset),
+                y: shift_y(q.y, q.fixed),
+                clip: shift_clip_if(q.clip, q.fixed),
                 ..q
             })
             .collect();
@@ -266,11 +281,16 @@ impl<'rt> Page<'rt> {
             .into_iter()
             .map(|g| ClippedGlyph {
                 glyph: PositionedGlyph {
-                    y: g.glyph.y - scroll_top as i32,
+                    y: if g.fixed {
+                        g.glyph.y
+                    } else {
+                        g.glyph.y - scroll_top as i32
+                    },
                     ..g.glyph
                 },
-                clip: shift_clip(g.clip, offset),
+                clip: shift_clip_if(g.clip, g.fixed),
                 opacity: g.opacity,
+                fixed: g.fixed,
             })
             .collect();
 
@@ -308,15 +328,15 @@ impl<'rt> Page<'rt> {
                 let layer_rects: Vec<Rect> = build_display_list(layer_root)
                     .into_iter()
                     .map(|r| Rect {
-                        y: r.y - offset,
+                        y: shift_y(r.y, r.fixed),
                         ..r
                     })
                     .collect();
                 let layer_images: Vec<ImageQuad> = build_image_list(layer_root)
                     .into_iter()
                     .map(|q| ImageQuad {
-                        y: q.y - offset,
-                        clip: shift_clip(q.clip, offset),
+                        y: shift_y(q.y, q.fixed),
+                        clip: shift_clip_if(q.clip, q.fixed),
                         ..q
                     })
                     .collect();
@@ -324,11 +344,16 @@ impl<'rt> Page<'rt> {
                     .into_iter()
                     .map(|g| ClippedGlyph {
                         glyph: PositionedGlyph {
-                            y: g.glyph.y - scroll_top as i32,
+                            y: if g.fixed {
+                                g.glyph.y
+                            } else {
+                                g.glyph.y - scroll_top as i32
+                            },
                             ..g.glyph
                         },
-                        clip: shift_clip(g.clip, offset),
+                        clip: shift_clip_if(g.clip, g.fixed),
                         opacity: g.opacity,
+                        fixed: g.fixed,
                     })
                     .collect();
 

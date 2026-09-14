@@ -1,7 +1,7 @@
 //! `Rect`, `build_display_list`, and background/border/box-shadow
 //! collection — split out from `display_list.rs`.
 
-use layout_engine::{BorderStyle, Color, LayoutBox, Overflow};
+use layout_engine::{BorderStyle, Color, LayoutBox, Overflow, Position};
 
 use super::helpers::{clip_rect, paint_order, scale_alpha, tighten_clip, ClipRect};
 
@@ -30,6 +30,15 @@ pub struct Rect {
     /// (`fs_main` never changed) paint the gradient in between; no new
     /// shader code.
     pub gradient: Option<(Color, Color, f32)>,
+    /// Real `position: fixed` (`layout_engine::Position::Fixed`, see its
+    /// own doc) — `true` for this rect, or for any rect belonging to a
+    /// descendant of a `Fixed` box (propagated down through `collect`
+    /// exactly like `opacity`/`transform` already are, so a `Fixed`
+    /// element's whole subtree stays glued to the viewport together, not
+    /// just the one box). Not consulted anywhere in `render` itself —
+    /// `profile-worker`'s own page-scroll shift is the one consumer,
+    /// skipping the `-scroll_top` shift for a tagged rect.
+    pub fixed: bool,
 }
 
 /// Walks `box_` in paint order (parent before children, so later-painted
@@ -39,7 +48,7 @@ pub struct Rect {
 /// rect — nothing downstream needs to know they exist.
 pub fn build_display_list(box_: &LayoutBox) -> Vec<Rect> {
     let mut list = Vec::new();
-    collect(box_, &mut list, None, 1.0, (0.0, 0.0));
+    collect(box_, &mut list, None, 1.0, (0.0, 0.0), false);
     list
 }
 
@@ -58,15 +67,20 @@ fn collect(
     clip: Option<ClipRect>,
     parent_opacity: f64,
     parent_translate: (f64, f64),
+    parent_fixed: bool,
 ) {
     let opacity = parent_opacity * box_.style.opacity;
     let translate = (
         parent_translate.0 + box_.style.transform.0,
         parent_translate.1 + box_.style.transform.1,
     );
+    // Real `position: fixed` (`layout_engine::Position::Fixed`) — see
+    // `Rect::fixed`'s own doc. Propagates down like `opacity`/`translate`
+    // so a `Fixed` box's whole subtree stays tagged together.
+    let fixed = parent_fixed || box_.style.position == Position::Fixed;
     if let Some(shadow) = box_.style.box_shadow {
         if shadow.color.a > 0 {
-            push_box_shadow_rect(box_, shadow, out, clip, opacity, translate);
+            push_box_shadow_rect(box_, shadow, out, clip, opacity, translate, fixed);
         }
     }
     if box_.style.background_color.a > 0 || box_.style.background_image.is_some() {
@@ -85,13 +99,14 @@ fn collect(
             color: scale_alpha(box_.style.background_color, opacity),
             radius: box_.style.border_radius as f32,
             gradient,
+            fixed,
         };
         if let Some(clipped) = clip_rect(rect, clip) {
             out.push(clipped);
         }
     }
     if box_.style.border_style != BorderStyle::None && box_.style.border_color.a > 0 {
-        push_border_rects(box_, out, clip, opacity, translate);
+        push_border_rects(box_, out, clip, opacity, translate, fixed);
     }
     let (child_clip, child_translate) = if box_.style.overflow == Overflow::Hidden {
         (
@@ -113,7 +128,7 @@ fn collect(
         (clip, translate)
     };
     for child in paint_order(&box_.children) {
-        collect(child, out, child_clip, opacity, child_translate);
+        collect(child, out, child_clip, opacity, child_translate, fixed);
     }
 }
 
@@ -132,6 +147,7 @@ fn push_box_shadow_rect(
     clip: Option<ClipRect>,
     opacity: f64,
     translate: (f64, f64),
+    fixed: bool,
 ) {
     let d = box_.dimensions;
     let rect = Rect {
@@ -146,6 +162,7 @@ fn push_box_shadow_rect(
         // own doc already states for blur-radius).
         radius: 0.0,
         gradient: None,
+        fixed,
     };
     if let Some(clipped) = clip_rect(rect, clip) {
         out.push(clipped);
@@ -175,6 +192,7 @@ fn push_border_rects(
     clip: Option<ClipRect>,
     opacity: f64,
     translate: (f64, f64),
+    fixed: bool,
 ) {
     let d = box_.dimensions;
     let b = box_.border;
@@ -196,6 +214,7 @@ fn push_border_rects(
             color,
             radius,
             gradient: None,
+            fixed,
         });
     }
     if b.bottom > 0.0 {
@@ -207,6 +226,7 @@ fn push_border_rects(
             color,
             radius,
             gradient: None,
+            fixed,
         });
     }
     if b.left > 0.0 {
@@ -218,6 +238,7 @@ fn push_border_rects(
             color,
             radius,
             gradient: None,
+            fixed,
         });
     }
     if b.right > 0.0 {
@@ -229,6 +250,7 @@ fn push_border_rects(
             color,
             radius,
             gradient: None,
+            fixed,
         });
     }
 }

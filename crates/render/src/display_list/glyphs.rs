@@ -1,6 +1,6 @@
 //! `ClippedGlyph`/`build_glyph_list` — split out from `display_list.rs`.
 
-use layout_engine::{LayoutBox, Overflow, PositionedGlyph};
+use layout_engine::{LayoutBox, Overflow, Position, PositionedGlyph};
 
 use super::helpers::{paint_order, tighten_clip, ClipRect};
 
@@ -20,6 +20,10 @@ pub struct ClippedGlyph {
     pub glyph: PositionedGlyph,
     pub clip: Option<ClipRect>,
     pub opacity: f64,
+    /// See `super::rects::Rect::fixed`'s own doc — identical real
+    /// `position: fixed` propagation, applied to glyphs instead of
+    /// background rects.
+    pub fixed: bool,
 }
 
 /// Same paint-order walk as [`super::build_display_list`], but collects
@@ -29,7 +33,7 @@ pub struct ClippedGlyph {
 /// `Dimensions`, so callers don't need to track box offsets themselves.
 pub fn build_glyph_list(box_: &LayoutBox) -> Vec<ClippedGlyph> {
     let mut list = Vec::new();
-    collect_glyphs(box_, &mut list, None, 1.0, (0.0, 0.0));
+    collect_glyphs(box_, &mut list, None, 1.0, (0.0, 0.0), false);
     list
 }
 
@@ -39,12 +43,14 @@ fn collect_glyphs(
     clip: Option<ClipRect>,
     parent_opacity: f64,
     parent_translate: (f64, f64),
+    parent_fixed: bool,
 ) {
     let opacity = parent_opacity * box_.style.opacity;
     let translate = (
         parent_translate.0 + box_.style.transform.0,
         parent_translate.1 + box_.style.transform.1,
     );
+    let fixed = parent_fixed || box_.style.position == Position::Fixed;
     let ox = (box_.dimensions.x + translate.0) as i32;
     let oy = (box_.dimensions.y + translate.1) as i32;
     out.extend(box_.glyphs.iter().map(|g| ClippedGlyph {
@@ -55,6 +61,7 @@ fn collect_glyphs(
         },
         clip,
         opacity,
+        fixed,
     }));
     let (child_clip, child_translate) = if box_.style.overflow == Overflow::Hidden {
         // Real per-element scroll (`ROADMAP.md` item 22) - see
@@ -71,6 +78,6 @@ fn collect_glyphs(
         (clip, translate)
     };
     for child in paint_order(&box_.children) {
-        collect_glyphs(child, out, child_clip, opacity, child_translate);
+        collect_glyphs(child, out, child_clip, opacity, child_translate, fixed);
     }
 }

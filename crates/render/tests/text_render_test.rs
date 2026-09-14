@@ -114,6 +114,7 @@ fn clip_restricts_which_pixels_a_glyph_can_paint() {
                 height: 50.0,
             }),
             opacity: 1.0,
+            fixed: false,
         })
         .collect();
 
@@ -147,6 +148,7 @@ fn zero_opacity_paints_no_glyph_pixels() {
             glyph: g.glyph,
             clip: None,
             opacity: 0.0,
+            fixed: false,
         })
         .collect();
 

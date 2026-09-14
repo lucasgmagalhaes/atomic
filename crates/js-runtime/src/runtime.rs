@@ -4,7 +4,7 @@
 
 use quickjs_sys as sys;
 
-use crate::{class_registry, module_loader};
+use crate::{class_registry, module_loader, shared_worker_bindings};
 
 #[derive(Debug)]
 pub struct EvalError(pub String);
@@ -83,6 +83,12 @@ impl Drop for Runtime {
         // !Send/!Sync, so no cross-thread reuse is possible).
         unsafe { sys::JS_FreeRuntime(self.ptr) };
         class_registry::cleanup_runtime(self.ptr);
+        // Same pointer-reuse hazard class_registry's own comment above
+        // documents: a SharedWorker instance keyed by this runtime's raw
+        // pointer must be evicted (and its OS thread joined) before that
+        // address can be handed to a later, unrelated `JS_NewRuntime()`
+        // call — see `shared_worker_bindings::evict_runtime`'s own doc.
+        shared_worker_bindings::evict_runtime(self.ptr as usize);
     }
 }
 

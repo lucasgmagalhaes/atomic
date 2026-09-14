@@ -24,6 +24,22 @@ pub(super) struct EventState {
     /// `preventDefault()` from inside one is silently ignored rather than
     /// actually canceling the event, regardless of `cancelable`.
     pub(super) in_passive_listener: bool,
+    /// Real per-spec `.composed` flag — read from the constructor's options
+    /// (`bubbles`/`cancelable`'s own shape), otherwise inert here: this
+    /// engine's shadow DOM has no `<slot>`/render integration
+    /// (`ROADMAP.md` item 38's own scope cut), so there's no
+    /// shadow-boundary-crossing behavior for it to actually gate.
+    pub(super) composed: bool,
+    /// Real target→root node chain, filled in once by
+    /// `dispatch::chain::run_phases` for an actual `Node`-tree dispatch —
+    /// empty before any dispatch and for a "simple" (non-`Node`) target
+    /// like `window`/`document`/`history`, which has no DOM tree to walk
+    /// (matches this crate's existing capture/bubble scope split for those
+    /// targets). Backs `.composedPath()`. Documented deviation: kept
+    /// populated after dispatch completes too, rather than clearing back to
+    /// `[]` once the event's real "dispatch flag" unsets — simpler, and no
+    /// consumer here needs the stricter post-dispatch-empty behavior.
+    pub(super) path: Vec<dom::NodeId>,
 }
 
 pub(super) unsafe fn state(ctx: *mut sys::JSContext, value: sys::JSValue) -> *mut EventState {
@@ -90,6 +106,31 @@ unsafe extern "C" fn cancelable(ctx: *mut sys::JSContext, value: sys::JSValue) -
     sys::js_bool(!p.is_null() && (*p).cancelable)
 }
 
+unsafe extern "C" fn composed(ctx: *mut sys::JSContext, value: sys::JSValue) -> sys::JSValue {
+    let p = state(ctx, value);
+    sys::js_bool(!p.is_null() && (*p).composed)
+}
+
+pub(super) unsafe extern "C" fn composed_path(
+    ctx: *mut sys::JSContext,
+    value: sys::JSValue,
+    _: c_int,
+    _: *mut sys::JSValue,
+) -> sys::JSValue {
+    let p = state(ctx, value);
+    let array = sys::JS_NewArray(ctx);
+    if p.is_null() {
+        return array;
+    }
+    let rt = sys::JS_GetRuntime(ctx);
+    for (index, &id) in (*p).path.iter().enumerate() {
+        let class_id = crate::class_registry::class_id_for(rt, "Node");
+        let node = crate::dom_bindings::node_object(ctx, class_id, id);
+        sys::JS_SetPropertyUint32(ctx, array, index as u32, node);
+    }
+    array
+}
+
 unsafe extern "C" fn default_prevented(
     ctx: *mut sys::JSContext,
     value: sys::JSValue,
@@ -138,9 +179,14 @@ unsafe extern "C" fn event_constructor(
     };
     let mut bubbles = false;
     let mut cancelable = false;
+    let mut composed = false;
     if argc >= 2 {
         let options = *argv.add(1);
-        for (name, target) in [("bubbles", &mut bubbles), ("cancelable", &mut cancelable)] {
+        for (name, target) in [
+            ("bubbles", &mut bubbles),
+            ("cancelable", &mut cancelable),
+            ("composed", &mut composed),
+        ] {
             let name = CString::new(name).unwrap();
             let value = sys::JS_GetPropertyStr(ctx, options, name.as_ptr());
             if sys::js_is_exception(&value) {
@@ -154,7 +200,11 @@ unsafe extern "C" fn event_constructor(
             *target = bool_value != 0;
         }
     }
-    make_event(ctx, None, &kind, bubbles, cancelable)
+    let event = make_event(ctx, None, &kind, bubbles, cancelable);
+    if !sys::js_is_exception(&event) {
+        (*state(ctx, event)).composed = composed;
+    }
+    event
 }
 
 pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
@@ -175,6 +225,7 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
         ("currentTarget", current_target as Getter),
         ("bubbles", bubbles as Getter),
         ("cancelable", cancelable as Getter),
+        ("composed", composed as Getter),
         ("defaultPrevented", default_prevented as Getter),
     ] {
         getter(ctx, proto, name, func)
@@ -182,6 +233,7 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     for (name, func) in [
         ("preventDefault", prevent_default as sys::JSCFunction),
         ("stopPropagation", stop_propagation as sys::JSCFunction),
+        ("composedPath", composed_path as sys::JSCFunction),
     ] {
         let name = CString::new(name).unwrap();
         sys::JS_SetPropertyStr(
@@ -257,6 +309,8 @@ pub(super) unsafe fn make_event(
         default_prevented: false,
         propagation_stopped: false,
         in_passive_listener: false,
+        composed: false,
+        path: Vec::new(),
     };
     sys::JS_SetOpaque(e, Box::into_raw(Box::new(s)) as *mut c_void);
     e

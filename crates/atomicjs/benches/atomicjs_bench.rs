@@ -12,6 +12,7 @@ const SUM: &str = include_str!("../benchmarks/scripts/sum.js");
 const PROPS: &str = include_str!("../benchmarks/scripts/props.js");
 const CLOSURES: &str = include_str!("../benchmarks/scripts/closures.js");
 const HOT_LOOP: &str = include_str!("../benchmarks/scripts/hot_loop.js");
+const LOCAL_CONST: &str = include_str!("../benchmarks/scripts/local_const.js");
 
 fn bench_reference_workloads(criterion: &mut Criterion) {
     for (name, source) in [
@@ -19,6 +20,7 @@ fn bench_reference_workloads(criterion: &mut Criterion) {
         ("props", PROPS),
         ("closures", CLOSURES),
         ("hot_loop", HOT_LOOP),
+        ("local_const", LOCAL_CONST),
     ] {
         criterion.bench_function(&format!("{name}/compile_and_run"), |bench| {
             bench.iter(|| black_box(run_source(black_box(source)).unwrap()))

@@ -4,6 +4,9 @@
 
 - [Validation spike](ATOMIC_JS_SPIKE.md): the scope boundary, evidence model,
   and go/no-go decision record for the isolated interpreter.
+- [Technical roadmap](ATOMIC_JS_ROADMAP.md): conditional sequence for language,
+  runtime, performance stages, GC, and any future JIT work; it does not authorize
+  production integration.
 - [Memory measurement protocol](ATOMIC_JS_MEMORY_MEASUREMENT.md): the canonical
   RSS methodology for AtomicJS and QuickJS-ng comparisons.
 - [Tiering design notes](ATOMIC_JS_TIERING.md): historical policy rationale;

@@ -20,6 +20,7 @@ use crate::ast::{BinOp, Expr, Stmt};
 use crate::bytecode::{BytecodeFunction, BytecodeModule, Const, Instr, NativeFn, NumericOp};
 
 mod analysis;
+mod statements;
 
 use analysis::{assigned_names, collect_locals, resolve};
 
@@ -45,8 +46,8 @@ pub fn compile(program: Vec<Stmt>) -> Result<BytecodeModule, CompileError> {
 
 pub(super) struct FunctionBuilder {
     pub(super) locals: Vec<String>,
-    code: Vec<Instr>,
-    constants: Vec<Const>,
+    pub(super) code: Vec<Instr>,
+    pub(super) constants: Vec<Const>,
     /// Indices into `locals` that some nested function captures.
     pub(super) captured: HashSet<usize>,
 }
@@ -70,12 +71,12 @@ pub(super) enum SlotRef {
     Upvalue(u32),
 }
 
-struct Compiler {
-    functions: Vec<BytecodeFunction>,
-    direct_globals: HashMap<String, u32>,
+pub(super) struct Compiler {
+    pub(super) functions: Vec<BytecodeFunction>,
+    pub(super) direct_globals: HashMap<String, u32>,
     /// Conservative semantic guard: a declaration whose name is assigned
     /// anywhere remains a dynamic closure lookup, even before Tier 1.
-    reassigned_names: HashSet<String>,
+    pub(super) reassigned_names: HashSet<String>,
 }
 
 impl Compiler {
@@ -83,7 +84,7 @@ impl Compiler {
     /// `None` and `is_top_level` is true) and appends it to `self.functions`.
     /// Returns its index plus the `captures` list its *own* `MakeClosure`
     /// site (in the parent, if any) needs.
-    fn compile_function(
+    pub(super) fn compile_function(
         &mut self,
         name: Option<String>,
         params: &[String],
@@ -164,140 +165,7 @@ impl Compiler {
         Ok(())
     }
 
-    fn compile_stmt(
-        &mut self,
-        stmt: &Stmt,
-        fb: &Scope,
-        parent: Option<&Scope>,
-        upvalues: &mut Vec<u32>,
-        is_top_level: bool,
-    ) -> Result<(), CompileError> {
-        match stmt {
-            Stmt::Expr(expr) => {
-                self.compile_discard_expr(expr, fb, parent, upvalues)?;
-            }
-            Stmt::Let { name, value } | Stmt::Const { name, value } => {
-                self.compile_expr(value, fb, parent, upvalues)?;
-                let slot = local_slot(fb, name);
-                fb.borrow_mut().code.push(Instr::StoreLocal(slot));
-            }
-            Stmt::Function(decl) => {
-                let decl_name = decl
-                    .name
-                    .clone()
-                    .expect("statement-level function declarations are always named");
-                let (function_index, captures) = self.compile_function(
-                    Some(decl_name.clone()),
-                    &decl.params,
-                    &decl.body,
-                    Some(fb),
-                    false,
-                )?;
-                fb.borrow_mut().code.push(Instr::MakeClosure {
-                    function_index,
-                    captures,
-                });
-                let slot = local_slot(fb, &decl_name);
-                fb.borrow_mut().code.push(Instr::StoreLocal(slot));
-                if is_top_level
-                    && self.functions[function_index as usize].upvalue_count == 0
-                    && !self.reassigned_names.contains(&decl_name)
-                {
-                    self.direct_globals.insert(decl_name, function_index);
-                }
-            }
-            Stmt::For {
-                init,
-                cond,
-                update,
-                body,
-            } => {
-                self.compile_stmt(init, fb, parent, upvalues, false)?;
-                let loop_start = fb.borrow().code.len();
-                self.compile_expr(cond, fb, parent, upvalues)?;
-                let jump_if_false_idx = fb.borrow().code.len();
-                fb.borrow_mut().code.push(Instr::JumpIfFalse(usize::MAX)); // patched below
-                for s in body {
-                    self.compile_stmt(s, fb, parent, upvalues, false)?;
-                }
-                self.compile_discard_expr(update, fb, parent, upvalues)?;
-                fb.borrow_mut().code.push(Instr::Jump(loop_start));
-                let loop_end = fb.borrow().code.len();
-                match &mut fb.borrow_mut().code[jump_if_false_idx] {
-                    Instr::JumpIfFalse(target) => *target = loop_end,
-                    _ => unreachable!("jump_if_false_idx was recorded right after pushing it"),
-                }
-            }
-            Stmt::While { cond, body } => {
-                let loop_start = fb.borrow().code.len();
-                self.compile_expr(cond, fb, parent, upvalues)?;
-                let false_jump = fb.borrow().code.len();
-                fb.borrow_mut().code.push(Instr::JumpIfFalse(usize::MAX));
-                for stmt in body {
-                    self.compile_stmt(stmt, fb, parent, upvalues, false)?;
-                }
-                fb.borrow_mut().code.push(Instr::Jump(loop_start));
-                let loop_end = fb.borrow().code.len();
-                match &mut fb.borrow_mut().code[false_jump] {
-                    Instr::JumpIfFalse(target) => *target = loop_end,
-                    _ => unreachable!(),
-                }
-            }
-            Stmt::If {
-                cond,
-                then_branch,
-                else_branch,
-            } => {
-                self.compile_expr(cond, fb, parent, upvalues)?;
-                let false_jump = fb.borrow().code.len();
-                fb.borrow_mut().code.push(Instr::JumpIfFalse(usize::MAX));
-                for stmt in then_branch {
-                    self.compile_stmt(stmt, fb, parent, upvalues, false)?;
-                }
-                if else_branch.is_empty() {
-                    let end = fb.borrow().code.len();
-                    match &mut fb.borrow_mut().code[false_jump] {
-                        Instr::JumpIfFalse(target) => *target = end,
-                        _ => unreachable!(),
-                    }
-                    return Ok(());
-                }
-                let end_jump = fb.borrow().code.len();
-                fb.borrow_mut().code.push(Instr::Jump(usize::MAX));
-                let else_start = fb.borrow().code.len();
-                match &mut fb.borrow_mut().code[false_jump] {
-                    Instr::JumpIfFalse(target) => *target = else_start,
-                    _ => unreachable!(),
-                }
-                for stmt in else_branch {
-                    self.compile_stmt(stmt, fb, parent, upvalues, false)?;
-                }
-                let end = fb.borrow().code.len();
-                match &mut fb.borrow_mut().code[end_jump] {
-                    Instr::Jump(target) => *target = end,
-                    _ => unreachable!(),
-                }
-            }
-            Stmt::Return(value) => {
-                match value {
-                    Some(expr) => self.compile_expr(expr, fb, parent, upvalues)?,
-                    None => {
-                        let idx = fb.borrow_mut().push_const(Const::Undefined);
-                        fb.borrow_mut().code.push(Instr::LoadConst(idx));
-                    }
-                }
-                fb.borrow_mut().code.push(Instr::Return);
-            }
-            Stmt::Block(stmts) => {
-                for s in stmts {
-                    self.compile_stmt(s, fb, parent, upvalues, false)?;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn compile_expr(
+    pub(super) fn compile_expr(
         &mut self,
         expr: &Expr,
         fb: &Scope,
@@ -462,7 +330,7 @@ impl Compiler {
     /// and increments otherwise reload the stored value only for the caller
     /// to immediately `Pop` it; avoiding that pair removes two dispatches
     /// per loop iteration in the spike's reference programs.
-    fn compile_discard_expr(
+    pub(super) fn compile_discard_expr(
         &mut self,
         expr: &Expr,
         fb: &Scope,
@@ -627,7 +495,7 @@ fn numeric_op(op: BinOp) -> NumericOp {
     }
 }
 
-fn local_slot(fb: &Scope, name: &str) -> u32 {
+pub(super) fn local_slot(fb: &Scope, name: &str) -> u32 {
     fb.borrow()
         .locals
         .iter()

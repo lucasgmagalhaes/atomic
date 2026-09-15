@@ -3,12 +3,51 @@
 //! depends on AtomicJS, and this test is never part of its public runtime API.
 
 use atomicjs::run_source;
-use js_runtime::{Context, Runtime};
+use quickjs_sys as quickjs;
+use std::ffi::{CStr, CString};
 
 fn quickjs_result(source: &str) -> String {
-    let runtime = Runtime::new();
-    let context = Context::new(&runtime);
-    context.eval(source, "atomicjs-differential.js").unwrap()
+    let source = CString::new(source).expect("differential source must not contain NUL bytes");
+    let filename = CString::new("atomicjs-differential.js").unwrap();
+    let runtime = unsafe { quickjs::JS_NewRuntime() };
+    assert!(!runtime.is_null(), "QuickJS failed to allocate a runtime");
+    let context = unsafe { quickjs::JS_NewContext(runtime) };
+    if context.is_null() {
+        unsafe { quickjs::JS_FreeRuntime(runtime) };
+        panic!("QuickJS failed to allocate a context");
+    }
+
+    let value = unsafe {
+        quickjs::JS_Eval(
+            context,
+            source.as_ptr(),
+            source.as_bytes().len(),
+            filename.as_ptr(),
+            quickjs::JS_EVAL_TYPE_GLOBAL,
+        )
+    };
+    let result = if quickjs::js_is_exception(&value) {
+        Err("QuickJS raised an exception for a supported differential program".to_string())
+    } else {
+        let mut length = 0;
+        let raw_text = unsafe { quickjs::JS_ToCStringLen2(context, &mut length, value, false) };
+        if raw_text.is_null() {
+            Err("QuickJS could not stringify a differential result".to_string())
+        } else {
+            let text = unsafe { CStr::from_ptr(raw_text) }
+                .to_string_lossy()
+                .into_owned();
+            unsafe { quickjs::JS_FreeCString(context, raw_text) };
+            Ok(text)
+        }
+    };
+
+    unsafe {
+        quickjs::JS_FreeValue(context, value);
+        quickjs::JS_FreeContext(context);
+        quickjs::JS_FreeRuntime(runtime);
+    }
+    result.unwrap()
 }
 
 fn atomic_result(source: &str) -> Result<String, String> {

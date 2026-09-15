@@ -11,7 +11,7 @@ checking its observable result against the repository's QuickJS-ng runtime.
 
 ## Delivered
 
-- A development-only `js-runtime` dependency in `crates/atomicjs`.
+- A development-only direct `quickjs-sys` dependency in `crates/atomicjs`.
 - Differential tests that evaluate the same source in AtomicJS and QuickJS-ng
   and require identical stringified results.
 - Four stable coverage programs for objects, closures, control flow/native
@@ -19,7 +19,9 @@ checking its observable result against the repository's QuickJS-ng runtime.
 - Five generated arithmetic/control-flow variants with distinct operands.
 
 The oracle is test-only: AtomicJS's public API and production dependency graph
-remain unchanged. No application integration is introduced by this milestone.
+remain unchanged. It uses QuickJS-ng's minimal FFI binding directly rather than
+initializing the broader `js-runtime`; no application integration is introduced
+by this milestone.
 
 ## Validation contract
 

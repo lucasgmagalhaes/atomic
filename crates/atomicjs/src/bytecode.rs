@@ -29,6 +29,16 @@ pub enum Instr {
     /// Pops the object, pushes `object[name]` (`name` = constant pool
     /// string at this index) — `Value::Undefined` if missing.
     GetProp(u32),
+    /// Reads a property from a known local/upvalue without materializing its
+    /// object value on the operand stack first.
+    GetLocalProp {
+        local: u32,
+        name: u32,
+    },
+    GetUpvalueProp {
+        upvalue: u32,
+        name: u32,
+    },
     /// Pops the value; the object below it on the stack is mutated in place
     /// (`object[name] = value`) and stays on the stack — see this module's
     /// doc for why.

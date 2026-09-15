@@ -90,6 +90,27 @@ fn named_functions_can_call_another_named_function() {
 }
 
 #[test]
+fn captured_object_property_uses_the_same_member_semantics() {
+    let source = r#"
+        function makeReader() {
+            const player = { damage: 20 };
+            return function () { return player.damage; };
+        }
+        const reader = makeReader();
+        reader();
+    "#;
+    assert_eq!(number(source), 20.0);
+}
+
+#[test]
+fn later_literal_property_overwrites_the_earlier_value() {
+    assert_eq!(
+        number("const player = { level: 1, level: 2 }; player.level;"),
+        2.0
+    );
+}
+
+#[test]
 fn recursive_upgrade_cost_matches_quickjs_golden_value() {
     assert_eq!(number(common::UPGRADE_COST), 19.0);
 }

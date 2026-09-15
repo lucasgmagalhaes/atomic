@@ -382,9 +382,24 @@ impl Compiler {
                 fb.borrow_mut().code.push(Instr::Call(args.len() as u32));
             }
             Expr::Member { object, property } => {
-                self.compile_expr(object, fb, parent, upvalues)?;
                 let idx = fb.borrow_mut().push_const(Const::String(property.clone()));
-                fb.borrow_mut().code.push(Instr::GetProp(idx));
+                if let Expr::Identifier(name) = &**object {
+                    match resolve(name, fb, parent, upvalues)? {
+                        SlotRef::Local(local) => {
+                            fb.borrow_mut()
+                                .code
+                                .push(Instr::GetLocalProp { local, name: idx });
+                        }
+                        SlotRef::Upvalue(upvalue) => {
+                            fb.borrow_mut()
+                                .code
+                                .push(Instr::GetUpvalueProp { upvalue, name: idx });
+                        }
+                    }
+                } else {
+                    self.compile_expr(object, fb, parent, upvalues)?;
+                    fb.borrow_mut().code.push(Instr::GetProp(idx));
+                }
             }
             Expr::ObjectLiteral(props) => {
                 fb.borrow_mut().code.push(Instr::NewObject);

@@ -1,5 +1,4 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
@@ -32,24 +31,31 @@ impl fmt::Display for Value {
     }
 }
 
-/// No prototypes, no Shapes, no property descriptors — §5.1. A
-/// missing-property read returns `Value::Undefined` (`get`, below), matching
-/// real JS semantics; this is what `GET_PROP` (§5.3) relies on.
+/// No prototypes, no Shapes, no property descriptors — §5.1. This is a
+/// compact inline-property representation, deliberately tuned for the small
+/// object literals AtomicJS supports: it avoids hashing on every read while
+/// preserving insertion-order overwrite semantics. A missing-property read
+/// returns `Value::Undefined` (`get`, below), matching real JS semantics.
 #[derive(Debug, Default)]
 pub struct JsObject {
-    pub properties: HashMap<String, Value>,
+    pub properties: Vec<(String, Value)>,
 }
 
 impl JsObject {
     pub fn get(&self, name: &str) -> Value {
         self.properties
-            .get(name)
-            .cloned()
+            .iter()
+            .find_map(|(key, value)| (key == name).then(|| value.clone()))
             .unwrap_or(Value::Undefined)
     }
 
     pub fn set(&mut self, name: impl Into<String>, value: Value) {
-        self.properties.insert(name.into(), value);
+        let name = name.into();
+        if let Some((_, existing)) = self.properties.iter_mut().find(|(key, _)| *key == name) {
+            *existing = value;
+        } else {
+            self.properties.push((name, value));
+        }
     }
 }
 

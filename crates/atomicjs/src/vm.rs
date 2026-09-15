@@ -9,7 +9,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::bytecode::{BytecodeModule, Const, Instr, NativeFn};
+use crate::bytecode::{BytecodeFunction, BytecodeModule, Const, Instr, NativeFn};
 use crate::error::AtomicJsError;
 use crate::value::{FunctionData, FunctionFeedback, JsObject, Value};
 
@@ -36,6 +36,20 @@ impl LocalSlot {
         match self {
             LocalSlot::Plain(v) => *v = value,
             LocalSlot::Captured(cell) => *cell.borrow_mut() = value,
+        }
+    }
+
+    fn get_property(&self, name: &str) -> Value {
+        match self {
+            LocalSlot::Plain(Value::Object(object)) => object.borrow().get(name),
+            LocalSlot::Captured(cell) => {
+                let value = cell.borrow();
+                match &*value {
+                    Value::Object(object) => object.borrow().get(name),
+                    _ => Value::Undefined,
+                }
+            }
+            _ => Value::Undefined,
         }
     }
 }
@@ -283,6 +297,21 @@ fn execute_function<F: FeedbackSink>(
                 stack.push(value);
                 pc += 1;
             }
+            Instr::GetLocalProp { local, name } => {
+                let name = property_name(function, *name);
+                stack.push(locals[*local as usize].get_property(name));
+                pc += 1;
+            }
+            Instr::GetUpvalueProp { upvalue, name } => {
+                let name = property_name(function, *name);
+                let value = upvalues[*upvalue as usize].borrow();
+                let property = match &*value {
+                    Value::Object(object) => object.borrow().get(name),
+                    _ => Value::Undefined,
+                };
+                stack.push(property);
+                pc += 1;
+            }
             Instr::SetProp(idx) => {
                 let name = match &function.constants[*idx as usize] {
                     Const::String(s) => s.clone(),
@@ -452,4 +481,11 @@ fn binary_number(stack: &mut Vec<Value>, op: impl FnOnce(f64, f64) -> f64) {
     let b = stack.pop().expect("binary operation needs two operands");
     let a = stack.pop().expect("binary operation needs two operands");
     stack.push(Value::Number(op(as_number(&a), as_number(&b))));
+}
+
+fn property_name(function: &BytecodeFunction, idx: u32) -> &str {
+    match &function.constants[idx as usize] {
+        Const::String(name) => name,
+        other => panic!("internal error: property opcode constant must be a String, got {other:?}"),
+    }
 }

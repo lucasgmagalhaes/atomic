@@ -81,6 +81,20 @@ fn object_literal_compiles_to_new_object_then_set_prop_per_field() {
 }
 
 #[test]
+fn member_read_from_a_local_uses_the_direct_property_opcode() {
+    let module = compile_source("const player = { level: 10 }; player.level;");
+    let top_level = &module.functions[module.top_level];
+    assert!(top_level
+        .code
+        .iter()
+        .any(|instr| matches!(instr, Instr::GetLocalProp { .. })));
+    assert!(!top_level
+        .code
+        .iter()
+        .any(|instr| matches!(instr, Instr::GetProp(_))));
+}
+
+#[test]
 fn for_loop_compiles_a_backward_jump_and_a_patched_forward_jump() {
     let module = compile_source(
         r#"

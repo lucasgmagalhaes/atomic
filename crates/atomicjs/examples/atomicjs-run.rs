@@ -36,59 +36,9 @@ fn script_for(name: &str) -> &'static str {
     }
 }
 
-const SUM: &str = r#"
-function sum(n) {
-    let total = 0;
-    for (let i = 0; i < n; i++) {
-        total += i;
-    }
-    return total;
-}
-sum(1000000);
-"#;
-
-const OBJ: &str = r#"
-const player = { level: 10, damage: 20 };
-player.damage + player.level;
-"#;
-
-const CLOSURE: &str = r#"
-function makeCounter() {
-    let count = 0;
-    return function () {
-        return ++count;
-    };
-}
-const counter = makeCounter();
-counter();
-counter();
-counter();
-"#;
-
-const PROPS: &str = r#"
-const player = { level: 10, damage: 20 };
-let total = 0;
-for (let i = 0; i < 1000000; i++) {
-    total += player.damage;
-}
-total;
-"#;
-
-const CLOSURES: &str = r#"
-function makeCounter() {
-    let count = 0;
-    return function () {
-        return ++count;
-    };
-}
-const counter = makeCounter();
-let total = 0;
-for (let i = 0; i < 1000000; i++) {
-    total += counter();
-}
-total;
-"#;
-
-const HOT_LOOP: &str = r#"
-(function () { let gold=1.0; let gems=1.0; let energy=1.0; let goldMult=1.0001; let gemsMult=1.00005; let energyMult=1.00002; let ticks=200000; for (let i=0; i<ticks; i++) { gold=gold*goldMult+Math.sqrt(i%997+1); gems=gems*gemsMult+(gold%13); energy=energy*energyMult+Math.log(gems+1); if (gold>1e12) { gold=gold/1e6; goldMult*=1.0000001; } if (gems>1e12) { gems=gems/1e6; gemsMult*=1.0000001; } if (energy>1e12) { energy=energy/1e6; energyMult*=1.0000001; } } return gold+gems+energy; })();
-"#;
+const SUM: &str = include_str!("../benchmarks/scripts/sum.js");
+const OBJ: &str = include_str!("../benchmarks/scripts/obj.js");
+const CLOSURE: &str = include_str!("../benchmarks/scripts/closure.js");
+const PROPS: &str = include_str!("../benchmarks/scripts/props.js");
+const CLOSURES: &str = include_str!("../benchmarks/scripts/closures.js");
+const HOT_LOOP: &str = include_str!("../benchmarks/scripts/hot_loop.js");

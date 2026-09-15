@@ -24,6 +24,15 @@ function accumulate(n) {
 }
 accumulate(1000000);
 "#;
+const PROPERTY_LOOP: &str = r#"
+function sum(player, n) {
+    let total = 0;
+    for (let i = 0; i < n; i++) { total += player.damage; }
+    return total;
+}
+const player = { damage: 20 };
+sum(player, 1000000);
+"#;
 
 fn bench_reference_workloads(criterion: &mut Criterion) {
     for (name, source) in [
@@ -74,6 +83,26 @@ fn bench_reference_workloads(criterion: &mut Criterion) {
     tiered_call_graph.run().unwrap();
     criterion.bench_function("numeric_call_graph/tier_one_compiled", |bench| {
         bench.iter(|| black_box(tiered_call_graph.run().unwrap()))
+    });
+
+    let property_loop = CompiledProgram::compile(PROPERTY_LOOP).unwrap();
+    criterion.bench_function("property_loop/tier_zero_compiled", |bench| {
+        bench.iter(|| black_box(property_loop.run().unwrap()))
+    });
+
+    let mut tiered_property_loop = TieredProgram::compile(
+        PROPERTY_LOOP,
+        TieringPolicy {
+            enabled: true,
+            call_threshold: 1,
+            loop_threshold: 1,
+            ..TieringPolicy::default()
+        },
+    )
+    .unwrap();
+    tiered_property_loop.run().unwrap();
+    criterion.bench_function("property_loop/tier_one_compiled", |bench| {
+        bench.iter(|| black_box(tiered_property_loop.run().unwrap()))
     });
 }
 

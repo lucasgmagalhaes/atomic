@@ -10,8 +10,9 @@ pub mod compiler;
 pub mod error;
 pub mod lexer;
 pub mod parser;
-pub mod tiering;
+pub mod test262;
 pub mod tier_one;
+pub mod tiering;
 pub mod value;
 pub mod vm;
 

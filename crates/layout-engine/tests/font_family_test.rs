@@ -133,3 +133,27 @@ fn with_no_font_family_rule_anywhere_the_root_falls_back_to_the_built_in_default
     assert_eq!(tree.style.font_family, Some(FontFamily::default()));
     assert_eq!(FontFamily::default().generic, GenericFontFamily::SansSerif);
 }
+
+#[test]
+fn register_font_face_never_panics_on_unparseable_bytes() {
+    // Real `@font-face` (`page_source::load_font_faces`'s one real
+    // consumer): `fontdb`'s own loader just logs a warning and registers
+    // zero faces for data it can't parse - never panics - matching this
+    // crate's "best-effort, never fail the whole page load over one bad
+    // resource" stance for every other optional network resource.
+    layout_engine::register_font_face(b"not a real font file".to_vec());
+    layout_engine::register_font_face(Vec::new());
+
+    // Layout/shaping still works normally afterwards - registering garbage
+    // data doesn't poison the shared font system for anything else.
+    let mut d = Dom::new();
+    let root = d.root();
+    let div = d.create_element("div");
+    d.append_child(root, div);
+    let sheet = parse_stylesheet("div { font-family: \"DefinitelyNotRegistered\", sans-serif; }");
+    let tree = build_box_tree(&d, div, &sheet).unwrap();
+    assert_eq!(
+        tree.style.font_family.unwrap().name(),
+        Some("DefinitelyNotRegistered")
+    );
+}

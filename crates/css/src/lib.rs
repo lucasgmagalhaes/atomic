@@ -9,6 +9,6 @@ pub use cascade::{
 pub use lexer::{tokenize, Lexer, Token};
 pub use parser::{
     parse_inline_style, parse_stylesheet, AttributeMatch, AttributeSelector, Combinator,
-    ComplexSelector, CompoundSelector, Declaration, ImportRule, MediaFeature, MediaQuery,
-    NthFormula, PseudoClass, Rule, SelectorList, SimpleSelector, Stylesheet,
+    ComplexSelector, CompoundSelector, Declaration, FontFaceRule, ImportRule, MediaFeature,
+    MediaQuery, NthFormula, PseudoClass, Rule, SelectorList, SimpleSelector, Stylesheet,
 };

@@ -4,7 +4,9 @@ use js_runtime::{Context, Runtime};
 
 use crate::document_load::LoadedDocument;
 use crate::network::ResourceCache;
-use crate::page_source::{build_stylesheet, collect_meta_csp_policies, load_images, load_scripts};
+use crate::page_source::{
+    build_stylesheet, collect_meta_csp_policies, load_font_faces, load_images, load_scripts,
+};
 
 use super::{Page, DEMO_SCRIPT};
 
@@ -46,6 +48,20 @@ impl<'rt> Page<'rt> {
             html_el,
             base_url,
             viewport_width,
+            storage_root,
+            proxy,
+            dns_server,
+            &mut cache,
+        );
+        // Real `@font-face` (`ROADMAP.md`'s "font loading" gap): every
+        // face the merged stylesheet carries (its own, plus anything it
+        // `@import`s) fetched and registered into `cosmic-text`'s shared
+        // font database before the first layout ever runs - so text using
+        // it shapes with the real fetched font from this page's very
+        // first paint, not a later one once the fetch happens to land.
+        load_font_faces(
+            &sheet,
+            base_url,
             storage_root,
             proxy,
             dns_server,

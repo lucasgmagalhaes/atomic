@@ -6,15 +6,18 @@
 //!
 //! Split into `url.rs` (`resolve_url`), `scripts.rs` (`load_scripts`),
 //! `images.rs` (`load_images`), `csp.rs` (`collect_meta_csp_policies`),
-//! and `stylesheet.rs` (`build_stylesheet`).
+//! `stylesheet.rs` (`build_stylesheet`), and `fonts.rs`
+//! (`load_font_faces`).
 
 mod csp;
+mod fonts;
 mod images;
 mod scripts;
 mod stylesheet;
 mod url;
 
 pub(crate) use csp::collect_meta_csp_policies;
+pub(crate) use fonts::load_font_faces;
 pub(crate) use images::load_images;
 pub(crate) use scripts::load_scripts;
 pub(crate) use stylesheet::build_stylesheet;

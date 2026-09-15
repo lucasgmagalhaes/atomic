@@ -57,7 +57,11 @@ fn collect_css_sources(dom: &Dom, node: NodeId, out: &mut Vec<CssSource>) {
 /// for a rule that couldn't apply anyway" reasoning `<link media="...">`
 /// would get if this crate parsed that attribute, which it doesn't yet),
 /// then appends its own rules — imported rules land first, same relative
-/// order a real `@import` (which must precede other rules) produces.
+/// order a real `@import` (which must precede other rules) produces. Real
+/// `@font-face` rules (`css::FontFaceRule`) ride along the same way, from
+/// both `css_text` itself and anything it `@import`s - `sheet.font_faces`
+/// is what `page_source::load_font_faces` (called once, after
+/// `build_stylesheet` returns) actually fetches and registers.
 /// Only one level deep: an imported stylesheet's own `@import`s aren't
 /// followed, to keep this bounded without needing cycle detection for
 /// what's a real but rare case (a stylesheet importing a stylesheet that
@@ -92,11 +96,14 @@ fn merge_stylesheet_text(
         if let Some(resolved) = resolve_url(base_url, &import.url) {
             if let Ok(response) = cache.fetch_cached(&resolved, storage_root, proxy, dns_server) {
                 let imported_text = String::from_utf8_lossy(&response.body).into_owned();
-                sheet.rules.extend(parse_stylesheet(&imported_text).rules);
+                let imported = parse_stylesheet(&imported_text);
+                sheet.rules.extend(imported.rules);
+                sheet.font_faces.extend(imported.font_faces);
             }
         }
     }
     sheet.rules.extend(parsed.rules);
+    sheet.font_faces.extend(parsed.font_faces);
 }
 
 /// Resolves every CSS source in `dom` (rooted at `root`) into one cascaded

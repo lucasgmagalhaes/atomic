@@ -25,8 +25,8 @@ pub use style::{
 };
 pub use table::layout_table_children;
 pub use text::{
-    layout_inline, layout_text, rasterize_glyph, GlyphBitmap, InlineSpan, PositionedGlyph,
-    TextLayout,
+    layout_inline, layout_text, rasterize_glyph, register_font_face, GlyphBitmap, InlineSpan,
+    PositionedGlyph, TextLayout,
 };
 pub use transition::TransitionStates;
 pub use tree::{

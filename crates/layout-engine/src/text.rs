@@ -49,6 +49,32 @@ fn context() -> &'static Mutex<TextContext> {
     })
 }
 
+/// Real `@font-face` (`crate::style::FontFamily`'s own doc, "no custom
+/// `@font-face`-registered names" cut, lifted): loads `font_bytes` (a
+/// whole font file's raw bytes, already fetched over the network by a
+/// caller with network access - `profile-worker`'s
+/// `page_source::load_font_faces`, this crate itself fetches nothing) into
+/// the one process-wide `FontSystem`'s own `fontdb::Database` via
+/// `db_mut().load_font_data` - the same real database `family_for`'s
+/// `Family::Name(...)` lookup already queries for a plain system-installed
+/// font, so a page's own `@font-face`-declared name resolves exactly like
+/// an already-installed one from this point on, no separate lookup path.
+///
+/// Scope cut: `fontdb` matches a loaded font by the family name *embedded
+/// in the font file's own metadata*, not by whatever name the page's
+/// `@font-face` rule declared for it — there's no "register under this
+/// arbitrary alias" API in `fontdb`'s basic loader. In practice these two
+/// names coincide for the overwhelming majority of real `@font-face`
+/// declarations (a page author names the family after the font itself), so
+/// this is silently correct for the common case; a mismatched declared
+/// name simply falls through to `fontdb`'s own fallback, identical to
+/// today's existing "named font isn't installed" behavior for a plain
+/// `font-family` that names nothing real.
+pub fn register_font_face(font_bytes: Vec<u8>) {
+    let mut ctx = context().lock().expect("text context mutex poisoned");
+    ctx.fonts.db_mut().load_font_data(font_bytes);
+}
+
 /// One shaped glyph. `cache_key` plus `x`/`y` are exactly what
 /// `cosmic_text::LayoutGlyph::physical()` produces — `x`/`y` are already
 /// baseline-adjusted integer pixel positions relative to the text box's

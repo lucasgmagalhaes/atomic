@@ -19,6 +19,8 @@
   for numeric Tier-1 helper leaves.
 - [Milestone 25](ATOMIC_JS_MILESTONE_25.md): constant-left numeric helper
   inlining for the same one-argument Tier-1 boundary.
+- [Milestone 26](ATOMIC_JS_MILESTONE_26.md): two-argument numeric helper
+  inlining at the same Tier-1 boundary.
 
 ## Historical record
 

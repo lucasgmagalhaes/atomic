@@ -13,9 +13,6 @@ impl TierOneFunction {
             else {
                 continue;
             };
-            if *argc != 1 {
-                continue;
-            }
             let Some(leaf) = candidates
                 .get(*function_index)
                 .and_then(Option::as_ref)
@@ -23,15 +20,17 @@ impl TierOneFunction {
             else {
                 continue;
             };
-            *instruction = match leaf {
-                UnaryConstLeaf::Right { op, value } => TierOneInstr::InlineUnaryConst { op, value },
-                UnaryConstLeaf::Left { value, op } => TierOneInstr::InlineConstUnary { value, op },
+            *instruction = match (argc, leaf) {
+                (1, Leaf::UnaryRight { op, value }) => TierOneInstr::InlineUnaryConst { op, value },
+                (1, Leaf::UnaryLeft { value, op }) => TierOneInstr::InlineConstUnary { value, op },
+                (2, Leaf::Binary { op }) => TierOneInstr::InlineBinaryArgs { op },
+                _ => continue,
             };
         }
     }
 
-    fn unary_const_leaf(&self) -> Option<UnaryConstLeaf> {
-        if self.param_count != 1 || self.local_count != 1 || self.direct_calls().next().is_some() {
+    fn unary_const_leaf(&self) -> Option<Leaf> {
+        if self.local_count != self.param_count || self.direct_calls().next().is_some() {
             return None;
         }
         match self.code.as_slice() {
@@ -49,7 +48,7 @@ impl TierOneFunction {
                         | NumericOp::Mod
                 ) =>
             {
-                Some(UnaryConstLeaf::Right {
+                Some(Leaf::UnaryRight {
                     op: *op,
                     value: *value,
                 })
@@ -64,17 +63,35 @@ impl TierOneFunction {
                         | NumericOp::Mod
                 ) =>
             {
-                Some(UnaryConstLeaf::Left {
+                Some(Leaf::UnaryLeft {
                     value: *value,
                     op: *op,
                 })
+            }
+            [TierOneInstr::BinaryLocalLocal {
+                op,
+                left: 0,
+                right: 1,
+            }, TierOneInstr::Return, ..]
+                if self.param_count == 2
+                    && matches!(
+                        op,
+                        NumericOp::Add
+                            | NumericOp::Sub
+                            | NumericOp::Mul
+                            | NumericOp::Div
+                            | NumericOp::Mod
+                    ) =>
+            {
+                Some(Leaf::Binary { op: *op })
             }
             _ => None,
         }
     }
 }
 
-enum UnaryConstLeaf {
-    Right { op: NumericOp, value: f64 },
-    Left { value: f64, op: NumericOp },
+enum Leaf {
+    UnaryRight { op: NumericOp, value: f64 },
+    UnaryLeft { value: f64, op: NumericOp },
+    Binary { op: NumericOp },
 }

@@ -376,6 +376,20 @@ fn tier_one_numeric_subset_matches_tier_zero_and_quickjs() {
                 calculate(2);
             "#,
         ),
+        (
+            "binary_numeric_helper_graph",
+            r#"
+                function add(left, right) { return left + right; }
+                function subtract(left, right) { return left - right; }
+                function multiply(left, right) { return left * right; }
+                function divide(left, right) { return left / right; }
+                function remainder(left, right) { return left % right; }
+                function calculate(left, right) {
+                    return remainder(divide(multiply(subtract(add(left, right), 2), 3), 4), right);
+                }
+                calculate(9, 5);
+            "#,
+        ),
     ];
 
     for (name, source) in cases {

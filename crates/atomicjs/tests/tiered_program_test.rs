@@ -19,6 +19,12 @@ function invoke(n) { return remaining(n); }
 invoke(42);
 "#;
 
+const BINARY_HELPER_SOURCE: &str = r#"
+function remainder(left, right) { return left % right; }
+function invoke(left, right) { return remainder(left, right); }
+invoke(17, 5);
+"#;
+
 fn eager_policy() -> TieringPolicy {
     TieringPolicy {
         enabled: true,
@@ -107,6 +113,17 @@ fn tiered_program_inlines_a_constant_left_numeric_helper() {
     assert_number(program.run().unwrap().value, 58.0);
     let accelerated = program.run().unwrap();
     assert_number(accelerated.value, 58.0);
+    assert_eq!(accelerated.tier_one_calls, 1);
+    assert_eq!(accelerated.tier_one_fallbacks, 0);
+}
+
+#[test]
+fn tiered_program_inlines_a_binary_numeric_helper() {
+    let mut program = TieredProgram::compile(BINARY_HELPER_SOURCE, eager_policy()).unwrap();
+
+    assert_number(program.run().unwrap().value, 2.0);
+    let accelerated = program.run().unwrap();
+    assert_number(accelerated.value, 2.0);
     assert_eq!(accelerated.tier_one_calls, 1);
     assert_eq!(accelerated.tier_one_fallbacks, 0);
 }

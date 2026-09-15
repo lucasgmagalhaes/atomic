@@ -60,6 +60,10 @@ enum TierOneInstr {
         value: f64,
         op: NumericOp,
     },
+    /// A two-argument numeric leaf folded into its caller during preparation.
+    InlineBinaryArgs {
+        op: NumericOp,
+    },
     Jump(usize),
     JumpIfFalse(usize),
     Return,
@@ -275,6 +279,15 @@ impl TierOneFunction {
                         return None;
                     };
                     stack.push(numeric(*op, *value, argument));
+                }
+                TierOneInstr::InlineBinaryArgs { op } => {
+                    let TierValue::Number(right) = stack.pop()? else {
+                        return None;
+                    };
+                    let TierValue::Number(left) = stack.pop()? else {
+                        return None;
+                    };
+                    stack.push(numeric(*op, left, right));
                 }
                 TierOneInstr::Jump(target) => {
                     if *target <= pc {

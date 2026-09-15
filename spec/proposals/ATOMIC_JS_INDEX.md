@@ -7,6 +7,9 @@
 - [Technical roadmap](ATOMIC_JS_ROADMAP.md): conditional sequence for language,
   runtime, performance stages, GC, and any future JIT work; it does not authorize
   production integration.
+- [ECMA-262 conformance program](ATOMIC_JS_ECMASCRIPT_CONFORMANCE.md): the
+  Test262-gated path from the current subset to a named ECMAScript edition,
+  separate from ECMA-402 and Web APIs.
 - [Memory measurement protocol](ATOMIC_JS_MEMORY_MEASUREMENT.md): the canonical
   RSS methodology for AtomicJS and QuickJS-ng comparisons.
 - [Tiering design notes](ATOMIC_JS_TIERING.md): historical policy rationale;

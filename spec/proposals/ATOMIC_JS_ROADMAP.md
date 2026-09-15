@@ -16,6 +16,10 @@ perfil ocioso: baixo custo de partida e memória, boa latência em pequenos burs
 execução eficiente de loops aritméticos e acessos a objetos simples. Não é competir com
 V8, JavaScriptCore ou QuickJS-ng em compatibilidade geral ou throughput universal.
 
+O caminho alternativo para conformidade integral com uma edição nomeada de ECMA-262 está
+em [ATOMIC_JS_ECMASCRIPT_CONFORMANCE.md](ATOMIC_JS_ECMASCRIPT_CONFORMANCE.md). Ele é uma
+mudança de escopo, com Test262 como gate, e não altera os limites deste roadmap por si só.
+
 Cada etapa só avança quando cumpre, na ordem:
 
 1. semântica definida e testes de regressão;

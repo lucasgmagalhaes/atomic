@@ -101,3 +101,19 @@ fn fill_style_change_only_affects_subsequent_fill_rects() {
     assert_eq!(pixel(&pixels, 4, 0, 0), [0, 255, 0, 255]);
     assert_eq!(pixel(&pixels, 4, 3, 3), [0, 0, 255, 255]);
 }
+
+#[test]
+fn width_height_and_fill_style_getters_round_trip() {
+    let mut canvas = Canvas2D::new(10, 20);
+    assert_eq!(canvas.width(), 10);
+    assert_eq!(canvas.height(), 20);
+
+    let color = Color {
+        r: 12,
+        g: 34,
+        b: 56,
+        a: 255,
+    };
+    canvas.set_fill_style(color);
+    assert_eq!(canvas.fill_style(), color);
+}

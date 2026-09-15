@@ -37,13 +37,13 @@ pub struct Context<'rt> {
 }
 
 use crate::{
-    abort_controller, blob, clipboard, computed_style, console, crypto, cssom_stylesheet,
-    custom_elements, document_cookie, dom_bindings, event_subclasses, events, fetch, fetch_async,
-    form_data, history, host_state, import_map, indexed_db_bindings, local_storage_bindings,
-    location, message_channel, module_loader, mutation_observer, navigator, notifications,
-    page_visibility, performance, request_response, screen, script_limits, selection,
-    shared_worker_bindings, timers, trusted_types, url_bindings, value_bridge, web_audio, window,
-    window_registry, worker_bindings,
+    abort_controller, blob, canvas_bindings, clipboard, computed_style, console, crypto,
+    cssom_stylesheet, custom_elements, document_cookie, dom_bindings, event_subclasses, events,
+    fetch, fetch_async, form_data, history, host_state, import_map, indexed_db_bindings,
+    local_storage_bindings, location, message_channel, module_loader, mutation_observer, navigator,
+    notifications, page_visibility, performance, request_response, screen, script_limits,
+    selection, shared_worker_bindings, timers, trusted_types, url_bindings, value_bridge,
+    web_audio, window, window_registry, worker_bindings,
 };
 
 /// Registers every global this crate exposes on a fresh `JSContext` —
@@ -77,6 +77,7 @@ pub(crate) unsafe fn register_standard_globals(ptr: *mut sys::JSContext) {
     navigator::register(ptr);
     clipboard::register(ptr);
     web_audio::register(ptr);
+    canvas_bindings::register(ptr);
     window::register(ptr);
     location::register(ptr);
     history::register(ptr);
@@ -137,6 +138,7 @@ pub(crate) fn build_host_state(dom: dom::Dom) -> Box<host_state::HostState> {
         window: host_state::WindowState {
             id: window_registry::register(),
         },
+        canvases: std::collections::HashMap::new(),
     })
 }
 

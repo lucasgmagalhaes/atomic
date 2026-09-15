@@ -144,3 +144,45 @@ pub fn apply_image_sizes(
         apply_image_sizes(dom, child, images);
     }
 }
+
+/// Real `<canvas>` painting (Canvas2D JS wiring): sets [`LayoutBox::image`]
+/// for any `<canvas>` box with a matching entry in `canvases` - reuses the
+/// exact same `render::build_image_list`/`composite_images` paint pipeline
+/// [`apply_image_sizes`]'s `<img>` handling already does, so a canvas's
+/// drawn pixels composite into the page like any other replaced element,
+/// no new paint primitive. Deliberately does **not** touch `box_.style.
+/// width`/`height` the way `apply_image_sizes` does for `<img>` - a
+/// canvas's own `width`/`height` HTML attributes size its backing pixel
+/// buffer only (see `js-runtime`'s `canvas_bindings` for where that's
+/// read), not its layout box size; ordinary CSS (or this crate's own
+/// block-level Auto-stretch default) always decides that, matching this
+/// crate's "no synthesized default sizing beyond what's already modeled"
+/// convention.
+///
+/// `canvases` is supplied fresh by the caller on *every* call (unlike
+/// `apply_image_sizes`'s `images`, which a host fetches once at page load
+/// and reuses) - a canvas's content can change from a script's draw call
+/// at any point with no DOM mutation to signal it, so there's no safe
+/// point to cache this the way the rest of the box tree is cached. See
+/// `js_runtime::Context::canvas_snapshots`'s own doc for where a caller
+/// gets this map from.
+pub fn apply_canvas_snapshots(
+    dom: &Dom,
+    box_: &mut LayoutBox,
+    canvases: &std::collections::HashMap<NodeId, std::rc::Rc<image_decode::DecodedImage>>,
+) {
+    if let Some(dom::Node {
+        data: NodeData::Element { tag, .. },
+        ..
+    }) = dom.get(box_.node)
+    {
+        if tag.eq_ignore_ascii_case("canvas") {
+            if let Some(image) = canvases.get(&box_.node) {
+                box_.image = Some(image.clone());
+            }
+        }
+    }
+    for child in &mut box_.children {
+        apply_canvas_snapshots(dom, child, canvases);
+    }
+}

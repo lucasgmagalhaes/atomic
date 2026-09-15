@@ -8,6 +8,7 @@
 
 mod abort_controller;
 mod blob;
+mod canvas_bindings;
 mod class_registry;
 mod clipboard;
 mod computed_style;

@@ -87,4 +87,43 @@ impl<'rt> Context<'rt> {
             state.permissions_policy = Some(policy.to_string());
         }
     }
+
+    /// Real `<canvas>` compositing (`crate::canvas_bindings`): every
+    /// canvas element that's ever had `getContext('2d')` called on it,
+    /// with its *current* drawn pixels (`render::Canvas2D::get_image_data`,
+    /// re-read fresh on every call — canvas content can change from a JS
+    /// draw call at any point, with no dirty-tracking to know when). A
+    /// host (`profile-worker`'s `Page::render`) calls this once per real
+    /// paint and feeds the result into `layout_engine::
+    /// apply_canvas_snapshots`. Empty on a plain `Context::new`/`with_dom`
+    /// that has no `HostState`, or on a page with no canvas that's ever
+    /// called `getContext`.
+    pub fn canvas_snapshots(&self) -> std::collections::HashMap<dom::NodeId, (u32, u32, Vec<u8>)> {
+        let Some(state) = self._host_state.as_ref() else {
+            return std::collections::HashMap::new();
+        };
+        state
+            .canvases
+            .iter()
+            .map(|(node, canvas)| {
+                let canvas = canvas.borrow();
+                (
+                    *node,
+                    (canvas.width(), canvas.height(), canvas.get_image_data()),
+                )
+            })
+            .collect()
+    }
+
+    /// Whether this context has any canvas element with a real 2D
+    /// context — a host checks this to decide whether it must bypass its
+    /// own paint/layer caching every frame (see `canvas_snapshots`'s own
+    /// doc for why: canvas content can change with no signal this crate
+    /// can see cheaply). `false` on a plain `Context::new`/`with_dom`.
+    pub fn has_active_canvases(&self) -> bool {
+        self._host_state
+            .as_ref()
+            .map(|state| !state.canvases.is_empty())
+            .unwrap_or(false)
+    }
 }

@@ -190,7 +190,16 @@ impl<'rt> Page<'rt> {
         // running as of the *previous* frame has to force a cache bypass
         // this frame too, not just the one frame the underlying style
         // actually changed on.
-        if !self.transitions_active.get() {
+        // Real `<canvas>` compositing (`js_runtime::canvas_bindings`): a
+        // canvas's drawn pixels can change from a script's draw call at
+        // any point, with no dirty flag this worker can see cheaply (no
+        // `layout_ver`/`style_ver` bump, same blind spot a running CSS
+        // transition already has above) - so a page with any active 2D
+        // canvas context bypasses `PaintCache`/per-layer caching on every
+        // frame while that canvas exists, same shape `transitions_active`
+        // already uses.
+        let has_canvases = self.ctx.has_active_canvases();
+        if !self.transitions_active.get() && !has_canvases {
             if let Some(cached) = self.paint_cache.borrow().as_ref() {
                 if cached.width == width
                     && cached.height == height
@@ -210,6 +219,25 @@ impl<'rt> Page<'rt> {
         let now = std::time::Instant::now();
         let transitioning_nodes = self.transitions.borrow_mut().apply(&mut tree, now);
         self.transitions_active.set(!transitioning_nodes.is_empty());
+        let canvas_images: std::collections::HashMap<
+            NodeId,
+            std::rc::Rc<image_decode::DecodedImage>,
+        > = self
+            .ctx
+            .canvas_snapshots()
+            .into_iter()
+            .map(|(node, (w, h, rgba))| {
+                (
+                    node,
+                    std::rc::Rc::new(image_decode::DecodedImage {
+                        width: w,
+                        height: h,
+                        rgba,
+                    }),
+                )
+            })
+            .collect();
+        layout_engine::apply_canvas_snapshots(dom, &mut tree, &canvas_images);
         self.ctx.set_layout_rects(collect_layout_rects(&tree));
         self.ctx.set_computed_styles(collect_computed_styles(&tree));
         self.ctx.set_scroll_extents(collect_scroll_extents(&tree));
@@ -291,6 +319,17 @@ impl<'rt> Page<'rt> {
         for &node in &transitioning_nodes {
             for root in &layer_roots {
                 if root.node == node || dom.contains(root.node, node) {
+                    dirty_layers.insert(root.node);
+                }
+            }
+        }
+        // Same reasoning again, for every real `<canvas>` this frame
+        // composited (see `has_canvases`'s own doc above) - a canvas
+        // living inside a cached layer must not freeze that layer's own
+        // canvas at a stale frame.
+        for node in canvas_images.keys() {
+            for root in &layer_roots {
+                if root.node == *node || dom.contains(root.node, *node) {
                     dirty_layers.insert(root.node);
                 }
             }

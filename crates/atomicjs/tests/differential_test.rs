@@ -11,12 +11,166 @@ fn quickjs_result(source: &str) -> String {
     context.eval(source, "atomicjs-differential.js").unwrap()
 }
 
+fn atomic_result(source: &str) -> Result<String, String> {
+    run_source(source)
+        .map(|value| value.to_string())
+        .map_err(|error| error.to_string())
+}
+
 fn assert_matches_quickjs(name: &str, source: &str) {
-    let atomic = run_source(source)
-        .unwrap_or_else(|error| panic!("AtomicJS failed {name}: {error}"))
-        .to_string();
+    let atomic =
+        atomic_result(source).unwrap_or_else(|error| panic!("AtomicJS failed {name}: {error}"));
     let quickjs = quickjs_result(source);
     assert_eq!(atomic, quickjs, "differential mismatch in {name}: {source}");
+}
+
+#[derive(Clone, Debug)]
+struct GeneratedCase {
+    start: u32,
+    add: u32,
+    multiplier: u32,
+    divisor: u32,
+    modulus: u32,
+    threshold: u32,
+    decrement: u32,
+}
+
+impl GeneratedCase {
+    fn source(&self) -> String {
+        format!(
+            "let value = {start}; value = (value + {add}) * {multiplier}; value = value / {divisor} % {modulus}; if (value > {threshold}) {{ value = value - {decrement}; }} value;",
+            start = self.start,
+            add = self.add,
+            multiplier = self.multiplier,
+            divisor = self.divisor,
+            modulus = self.modulus,
+            threshold = self.threshold,
+            decrement = self.decrement,
+        )
+    }
+}
+
+#[derive(Clone, Copy)]
+enum CaseField {
+    Start,
+    Add,
+    Multiplier,
+    Divisor,
+    Modulus,
+    Threshold,
+    Decrement,
+}
+
+impl CaseField {
+    const ALL: [Self; 7] = [
+        Self::Start,
+        Self::Add,
+        Self::Multiplier,
+        Self::Divisor,
+        Self::Modulus,
+        Self::Threshold,
+        Self::Decrement,
+    ];
+
+    fn value(self, case: &GeneratedCase) -> u32 {
+        match self {
+            Self::Start => case.start,
+            Self::Add => case.add,
+            Self::Multiplier => case.multiplier,
+            Self::Divisor => case.divisor,
+            Self::Modulus => case.modulus,
+            Self::Threshold => case.threshold,
+            Self::Decrement => case.decrement,
+        }
+    }
+
+    fn set(self, case: &mut GeneratedCase, value: u32) {
+        match self {
+            Self::Start => case.start = value,
+            Self::Add => case.add = value,
+            Self::Multiplier => case.multiplier = value,
+            Self::Divisor => case.divisor = value,
+            Self::Modulus => case.modulus = value,
+            Self::Threshold => case.threshold = value,
+            Self::Decrement => case.decrement = value,
+        }
+    }
+
+    fn minimum(self) -> u32 {
+        match self {
+            Self::Divisor | Self::Modulus => 1,
+            _ => 0,
+        }
+    }
+}
+
+fn generated_cases(seed: u32, count: usize) -> impl Iterator<Item = GeneratedCase> {
+    let mut state = seed;
+    std::iter::repeat_with(move || {
+        let next = |minimum: u32, maximum: u32, state: &mut u32| {
+            *state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            minimum + ((*state >> 16) % (maximum - minimum + 1))
+        };
+        GeneratedCase {
+            start: next(0, 50, &mut state),
+            add: next(0, 20, &mut state),
+            multiplier: next(1, 10, &mut state),
+            divisor: next(1, 10, &mut state),
+            modulus: next(1, 17, &mut state),
+            threshold: next(0, 10, &mut state),
+            decrement: next(0, 5, &mut state),
+        }
+    })
+    .take(count)
+}
+
+fn differs_from_quickjs(case: &GeneratedCase) -> bool {
+    let source = case.source();
+    atomic_result(&source) != Ok(quickjs_result(&source))
+}
+
+fn shrink_failing_case(case: &GeneratedCase) -> GeneratedCase {
+    let mut smallest = case.clone();
+
+    loop {
+        let mut shrunk = false;
+        for field in CaseField::ALL {
+            let current = field.value(&smallest);
+            for candidate in [field.minimum(), current / 2, 1] {
+                if candidate == current || candidate < field.minimum() {
+                    continue;
+                }
+                let mut proposal = smallest.clone();
+                field.set(&mut proposal, candidate);
+                if differs_from_quickjs(&proposal) {
+                    smallest = proposal;
+                    shrunk = true;
+                    break;
+                }
+            }
+            if shrunk {
+                break;
+            }
+        }
+        if !shrunk {
+            return smallest;
+        }
+    }
+}
+
+fn assert_generated_case_matches_quickjs(seed: u32, index: usize, case: &GeneratedCase) {
+    let source = case.source();
+    let atomic = atomic_result(&source);
+    let quickjs = quickjs_result(&source);
+    if atomic == Ok(quickjs.clone()) {
+        return;
+    }
+
+    let smallest = shrink_failing_case(case);
+    panic!(
+        "differential mismatch for seed {seed}, case {index}:\\noriginal: {source}\\nminimized: {}\\nAtomicJS: {atomic:?}\\nQuickJS: {quickjs}",
+        smallest.source(),
+    );
 }
 
 #[test]
@@ -53,20 +207,9 @@ fn fixed_supported_programs_match_quickjs() {
 }
 
 #[test]
-fn generated_arithmetic_and_control_cases_match_quickjs() {
-    for (index, (start, add, multiplier, divisor, modulus)) in [
-        (2, 3, 5, 2, 7),
-        (7, 11, 3, 5, 9),
-        (19, 2, 7, 3, 11),
-        (31, 13, 2, 4, 17),
-        (43, 5, 11, 6, 19),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let source = format!(
-            "let value = {start}; value = (value + {add}) * {multiplier}; value = value / {divisor} % {modulus}; if (value > 1) {{ value = value - 1; }} value;"
-        );
-        assert_matches_quickjs(&format!("generated_case_{index}"), &source);
+fn seeded_arithmetic_and_control_cases_match_quickjs() {
+    const SEED: u32 = 0xA70C_1C5;
+    for (index, case) in generated_cases(SEED, 64).enumerate() {
+        assert_generated_case_matches_quickjs(SEED, index, &case);
     }
 }

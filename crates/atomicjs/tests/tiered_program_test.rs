@@ -34,6 +34,29 @@ function choose(left, right) {
 choose(3, 7);
 "#;
 
+const RECURSIVE_SOURCE: &str = r#"
+function triangular(n) {
+    if (n < 1) { return 0; }
+    return n + triangular(n - 1);
+}
+triangular(10);
+"#;
+
+const PROPERTY_READER_SOURCE: &str = r#"
+function read(player) { return player.damage; }
+const player = { damage: 12 };
+read(player);
+"#;
+
+const CLOSURE_COUNTER_SOURCE: &str = r#"
+function makeCounter() {
+    let count = 0;
+    return function () { return ++count; };
+}
+const counter = makeCounter();
+counter(); counter(); counter();
+"#;
+
 fn eager_policy() -> TieringPolicy {
     TieringPolicy {
         enabled: true,
@@ -161,4 +184,38 @@ fn tiered_program_rejects_an_entire_graph_when_the_budget_cannot_hold_it() {
     let second = program.run().unwrap();
     assert_number(second.value, 42.0);
     assert_eq!(second.tier_one_calls, 0);
+}
+
+#[test]
+fn tiered_program_admits_a_recursive_numeric_call_graph_atomically() {
+    let mut program = TieredProgram::compile(RECURSIVE_SOURCE, eager_policy()).unwrap();
+
+    assert_number(program.run().unwrap().value, 55.0);
+    let accelerated = program.run().unwrap();
+    assert_number(accelerated.value.clone(), 55.0);
+    assert_eq!(accelerated.tier_one_fallbacks, 0);
+    assert!(
+        accelerated.tier_one_calls > 0,
+        "recursive function must enter Tier 1: {accelerated:?}"
+    );
+}
+
+#[test]
+fn tiered_program_executes_guarded_numeric_property_reads() {
+    let mut program = TieredProgram::compile(PROPERTY_READER_SOURCE, eager_policy()).unwrap();
+    assert_number(program.run().unwrap().value, 12.0);
+    let accelerated = program.run().unwrap();
+    assert_number(accelerated.value, 12.0);
+    assert_eq!(accelerated.tier_one_calls, 1);
+    assert_eq!(accelerated.tier_one_fallbacks, 0);
+}
+
+#[test]
+fn tiered_program_executes_guarded_numeric_closure_upvalue_increment() {
+    let mut program = TieredProgram::compile(CLOSURE_COUNTER_SOURCE, eager_policy()).unwrap();
+    assert_number(program.run().unwrap().value, 3.0);
+    let accelerated = program.run().unwrap();
+    assert_number(accelerated.value, 3.0);
+    assert!(accelerated.tier_one_calls >= 3);
+    assert_eq!(accelerated.tier_one_fallbacks, 0);
 }

@@ -54,6 +54,27 @@ impl TierOneFunction {
                     value: *value,
                 })
             }
+            [TierOneInstr::BinaryLocalConst {
+                op,
+                local: 0,
+                value,
+            }, TierOneInstr::Store(slot), TierOneInstr::Load(reload), TierOneInstr::Return, ..]
+                if slot == reload
+                    && matches!(
+                        op,
+                        NumericOp::Add
+                            | NumericOp::Sub
+                            | NumericOp::Mul
+                            | NumericOp::Div
+                            | NumericOp::Mod
+                            | NumericOp::Lt
+                    ) =>
+            {
+                Some(Leaf::UnaryRight {
+                    op: *op,
+                    value: *value,
+                })
+            }
             [TierOneInstr::Const(value), TierOneInstr::Load(0), TierOneInstr::Numeric(op), TierOneInstr::Return, ..]
                 if matches!(
                     op,
@@ -70,12 +91,48 @@ impl TierOneFunction {
                     op: *op,
                 })
             }
+            [TierOneInstr::Const(value), TierOneInstr::Load(0), TierOneInstr::Numeric(op), TierOneInstr::Store(slot), TierOneInstr::Load(reload), TierOneInstr::Return, ..]
+                if slot == reload
+                    && matches!(
+                        op,
+                        NumericOp::Add
+                            | NumericOp::Sub
+                            | NumericOp::Mul
+                            | NumericOp::Div
+                            | NumericOp::Mod
+                            | NumericOp::Lt
+                    ) =>
+            {
+                Some(Leaf::UnaryLeft {
+                    value: *value,
+                    op: *op,
+                })
+            }
             [TierOneInstr::BinaryLocalLocal {
                 op,
                 left: 0,
                 right: 1,
             }, TierOneInstr::Return, ..]
                 if self.param_count == 2
+                    && matches!(
+                        op,
+                        NumericOp::Add
+                            | NumericOp::Sub
+                            | NumericOp::Mul
+                            | NumericOp::Div
+                            | NumericOp::Mod
+                            | NumericOp::Lt
+                    ) =>
+            {
+                Some(Leaf::Binary { op: *op })
+            }
+            [TierOneInstr::BinaryLocalLocal {
+                op,
+                left: 0,
+                right: 1,
+            }, TierOneInstr::Store(slot), TierOneInstr::Load(reload), TierOneInstr::Return, ..]
+                if slot == reload
+                    && self.param_count == 2
                     && matches!(
                         op,
                         NumericOp::Add

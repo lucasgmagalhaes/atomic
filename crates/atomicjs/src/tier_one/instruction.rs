@@ -1,7 +1,7 @@
 //! @spec atomicjs-profiling#tier-one-inlining
 //! Specialized bytecode emitted only for numeric Tier-1 candidates.
 
-use crate::bytecode::NumericOp;
+use crate::bytecode::{NativeFn, NumericOp};
 
 #[derive(Debug, Clone)]
 pub(super) enum TierOneInstr {
@@ -29,6 +29,7 @@ pub(super) enum TierOneInstr {
     },
     IncrementLocal(u32),
     Numeric(NumericOp),
+    Native(NativeFn),
     CallDirect {
         function_index: usize,
         argc: usize,

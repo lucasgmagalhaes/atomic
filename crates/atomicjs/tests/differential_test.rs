@@ -355,6 +355,13 @@ fn tier_one_numeric_subset_matches_tier_zero_and_quickjs() {
             "#,
         ),
         (
+            "numeric_math_natives",
+            r#"
+                function score(n) { return Math.sqrt(n) + Math.log(n); }
+                score(81);
+            "#,
+        ),
+        (
             "numeric_direct_call_graph",
             r#"
                 function increment(n) { return n + 1; }
@@ -437,6 +444,16 @@ fn tier_one_numeric_subset_matches_tier_zero_and_quickjs() {
                     outer++;
                 }
                 total;
+            "#,
+        ),
+        (
+            "recursive_numeric_call_graph",
+            r#"
+                function triangular(n) {
+                    if (n < 1) { return 0; }
+                    return n + triangular(n - 1);
+                }
+                triangular(10);
             "#,
         ),
     ];

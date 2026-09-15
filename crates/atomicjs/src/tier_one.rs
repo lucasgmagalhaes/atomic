@@ -5,7 +5,7 @@
 
 use crate::bytecode::{BytecodeFunction, Const, Instr, NumericOp};
 use crate::value::Value;
-
+mod guards;
 mod inlining;
 mod instruction;
 mod scratch;
@@ -19,6 +19,8 @@ pub struct TierOneFunction {
     param_count: usize,
     local_count: usize,
     code: Vec<TierOneInstr>,
+    property_read: Option<(usize, String)>,
+    increment_upvalue: Option<usize>,
 }
 
 pub struct TierOneResult {
@@ -28,6 +30,28 @@ pub struct TierOneResult {
 
 impl TierOneFunction {
     pub fn compile(function: &BytecodeFunction) -> Option<Self> {
+        let property_read = match function.code.as_slice() {
+            [Instr::GetLocalProp { local, name }, Instr::Return, ..] => {
+                match function.constants.get(*name as usize)? {
+                    Const::String(name) => Some((*local as usize, name.clone())),
+                    _ => return None,
+                }
+            }
+            _ => None,
+        };
+        let increment_upvalue = match function.code.as_slice() {
+            [Instr::IncrementUpvalue(index), Instr::Return, ..] => Some(*index as usize),
+            _ => None,
+        };
+        if property_read.is_some() || increment_upvalue.is_some() {
+            return Some(Self {
+                param_count: function.param_count,
+                local_count: function.local_count,
+                code: Vec::new(),
+                property_read,
+                increment_upvalue,
+            });
+        }
         if !function.captured_locals.is_empty() || function.upvalue_count != 0 {
             return None;
         }
@@ -80,6 +104,7 @@ impl TierOneFunction {
                 Instr::Div => TierOneInstr::Numeric(NumericOp::Div),
                 Instr::Mod => TierOneInstr::Numeric(NumericOp::Mod),
                 Instr::Lt => TierOneInstr::Numeric(NumericOp::Lt),
+                Instr::CallNative(native) => TierOneInstr::Native(*native),
                 Instr::CallDirect {
                     function_index,
                     argc,
@@ -99,10 +124,15 @@ impl TierOneFunction {
             param_count: function.param_count,
             local_count: function.local_count,
             code,
+            property_read: None,
+            increment_upvalue: None,
         })
     }
 
     pub fn run(&self, args: &[Value]) -> Option<TierOneResult> {
+        if let Some((local, name)) = &self.property_read {
+            return guards::property_read(args, self.param_count, *local, name);
+        }
         if args.len() != self.param_count {
             return None;
         }
@@ -123,8 +153,15 @@ impl TierOneFunction {
     pub(crate) fn run_with_functions(
         &self,
         args: &[Value],
+        upvalues: &[std::rc::Rc<std::cell::RefCell<Value>>],
         functions: &[Option<TierOneFunction>],
     ) -> Option<TierOneResult> {
+        if let Some((local, name)) = &self.property_read {
+            return guards::property_read(args, self.param_count, *local, name);
+        }
+        if let Some(index) = self.increment_upvalue {
+            return guards::increment_upvalue(upvalues, index);
+        }
         if args.len() != self.param_count
             || !args.iter().all(|value| matches!(value, Value::Number(_)))
         {
@@ -195,6 +232,15 @@ impl TierOneFunction {
                         return None;
                     };
                     stack.push(numeric(*op, left, right));
+                }
+                TierOneInstr::Native(native) => {
+                    let TierValue::Number(value) = stack.pop()? else {
+                        return None;
+                    };
+                    stack.push(TierValue::Number(match native {
+                        crate::bytecode::NativeFn::Sqrt => value.sqrt(),
+                        crate::bytecode::NativeFn::Log => value.ln(),
+                    }));
                 }
                 TierOneInstr::CallDirect {
                     function_index,

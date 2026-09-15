@@ -57,6 +57,14 @@ impl Compiler {
         is_top_level: bool,
     ) -> Result<(), CompileError> {
         let name = decl.name.clone().expect("function declarations are named");
+        // Reserve this declaration's stable module index before lowering its
+        // body so a closure-free top-level function can directly call itself.
+        // `compile_function` appends exactly one function at this position.
+        let direct_candidate = is_top_level && !self.reassigned_names.contains(&name);
+        let reserved_index = self.functions.len() as u32;
+        if direct_candidate {
+            self.direct_globals.insert(name.clone(), reserved_index);
+        }
         let (function_index, captures) = self.compile_function(
             Some(name.clone()),
             &decl.params,
@@ -70,11 +78,10 @@ impl Compiler {
         });
         let slot = local_slot(fb, &name);
         fb.borrow_mut().code.push(Instr::StoreLocal(slot));
-        if is_top_level
-            && self.functions[function_index as usize].upvalue_count == 0
-            && !self.reassigned_names.contains(&name)
-        {
+        if direct_candidate && self.functions[function_index as usize].upvalue_count == 0 {
             self.direct_globals.insert(name, function_index);
+        } else if direct_candidate {
+            self.direct_globals.remove(&name);
         }
         Ok(())
     }

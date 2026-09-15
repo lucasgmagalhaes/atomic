@@ -455,6 +455,40 @@ fn execute_function<F: FeedbackSink>(
                 stack.push(result);
                 pc += 1;
             }
+            Instr::CallLocal0(local) => {
+                let result = match &locals[*local as usize] {
+                    // The hot closure benchmark keeps its callee in a plain
+                    // local slot. Borrow FunctionData directly so this path
+                    // avoids LoadLocal, an operand-stack round trip, and an
+                    // Rc clone for every zero-argument call.
+                    LocalSlot::Plain(Value::Function(function_data)) => execute_function(
+                        module,
+                        function_data.function_index,
+                        &[],
+                        &function_data.captured_env,
+                        feedback,
+                        pools,
+                    ),
+                    // A captured local cannot hold a RefCell borrow across a
+                    // recursive call: the callee could mutate that same cell.
+                    // Fall back to the generic, ownership-safe value path.
+                    _ => match locals[*local as usize].get() {
+                        Value::Function(function_data) => execute_function(
+                            module,
+                            function_data.function_index,
+                            &[],
+                            &function_data.captured_env,
+                            feedback,
+                            pools,
+                        ),
+                        other => Err(AtomicJsError(format!(
+                            "attempted to call a non-function value: {other}"
+                        ))),
+                    },
+                }?;
+                stack.push(result);
+                pc += 1;
+            }
             Instr::CallNative(native) => {
                 let value = as_number(&stack.pop().expect("CallNative needs one operand"));
                 stack.push(Value::Number(match native {

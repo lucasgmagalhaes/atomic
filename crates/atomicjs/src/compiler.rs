@@ -359,6 +359,14 @@ impl Compiler {
                 fb.borrow_mut().code.push(bin_instr(*op));
             }
             Expr::Call { callee, args } => {
+                if args.is_empty() {
+                    if let Expr::Identifier(name) = &**callee {
+                        if let SlotRef::Local(local) = resolve(name, fb, parent, upvalues)? {
+                            fb.borrow_mut().code.push(Instr::CallLocal0(local));
+                            return Ok(());
+                        }
+                    }
+                }
                 if args.len() == 1 {
                     if let Expr::Member { object, property } = &**callee {
                         if matches!(&**object, Expr::Identifier(name) if name == "Math") {

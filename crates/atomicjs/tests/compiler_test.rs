@@ -95,6 +95,16 @@ fn member_read_from_a_local_uses_the_direct_property_opcode() {
 }
 
 #[test]
+fn zero_argument_local_call_uses_the_direct_call_opcode() {
+    let module = compile_source("function f() { return 1; } f();");
+    let top_level = &module.functions[module.top_level];
+    assert!(top_level
+        .code
+        .iter()
+        .any(|instr| matches!(instr, Instr::CallLocal0(_))));
+}
+
+#[test]
 fn for_loop_compiles_a_backward_jump_and_a_patched_forward_jump() {
     let module = compile_source(
         r#"

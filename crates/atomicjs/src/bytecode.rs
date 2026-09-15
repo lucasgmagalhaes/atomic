@@ -60,6 +60,9 @@ pub enum Instr {
         captures: Vec<u32>,
     },
     Call(u32),
+    /// Calls a known local function with no arguments without first loading
+    /// its `Rc<FunctionData>` onto the operand stack.
+    CallLocal0(u32),
     CallNative(NativeFn),
     Return,
     Pop,

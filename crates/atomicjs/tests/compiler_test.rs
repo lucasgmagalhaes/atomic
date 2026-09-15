@@ -149,6 +149,20 @@ fn discarded_local_call_accumulation_uses_a_direct_opcode() {
 }
 
 #[test]
+fn local_numeric_binary_expressions_use_direct_opcodes() {
+    let module = compile_source("let a = 6; let b = 2; a * b; a % 5; a < b;");
+    let top_level = &module.functions[module.top_level];
+    assert!(top_level
+        .code
+        .iter()
+        .any(|instr| matches!(instr, Instr::BinaryLocalLocal { .. })));
+    assert!(top_level
+        .code
+        .iter()
+        .any(|instr| matches!(instr, Instr::BinaryLocalConst { .. })));
+}
+
+#[test]
 fn for_loop_compiles_a_backward_jump_and_a_patched_forward_jump() {
     let module = compile_source(
         r#"

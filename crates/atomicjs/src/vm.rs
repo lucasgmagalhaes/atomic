@@ -9,7 +9,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::bytecode::{BytecodeFunction, BytecodeModule, Const, Instr, NativeFn};
+use crate::bytecode::{BytecodeFunction, BytecodeModule, Const, Instr, NativeFn, NumericOp};
 use crate::error::AtomicJsError;
 use crate::value::{FunctionData, FunctionFeedback, JsObject, Value};
 
@@ -407,6 +407,27 @@ fn execute_function<F: FeedbackSink>(
                 locals[*target as usize].set(Value::Number(as_number(&total) + as_number(&result)));
                 pc += 1;
             }
+            Instr::BinaryLocalLocal { op, left, right } => {
+                let left = locals[*left as usize].get();
+                let right = locals[*right as usize].get();
+                stack.push(numeric_value(*op, as_number(&left), as_number(&right)));
+                pc += 1;
+            }
+            Instr::BinaryLocalConst {
+                op,
+                local,
+                constant,
+            } => {
+                let local = locals[*local as usize].get();
+                let constant = match &function.constants[*constant as usize] {
+                    Const::Number(number) => *number,
+                    other => panic!(
+                        "internal error: BinaryLocalConst's constant must be a Number, got {other:?}"
+                    ),
+                };
+                stack.push(numeric_value(*op, as_number(&local), constant));
+                pc += 1;
+            }
             Instr::IncrementLocal(slot) => {
                 let value = locals[*slot as usize].get();
                 locals[*slot as usize].set(Value::Number(as_number(&value) + 1.0));
@@ -589,6 +610,17 @@ fn binary_number(stack: &mut Vec<Value>, op: impl FnOnce(f64, f64) -> f64) {
     let b = stack.pop().expect("binary operation needs two operands");
     let a = stack.pop().expect("binary operation needs two operands");
     stack.push(Value::Number(op(as_number(&a), as_number(&b))));
+}
+
+fn numeric_value(op: NumericOp, left: f64, right: f64) -> Value {
+    match op {
+        NumericOp::Add => Value::Number(left + right),
+        NumericOp::Sub => Value::Number(left - right),
+        NumericOp::Mul => Value::Number(left * right),
+        NumericOp::Div => Value::Number(left / right),
+        NumericOp::Mod => Value::Number(left % right),
+        NumericOp::Lt => Value::Bool(left < right),
+    }
 }
 
 fn cached_local_property(

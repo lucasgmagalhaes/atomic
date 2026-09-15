@@ -64,6 +64,19 @@ pub enum Instr {
         target: u32,
         callee: u32,
     },
+    /// Evaluates a numeric operation on two known local values and pushes the
+    /// result, avoiding two separate local-load dispatches.
+    BinaryLocalLocal {
+        op: NumericOp,
+        left: u32,
+        right: u32,
+    },
+    /// Evaluates a numeric operation on a known local and numeric constant.
+    BinaryLocalConst {
+        op: NumericOp,
+        local: u32,
+        constant: u32,
+    },
     /// Increments a local numeric value. Emitted only for a discarded
     /// increment expression.
     IncrementLocal(u32),
@@ -88,6 +101,16 @@ pub enum Instr {
     CallNative(NativeFn),
     Return,
     Pop,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum NumericOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Lt,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

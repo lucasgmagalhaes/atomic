@@ -16,7 +16,7 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use crate::ast::{BinOp, Expr, Stmt};
-use crate::bytecode::{BytecodeFunction, BytecodeModule, Const, Instr, NativeFn};
+use crate::bytecode::{BytecodeFunction, BytecodeModule, Const, Instr, NativeFn, NumericOp};
 
 #[derive(Debug, PartialEq)]
 pub struct CompileError(pub String);
@@ -362,6 +362,30 @@ impl Compiler {
                 self.store_and_reload(target, fb, parent, upvalues)?;
             }
             Expr::Binary { op, left, right } => {
+                if let (Expr::Identifier(left), Expr::Identifier(right)) = (&**left, &**right) {
+                    if let (SlotRef::Local(left), SlotRef::Local(right)) = (
+                        resolve(left, fb, parent, upvalues)?,
+                        resolve(right, fb, parent, upvalues)?,
+                    ) {
+                        fb.borrow_mut().code.push(Instr::BinaryLocalLocal {
+                            op: numeric_op(*op),
+                            left,
+                            right,
+                        });
+                        return Ok(());
+                    }
+                }
+                if let (Expr::Identifier(local), Expr::Number(number)) = (&**left, &**right) {
+                    if let SlotRef::Local(local) = resolve(local, fb, parent, upvalues)? {
+                        let constant = fb.borrow_mut().push_const(Const::Number(*number));
+                        fb.borrow_mut().code.push(Instr::BinaryLocalConst {
+                            op: numeric_op(*op),
+                            local,
+                            constant,
+                        });
+                        return Ok(());
+                    }
+                }
                 self.compile_expr(left, fb, parent, upvalues)?;
                 self.compile_expr(right, fb, parent, upvalues)?;
                 fb.borrow_mut().code.push(bin_instr(*op));
@@ -587,6 +611,17 @@ fn bin_instr(op: BinOp) -> Instr {
         BinOp::Div => Instr::Div,
         BinOp::Mod => Instr::Mod,
         BinOp::Less => Instr::Lt,
+    }
+}
+
+fn numeric_op(op: BinOp) -> NumericOp {
+    match op {
+        BinOp::Add => NumericOp::Add,
+        BinOp::Sub => NumericOp::Sub,
+        BinOp::Mul => NumericOp::Mul,
+        BinOp::Div => NumericOp::Div,
+        BinOp::Mod => NumericOp::Mod,
+        BinOp::Less => NumericOp::Lt,
     }
 }
 

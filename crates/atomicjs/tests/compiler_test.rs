@@ -119,6 +119,16 @@ fn discarded_local_arithmetic_updates_use_direct_opcodes() {
 }
 
 #[test]
+fn discarded_local_constant_addition_uses_a_direct_opcode() {
+    let module = compile_source("let total = 0; total += 3; 0;");
+    let top_level = &module.functions[module.top_level];
+    assert!(top_level
+        .code
+        .iter()
+        .any(|instr| matches!(instr, Instr::AddLocalConst { .. })));
+}
+
+#[test]
 fn discarded_local_property_accumulation_uses_a_direct_opcode() {
     let module = compile_source(
         "let total = 0; const player = { damage: 20 }; total += player.damage; 0;",

@@ -174,35 +174,70 @@ fn as_number(value: &Value) -> f64 {
 }
 
 pub fn run_source(source: &str) -> Result<Value, AtomicJsError> {
-    let module = compile_source(source)?;
-    let pools = VmPools::default();
-    let mut feedback = NoFeedback;
-    execute_function(&module, module.top_level, &[], &[], &mut feedback, &pools)
+    CompiledProgram::compile(source)?.run()
 }
 
-/// Same as `run_source`, but also returns the per-function
-/// `FunctionFeedback` counters accumulated during this one run — exposed
-/// specifically so a test (or a future caller) can confirm the
-/// "collecting this is cheap and it's really happening" claim
-/// spec/proposals/ATOMIC_JS_SPIKE.md §5.1 makes about them, without this
-/// spike building any actual tiering consumer of the data.
+/// Immutable bytecode compiled from one AtomicJS source string. Each
+/// [`Self::run`] starts a new top-level frame, so locals, closures, and
+/// objects never leak state from an earlier execution.
+#[derive(Debug)]
+pub struct CompiledProgram {
+    module: BytecodeModule,
+}
+
+impl CompiledProgram {
+    /// Parses and compiles `source` once for repeated isolated executions.
+    pub fn compile(source: &str) -> Result<Self, AtomicJsError> {
+        Ok(Self {
+            module: compile_module(source)?,
+        })
+    }
+
+    /// Executes the compiled bytecode with a fresh VM state and no profiling
+    /// instrumentation in the hot path.
+    pub fn run(&self) -> Result<Value, AtomicJsError> {
+        let pools = VmPools::default();
+        let mut feedback = NoFeedback;
+        execute_function(
+            &self.module,
+            self.module.top_level,
+            &[],
+            &[],
+            &mut feedback,
+            &pools,
+        )
+    }
+
+    /// Executes with per-function feedback, keeping instrumentation opt-in.
+    pub fn run_with_feedback(&self) -> Result<(Value, Vec<FunctionFeedback>), AtomicJsError> {
+        let mut feedback: Vec<FunctionFeedback> = (0..self.module.functions.len())
+            .map(|_| FunctionFeedback::default())
+            .collect();
+        let pools = VmPools::default();
+        let mut collector = CollectingFeedback {
+            entries: &mut feedback,
+        };
+        let value = execute_function(
+            &self.module,
+            self.module.top_level,
+            &[],
+            &[],
+            &mut collector,
+            &pools,
+        )?;
+        Ok((value, feedback))
+    }
+}
+
+/// Same as [`run_source`], but also returns the per-function
+/// [`FunctionFeedback`] counters accumulated during this one run.
 pub fn run_source_with_feedback(
     source: &str,
 ) -> Result<(Value, Vec<FunctionFeedback>), AtomicJsError> {
-    let module = compile_source(source)?;
-
-    let mut feedback: Vec<FunctionFeedback> = (0..module.functions.len())
-        .map(|_| FunctionFeedback::default())
-        .collect();
-    let pools = VmPools::default();
-    let mut collector = CollectingFeedback {
-        entries: &mut feedback,
-    };
-    let value = execute_function(&module, module.top_level, &[], &[], &mut collector, &pools)?;
-    Ok((value, feedback))
+    CompiledProgram::compile(source)?.run_with_feedback()
 }
 
-fn compile_source(source: &str) -> Result<BytecodeModule, AtomicJsError> {
+fn compile_module(source: &str) -> Result<BytecodeModule, AtomicJsError> {
     let tokens = crate::lexer::tokenize(source).map_err(|e| AtomicJsError(e.0))?;
     let program = crate::parser::parse(tokens).map_err(|e| AtomicJsError(e.0))?;
     crate::compiler::compile(program).map_err(|e| AtomicJsError(e.0))

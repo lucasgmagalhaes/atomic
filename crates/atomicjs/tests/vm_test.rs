@@ -1,5 +1,5 @@
 use atomicjs::value::Value;
-use atomicjs::{run_source, run_source_with_feedback};
+use atomicjs::{run_source, run_source_with_feedback, CompiledProgram};
 
 mod common;
 
@@ -118,6 +118,33 @@ fn recursive_upgrade_cost_matches_quickjs_golden_value() {
 #[test]
 fn empty_script_completes_to_undefined() {
     assert!(matches!(run_source("").unwrap(), Value::Undefined));
+}
+
+#[test]
+fn compiled_program_reuses_bytecode_but_not_execution_state() {
+    let program = CompiledProgram::compile(common::CLOSURE).unwrap();
+    assert_eq!(
+        match program.run().unwrap() {
+            Value::Number(n) => n,
+            other => panic!("expected Number, got {other:?}"),
+        },
+        3.0
+    );
+    assert_eq!(
+        match program.run().unwrap() {
+            Value::Number(n) => n,
+            other => panic!("expected Number, got {other:?}"),
+        },
+        3.0
+    );
+}
+
+#[test]
+fn compiled_program_keeps_feedback_opt_in_per_run() {
+    let program = CompiledProgram::compile(common::SUM).unwrap();
+    let (value, feedback) = program.run_with_feedback().unwrap();
+    assert!(matches!(value, Value::Number(n) if n == 499999500000.0));
+    assert_eq!(feedback[0].loop_count, 1_000_000);
 }
 
 #[test]

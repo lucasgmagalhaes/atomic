@@ -15,4 +15,4 @@ pub mod vm;
 
 pub use error::AtomicJsError;
 pub use value::{FunctionData, FunctionFeedback, JsObject, Value};
-pub use vm::{run_source, run_source_with_feedback};
+pub use vm::{run_source, run_source_with_feedback, CompiledProgram};

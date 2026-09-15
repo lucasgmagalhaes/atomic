@@ -15,6 +15,7 @@ enum TierValue {
 
 #[derive(Debug, Clone)]
 pub struct TierOneFunction {
+    param_count: usize,
     local_count: usize,
     code: Vec<TierOneInstr>,
 }
@@ -119,16 +120,23 @@ impl TierOneFunction {
             code.push(lowered);
         }
         Some(Self {
+            param_count: function.param_count,
             local_count: function.local_count,
             code,
         })
     }
 
     pub fn run(&self, args: &[Value]) -> Option<TierOneResult> {
+        if args.len() != self.param_count {
+            return None;
+        }
+        if !args.iter().all(|value| matches!(value, Value::Number(_))) {
+            return None;
+        }
         let mut locals = vec![0.0; self.local_count];
         for (slot, value) in args.iter().enumerate() {
             let Value::Number(value) = value else {
-                return None;
+                unreachable!()
             };
             *locals.get_mut(slot)? = *value;
         }

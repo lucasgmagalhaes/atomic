@@ -28,6 +28,9 @@ fn main() {
     let t0 = std::time::Instant::now();
     let mut result = None;
     let mut eligible_functions = 0;
+    let mut tier_one_calls = 0;
+    let mut tier_one_installs = 0;
+    let mut tier_one_fallbacks = 0;
     for _ in 0..repetitions {
         let run = program.run().unwrap();
         eligible_functions = run
@@ -35,6 +38,9 @@ fn main() {
             .iter()
             .filter(|decision| **decision == TierDecision::Eligible)
             .count();
+        tier_one_calls = run.tier_one_calls;
+        tier_one_installs = run.tier_one_installs;
+        tier_one_fallbacks = run.tier_one_fallbacks;
         result = Some(run.value);
     }
     let elapsed = t0.elapsed();
@@ -42,11 +48,14 @@ fn main() {
     let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
     unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut usage) };
     println!(
-        "elapsed_us={} maxrss_bytes={} repetitions={} eligible_functions={} result={:?}",
+        "elapsed_us={} maxrss_bytes={} repetitions={} eligible_functions={} tier_one_calls={} tier_one_installs={} tier_one_fallbacks={} result={:?}",
         elapsed.as_micros(),
         usage.ru_maxrss,
         repetitions,
         eligible_functions,
+        tier_one_calls,
+        tier_one_installs,
+        tier_one_fallbacks,
         result
     );
 }

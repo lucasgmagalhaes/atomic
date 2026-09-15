@@ -1,3 +1,4 @@
+//! @spec atomicjs-profiling#tier-one-lifecycle
 use atomicjs::tier_one::TierOneFunction;
 use atomicjs::Value;
 
@@ -34,4 +35,18 @@ fn numeric_loop_executes_in_specialized_tier() {
 fn unsupported_property_access_stays_in_tier_zero() {
     let function = compile_function("function read(o) { return o.value; }", "read");
     assert!(TierOneFunction::compile(&function).is_none());
+}
+
+#[test]
+fn numeric_tier_rejects_non_exact_or_nonnumeric_arguments_before_execution() {
+    let function = compile_function("function add(left, right) { return left + right; }", "add");
+    let tier_one = TierOneFunction::compile(&function).unwrap();
+
+    assert!(tier_one.run(&[Value::Number(1.0)]).is_none());
+    assert!(tier_one
+        .run(&[Value::Number(1.0), Value::Undefined])
+        .is_none());
+    assert!(tier_one
+        .run(&[Value::Number(1.0), Value::Number(2.0), Value::Number(3.0)])
+        .is_none());
 }

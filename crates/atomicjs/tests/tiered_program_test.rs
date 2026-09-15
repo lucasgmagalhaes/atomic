@@ -1,3 +1,4 @@
+//! @spec atomicjs-profiling#tier-one-lifecycle
 use atomicjs::tiering::{HostState, TierDecision, TieringPolicy};
 use atomicjs::{TieredProgram, Value};
 
@@ -53,4 +54,19 @@ fn paused_tiered_program_uses_tier_zero_and_forgets_admission() {
         .iter()
         .all(|decision| *decision == TierDecision::Interpret));
     assert_eq!(paused.tier_one_calls, 0);
+}
+
+#[test]
+fn resume_after_pause_requires_a_fresh_tier_one_warmup() {
+    let mut program = TieredProgram::compile(SOURCE, eager_policy()).unwrap();
+    program.run().unwrap();
+
+    program.set_host_state(HostState::Paused);
+    program.set_host_state(HostState::Running);
+    let after_resume = program.run().unwrap();
+    assert_eq!(after_resume.tier_one_calls, 0);
+    assert_eq!(after_resume.tier_one_installs, 1);
+
+    let accelerated = program.run().unwrap();
+    assert_eq!(accelerated.tier_one_calls, 1);
 }

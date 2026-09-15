@@ -12,8 +12,8 @@ use std::rc::Rc;
 
 use crate::bytecode::{BytecodeFunction, BytecodeModule, Const, Instr, NativeFn, NumericOp};
 use crate::error::AtomicJsError;
-use crate::tiering::{HostState, TierDecision, TieringController, TieringPolicy};
 use crate::tier_one::TierOneFunction;
+use crate::tiering::{HostState, TierDecision, TieringController, TieringPolicy};
 use crate::value::{FunctionData, FunctionFeedback, JsObject, Value};
 
 /// A local slot is boxed (`Captured`) iff the compiler recorded it in its
@@ -133,6 +133,7 @@ impl FeedbackSink for CollectingFeedback<'_> {
 struct TierOneState<'a> {
     functions: Option<&'a [Option<TierOneFunction>]>,
     calls: &'a mut u32,
+    fallbacks: &'a mut u32,
 }
 
 impl VmPools {
@@ -217,9 +218,11 @@ impl CompiledProgram {
         let pools = VmPools::default();
         let mut feedback = NoFeedback;
         let mut tier_one_calls = 0;
+        let mut tier_one_fallbacks = 0;
         let mut tier_one = TierOneState {
             functions: None,
             calls: &mut tier_one_calls,
+            fallbacks: &mut tier_one_fallbacks,
         };
         execute_function(
             &self.module,
@@ -235,13 +238,15 @@ impl CompiledProgram {
     /// Executes with per-function feedback, keeping instrumentation opt-in.
     pub fn run_with_feedback(&self) -> Result<(Value, Vec<FunctionFeedback>), AtomicJsError> {
         let mut tier_one_calls = 0;
-        self.run_with_feedback_and_tier_one(None, &mut tier_one_calls)
+        let mut tier_one_fallbacks = 0;
+        self.run_with_feedback_and_tier_one(None, &mut tier_one_calls, &mut tier_one_fallbacks)
     }
 
     fn run_with_feedback_and_tier_one(
         &self,
         tier_one: Option<&[Option<TierOneFunction>]>,
         tier_one_calls: &mut u32,
+        tier_one_fallbacks: &mut u32,
     ) -> Result<(Value, Vec<FunctionFeedback>), AtomicJsError> {
         let mut feedback: Vec<FunctionFeedback> = (0..self.module.functions.len())
             .map(|_| FunctionFeedback::default())
@@ -253,6 +258,7 @@ impl CompiledProgram {
         let mut tier_one = TierOneState {
             functions: tier_one,
             calls: tier_one_calls,
+            fallbacks: tier_one_fallbacks,
         };
         let value = execute_function(
             &self.module,
@@ -274,7 +280,11 @@ impl CompiledProgram {
 pub struct TieredRun {
     pub value: Value,
     pub decisions: Vec<TierDecision>,
+    /// Number of Tier-1 entries installed after this run's admission pass.
+    pub tier_one_installs: u32,
     pub tier_one_calls: u32,
+    /// Installed Tier-1 entries that rejected a call shape before execution.
+    pub tier_one_fallbacks: u32,
 }
 
 /// Compile-once, run-many boundary with persistent tiering feedback.
@@ -287,20 +297,25 @@ pub struct TieredProgram {
     program: CompiledProgram,
     controller: TieringController,
     estimated_code_bytes: Vec<usize>,
+    candidates: Vec<Option<TierOneFunction>>,
     tier_one: Vec<Option<TierOneFunction>>,
 }
 
 impl TieredProgram {
     pub fn compile(source: &str, policy: TieringPolicy) -> Result<Self, AtomicJsError> {
         let program = CompiledProgram::compile(source)?;
-        let estimated_code_bytes = program
+        let candidates: Vec<Option<TierOneFunction>> = program
             .module
             .functions
             .iter()
-            .map(|function| {
-                TierOneFunction::compile(function)
-                    .map(|tier_one| tier_one.estimated_bytes())
-                    .unwrap_or(0)
+            .map(TierOneFunction::compile)
+            .collect();
+        let estimated_code_bytes = candidates
+            .iter()
+            .map(|candidate| {
+                candidate
+                    .as_ref()
+                    .map_or(0, TierOneFunction::estimated_bytes)
             })
             .collect();
         let function_count = program.module.functions.len();
@@ -309,6 +324,7 @@ impl TieredProgram {
             program,
             controller,
             estimated_code_bytes,
+            candidates,
             tier_one: vec![None; function_count],
         })
     }
@@ -322,18 +338,30 @@ impl TieredProgram {
 
     pub fn run(&mut self) -> Result<TieredRun, AtomicJsError> {
         let mut tier_one_calls = 0;
-        let (value, feedback) = self
-            .program
-            .run_with_feedback_and_tier_one(Some(&self.tier_one), &mut tier_one_calls)?;
+        let mut tier_one_fallbacks = 0;
+        let (value, feedback) = self.program.run_with_feedback_and_tier_one(
+            Some(&self.tier_one),
+            &mut tier_one_calls,
+            &mut tier_one_fallbacks,
+        )?;
+        let supported: Vec<bool> = self.candidates.iter().map(Option::is_some).collect();
         let decisions = self
             .controller
-            .observe(&feedback, &self.estimated_code_bytes);
+            .observe(&feedback, &self.estimated_code_bytes, &supported);
+        let mut tier_one_installs = 0;
         for (index, decision) in decisions.iter().enumerate() {
             if *decision == TierDecision::Eligible && self.tier_one[index].is_none() {
-                self.tier_one[index] = TierOneFunction::compile(&self.program.module.functions[index]);
+                self.tier_one[index] = self.candidates[index].clone();
+                tier_one_installs += u32::from(self.tier_one[index].is_some());
             }
         }
-        Ok(TieredRun { value, decisions, tier_one_calls })
+        Ok(TieredRun {
+            value,
+            decisions,
+            tier_one_installs,
+            tier_one_calls,
+            tier_one_fallbacks,
+        })
     }
 }
 
@@ -361,7 +389,10 @@ fn execute_function<F: FeedbackSink>(
     tier_one: &mut TierOneState<'_>,
 ) -> Result<Value, AtomicJsError> {
     feedback.on_function_call(function_index);
-    if let Some(Some(function)) = tier_one.functions.and_then(|functions| functions.get(function_index)) {
+    if let Some(Some(function)) = tier_one
+        .functions
+        .and_then(|functions| functions.get(function_index))
+    {
         if let Some(result) = function.run(args) {
             for _ in 0..result.loop_backedges {
                 feedback.on_loop_backedge(function_index);
@@ -369,6 +400,7 @@ fn execute_function<F: FeedbackSink>(
             *tier_one.calls = tier_one.calls.saturating_add(1);
             return Ok(result.value);
         }
+        *tier_one.fallbacks = tier_one.fallbacks.saturating_add(1);
     }
     let function = &module.functions[function_index];
 
@@ -536,13 +568,8 @@ fn execute_function<F: FeedbackSink>(
                 // Preserve compound-assignment evaluation order: a call can
                 // mutate a captured `target` local before it returns.
                 let total = locals[*target as usize].number();
-                let result = call_local0(
-                    module,
-                    &locals[*callee as usize],
-                    feedback,
-                    pools,
-                    tier_one,
-                )?;
+                let result =
+                    call_local0(module, &locals[*callee as usize], feedback, pools, tier_one)?;
                 locals[*target as usize].set_number(total + as_number(&result));
                 pc += 1;
             }
@@ -565,7 +592,11 @@ fn execute_function<F: FeedbackSink>(
                         "internal error: BinaryLocalConst's constant must be a Number, got {other:?}"
                     ),
                 };
-                stack.push(numeric_value(*op, locals[*local as usize].number(), constant));
+                stack.push(numeric_value(
+                    *op,
+                    locals[*local as usize].number(),
+                    constant,
+                ));
                 pc += 1;
             }
             Instr::IncrementLocal(slot) => {
@@ -695,13 +726,8 @@ fn execute_function<F: FeedbackSink>(
                 pc += 1;
             }
             Instr::CallLocal0(local) => {
-                let result = call_local0(
-                    module,
-                    &locals[*local as usize],
-                    feedback,
-                    pools,
-                    tier_one,
-                )?;
+                let result =
+                    call_local0(module, &locals[*local as usize], feedback, pools, tier_one)?;
                 stack.push(result);
                 pc += 1;
             }

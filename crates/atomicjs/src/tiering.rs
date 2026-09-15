@@ -63,16 +63,34 @@ impl TieringController {
     }
 
     pub fn set_host_state(&mut self, host: HostState) {
+        if self.host == HostState::Running && host == HostState::Paused {
+            self.invalidate();
+        }
         self.host = host;
+    }
+
+    /// Drops all promotion state at a pause boundary. A subsequent resume
+    /// starts cold: it must collect fresh feedback before Tier 1 is eligible.
+    pub fn invalidate(&mut self) {
+        self.feedback
+            .iter_mut()
+            .for_each(|feedback| *feedback = FunctionFeedback::default());
+        self.admitted.fill(false);
+        self.admitted_bytes = 0;
     }
 
     pub fn observe(
         &mut self,
         run_feedback: &[FunctionFeedback],
         estimated_code_bytes: &[usize],
+        supported: &[bool],
     ) -> Vec<TierDecision> {
         assert_eq!(self.feedback.len(), run_feedback.len());
         assert_eq!(self.feedback.len(), estimated_code_bytes.len());
+        assert_eq!(self.feedback.len(), supported.len());
+        if self.host == HostState::Paused || !self.policy.enabled {
+            return vec![TierDecision::Interpret; self.feedback.len()];
+        }
         self.feedback
             .iter_mut()
             .zip(run_feedback)
@@ -80,21 +98,15 @@ impl TieringController {
                 total.call_count = total.call_count.saturating_add(run.call_count);
                 total.loop_count = total.loop_count.saturating_add(run.loop_count);
             });
-        if self.host == HostState::Paused || !self.policy.enabled {
-            // A paused host never retains tiered work. Clearing this before
-            // decisions makes the next invocation deterministic even when a
-            // pause happened between two calls.
-            self.admitted.fill(false);
-            self.admitted_bytes = 0;
-            return vec![TierDecision::Interpret; self.feedback.len()];
-        }
-
         self.feedback
             .iter()
             .zip(estimated_code_bytes)
+            .zip(supported)
             .enumerate()
-            .map(|(index, (feedback, estimate))| {
-                if self.admitted[index]
+            .map(|(index, ((feedback, estimate), supported))| {
+                if !supported {
+                    TierDecision::Interpret
+                } else if self.admitted[index]
                     || self
                         .policy
                         .decide(self.host, feedback, self.admitted_bytes, *estimate)

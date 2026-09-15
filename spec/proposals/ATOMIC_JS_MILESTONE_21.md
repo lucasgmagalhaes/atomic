@@ -2,7 +2,7 @@
 
 ## Status
 
-Planned.
+Completed 2026-09-15.
 
 ## Objective
 
@@ -226,15 +226,30 @@ Files: `crates/atomicjs/benches/atomicjs_bench.rs`,
 8. The benchmark and RSS records are reproducible, include their commands, and
    make no performance claim when results are statistically inconclusive.
 
-## Result template
+## Results
 
-Populate after implementation:
-
-- Correctness: `<tests and differential cases>`
-- Lifecycle: `<pause/resume and budget observations>`
-- Criterion: `<median, interval, significance>`
-- RSS: `<runs, range, installed bytes/counts>`
-- Scope confirmation: `<no JIT/native code/runtime integration>`
+- Correctness: `cargo test --manifest-path crates/atomicjs/Cargo.toml` passed
+  all 87 tests, including the existing Tier 0/Tier 1/QuickJS-ng differential
+  suite and new unsupported-candidate, exact-call-shape, and pause/resume
+  lifecycle tests. `cargo clippy --manifest-path crates/atomicjs/Cargo.toml
+  --lib -- -D warnings` also passed.
+- Lifecycle: unsupported functions now remain `Interpret` and reserve no
+  admission budget; Tier 1 accepts only exact numeric calls; and a
+  `Running -> Paused` transition drops feedback, admitted bytes, and installed
+  functions before a later run. Resume therefore requires a fresh warm-up.
+- Criterion: `cargo bench --manifest-path crates/atomicjs/Cargo.toml --bench
+  atomicjs_bench -- --sample-size 10 --warm-up-time 0.1 --measurement-time
+  0.1` reported `sum/tier_one_compiled` at 7.4992 ms median with a
+  6.7040--8.3533 ms 95% interval (10 samples). The stored-baseline comparison
+  flagged a regression (+23.734% to +57.439%, p < 0.05); the intentionally
+  short sampling run is not sufficient for a performance claim, so this
+  milestone makes none.
+- RSS: five release probes using `tiered-run sum 10` reported 1,687,552 to
+  1,720,320 bytes maximum RSS. Each final warm run dispatched Tier 1 once,
+  installed zero new entries, and made zero fallbacks; the initial threshold
+  crossing is covered by the deterministic installation test.
+- Scope confirmation: no JIT/native code, syntax expansion, or runtime/product
+  integration was added.
 
 ## Risks and decision rules
 

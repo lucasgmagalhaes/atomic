@@ -275,3 +275,8 @@ fn if_else_executes_exactly_one_branch() {
         20.0
     );
 }
+
+#[test]
+fn while_repeats_until_its_condition_is_false() {
+    assert_eq!(number("let n = 0; while (n < 4) { n++; } n;"), 4.0);
+}

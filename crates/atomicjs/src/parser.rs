@@ -66,6 +66,7 @@ impl Parser {
             Token::Const => self.parse_const(),
             Token::Function => self.parse_function_decl(),
             Token::For => self.parse_for(),
+            Token::While => self.parse_while(),
             Token::If => self.parse_if(),
             Token::Return => self.parse_return(),
             Token::LBrace => self.parse_block(),
@@ -156,6 +157,20 @@ impl Parser {
             update,
             body,
         })
+    }
+
+    fn parse_while(&mut self) -> Result<Stmt, ParseError> {
+        self.expect(&Token::While)?;
+        self.expect(&Token::LParen)?;
+        let cond = self.parse_expr()?;
+        self.expect(&Token::RParen)?;
+        self.expect(&Token::LBrace)?;
+        let mut body = Vec::new();
+        while !self.check(&Token::RBrace) {
+            body.push(self.parse_statement()?);
+        }
+        self.expect(&Token::RBrace)?;
+        Ok(Stmt::While { cond, body })
     }
 
     fn parse_return(&mut self) -> Result<Stmt, ParseError> {

@@ -266,3 +266,12 @@ fn parses_braced_else_branch() {
         other => panic!("expected If with else branch, got {other:?}"),
     }
 }
+
+#[test]
+fn parses_braced_while_loop() {
+    let program = parse_source("while (n < 3) { n++; }");
+    match &program[0] {
+        Stmt::While { body, .. } => assert_eq!(body.len(), 1),
+        other => panic!("expected While, got {other:?}"),
+    }
+}

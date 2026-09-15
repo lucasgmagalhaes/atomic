@@ -179,3 +179,19 @@ fn tokenizes_else_keyword() {
         ]
     );
 }
+
+#[test]
+fn tokenizes_while_keyword() {
+    assert_eq!(
+        tokenize("while (x) { }").unwrap(),
+        vec![
+            Token::While,
+            Token::LParen,
+            Token::Identifier("x".into()),
+            Token::RParen,
+            Token::LBrace,
+            Token::RBrace,
+            Token::Eof,
+        ]
+    );
+}

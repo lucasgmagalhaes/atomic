@@ -137,6 +137,11 @@ fn collect_locals_stmt(stmt: &Stmt, locals: &mut Vec<String>) {
                 collect_locals_stmt(s, locals);
             }
         }
+        Stmt::While { body, .. } => {
+            for s in body {
+                collect_locals_stmt(s, locals);
+            }
+        }
         Stmt::If {
             then_branch,
             else_branch,
@@ -314,6 +319,21 @@ impl Compiler {
                 match &mut fb.borrow_mut().code[jump_if_false_idx] {
                     Instr::JumpIfFalse(target) => *target = loop_end,
                     _ => unreachable!("jump_if_false_idx was recorded right after pushing it"),
+                }
+            }
+            Stmt::While { cond, body } => {
+                let loop_start = fb.borrow().code.len();
+                self.compile_expr(cond, fb, parent, upvalues)?;
+                let false_jump = fb.borrow().code.len();
+                fb.borrow_mut().code.push(Instr::JumpIfFalse(usize::MAX));
+                for stmt in body {
+                    self.compile_stmt(stmt, fb, parent, upvalues, false)?;
+                }
+                fb.borrow_mut().code.push(Instr::Jump(loop_start));
+                let loop_end = fb.borrow().code.len();
+                match &mut fb.borrow_mut().code[false_jump] {
+                    Instr::JumpIfFalse(target) => *target = loop_end,
+                    _ => unreachable!(),
                 }
             }
             Stmt::If {
@@ -704,6 +724,12 @@ fn collect_assigned_stmt(statement: &Stmt, names: &mut HashSet<String>) {
             collect_assigned_stmt(init, names);
             collect_assigned_expr(cond, names);
             collect_assigned_expr(update, names);
+            for statement in body {
+                collect_assigned_stmt(statement, names);
+            }
+        }
+        Stmt::While { cond, body } => {
+            collect_assigned_expr(cond, names);
             for statement in body {
                 collect_assigned_stmt(statement, names);
             }

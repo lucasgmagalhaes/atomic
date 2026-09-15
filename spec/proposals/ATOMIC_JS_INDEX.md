@@ -25,6 +25,8 @@
   Tier-1 conditionals.
 - [Milestone 28](ATOMIC_JS_MILESTONE_28.md): optional braced `else` branches
   across the supported statement pipeline.
+- [Milestone 29](ATOMIC_JS_MILESTONE_29.md): braced `while` loops across the
+  parser, compiler, VM, and Tier-1 numeric subset.
 
 ## Historical record
 

@@ -411,6 +411,21 @@ fn tier_one_numeric_subset_matches_tier_zero_and_quickjs() {
                 choose(7, 3);
             "#,
         ),
+        (
+            "while_loop",
+            r#"
+                function sumUntil(limit) {
+                    let index = 0;
+                    let total = 0;
+                    while (index < limit) {
+                        total += index;
+                        index++;
+                    }
+                    return total;
+                }
+                sumUntil(10);
+            "#,
+        ),
     ];
 
     for (name, source) in cases {

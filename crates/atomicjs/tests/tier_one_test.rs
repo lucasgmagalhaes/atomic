@@ -32,6 +32,18 @@ fn numeric_loop_executes_in_specialized_tier() {
 }
 
 #[test]
+fn numeric_while_loop_executes_in_specialized_tier() {
+    let function = compile_function(
+        "function sum(n) { let total = 0; let i = 0; while (i < n) { total += i; i++; } return total; }",
+        "sum",
+    );
+    let tier_one = TierOneFunction::compile(&function).expect("while loop must remain eligible");
+    let result = tier_one.run(&[Value::Number(10.0)]).unwrap();
+    assert!(matches!(result.value, Value::Number(45.0)));
+    assert_eq!(result.loop_backedges, 10);
+}
+
+#[test]
 fn unsupported_property_access_stays_in_tier_zero() {
     let function = compile_function("function read(o) { return o.value; }", "read");
     assert!(TierOneFunction::compile(&function).is_none());

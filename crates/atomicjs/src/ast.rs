@@ -80,6 +80,10 @@ pub enum Stmt {
         update: Expr,
         body: Vec<Stmt>,
     },
+    While {
+        cond: Expr,
+        body: Vec<Stmt>,
+    },
     If {
         cond: Expr,
         then_branch: Vec<Stmt>,

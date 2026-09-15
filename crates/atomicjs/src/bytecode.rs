@@ -45,6 +45,15 @@ pub enum Instr {
     SetProp(u32),
     NewObject,
     Add,
+    /// Updates a local with the sum of two local numeric values. Emitted only
+    /// for a discarded `target += value` expression.
+    AddLocalLocal {
+        target: u32,
+        value: u32,
+    },
+    /// Increments a local numeric value. Emitted only for a discarded
+    /// increment expression.
+    IncrementLocal(u32),
     Sub,
     Mul,
     Div,

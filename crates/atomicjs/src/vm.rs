@@ -343,6 +343,17 @@ fn execute_function<F: FeedbackSink>(
                 stack.push(Value::Number(as_number(&a) + as_number(&b)));
                 pc += 1;
             }
+            Instr::AddLocalLocal { target, value } => {
+                let left = locals[*target as usize].get();
+                let right = locals[*value as usize].get();
+                locals[*target as usize].set(Value::Number(as_number(&left) + as_number(&right)));
+                pc += 1;
+            }
+            Instr::IncrementLocal(slot) => {
+                let value = locals[*slot as usize].get();
+                locals[*slot as usize].set(Value::Number(as_number(&value) + 1.0));
+                pc += 1;
+            }
             Instr::Sub => {
                 binary_number(&mut stack, |a, b| a - b);
                 pc += 1;

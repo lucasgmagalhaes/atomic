@@ -451,12 +451,33 @@ impl Compiler {
                 self.store(target, fb, parent, upvalues)?;
             }
             Expr::CompoundAssign { op, target, value } => {
+                if *op == BinOp::Add {
+                    if let (Expr::Identifier(target), Expr::Identifier(value)) =
+                        (&**target, &**value)
+                    {
+                        if let (SlotRef::Local(target), SlotRef::Local(value)) = (
+                            resolve(target, fb, parent, upvalues)?,
+                            resolve(value, fb, parent, upvalues)?,
+                        ) {
+                            fb.borrow_mut()
+                                .code
+                                .push(Instr::AddLocalLocal { target, value });
+                            return Ok(());
+                        }
+                    }
+                }
                 self.compile_expr(target, fb, parent, upvalues)?;
                 self.compile_expr(value, fb, parent, upvalues)?;
                 fb.borrow_mut().code.push(bin_instr(*op));
                 self.store(target, fb, parent, upvalues)?;
             }
             Expr::Increment { target, .. } => {
+                if let Expr::Identifier(name) = &**target {
+                    if let SlotRef::Local(local) = resolve(name, fb, parent, upvalues)? {
+                        fb.borrow_mut().code.push(Instr::IncrementLocal(local));
+                        return Ok(());
+                    }
+                }
                 self.compile_expr(target, fb, parent, upvalues)?;
                 let one_idx = fb.borrow_mut().push_const(Const::Number(1.0));
                 fb.borrow_mut().code.push(Instr::LoadConst(one_idx));

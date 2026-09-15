@@ -105,6 +105,20 @@ fn zero_argument_local_call_uses_the_direct_call_opcode() {
 }
 
 #[test]
+fn discarded_local_arithmetic_updates_use_direct_opcodes() {
+    let module = compile_source("let total = 0; let i = 1; total += i; i++; 0;");
+    let top_level = &module.functions[module.top_level];
+    assert!(top_level
+        .code
+        .iter()
+        .any(|instr| matches!(instr, Instr::AddLocalLocal { .. })));
+    assert!(top_level
+        .code
+        .iter()
+        .any(|instr| matches!(instr, Instr::IncrementLocal(_))));
+}
+
+#[test]
 fn for_loop_compiles_a_backward_jump_and_a_patched_forward_jump() {
     let module = compile_source(
         r#"

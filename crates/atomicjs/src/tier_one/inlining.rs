@@ -16,7 +16,7 @@ impl TierOneFunction {
             let Some(leaf) = candidates
                 .get(*function_index)
                 .and_then(Option::as_ref)
-                .and_then(TierOneFunction::unary_const_leaf)
+                .and_then(TierOneFunction::inlineable_leaf)
             else {
                 continue;
             };
@@ -29,7 +29,7 @@ impl TierOneFunction {
         }
     }
 
-    fn unary_const_leaf(&self) -> Option<Leaf> {
+    fn inlineable_leaf(&self) -> Option<Leaf> {
         if self.local_count != self.param_count || self.direct_calls().next().is_some() {
             return None;
         }

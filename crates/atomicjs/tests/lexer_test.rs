@@ -1,3 +1,4 @@
+//! @spec atomicjs-profiling#conditional-else
 use atomicjs::lexer::{tokenize, Token};
 
 mod common;
@@ -157,6 +158,23 @@ fn tokenizes_member_access_and_call_shape() {
             Token::Identifier("counter".to_string()),
             Token::LParen,
             Token::RParen,
+            Token::Eof,
+        ]
+    );
+}
+
+#[test]
+fn tokenizes_else_keyword() {
+    assert_eq!(
+        tokenize("if x { } else { }").unwrap(),
+        vec![
+            Token::If,
+            Token::Identifier("x".into()),
+            Token::LBrace,
+            Token::RBrace,
+            Token::Else,
+            Token::LBrace,
+            Token::RBrace,
             Token::Eof,
         ]
     );

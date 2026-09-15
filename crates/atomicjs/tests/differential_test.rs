@@ -401,6 +401,16 @@ fn tier_one_numeric_subset_matches_tier_zero_and_quickjs() {
                 choose(3, 7);
             "#,
         ),
+        (
+            "if_else_branching",
+            r#"
+                function choose(left, right) {
+                    if (left < right) { return left + 10; }
+                    else { return right + 20; }
+                }
+                choose(7, 3);
+            "#,
+        ),
     ];
 
     for (name, source) in cases {

@@ -1,3 +1,4 @@
+//! @spec atomicjs-profiling#conditional-else
 use atomicjs::value::Value;
 use atomicjs::{run_source, run_source_with_feedback, CompiledProgram};
 
@@ -254,4 +255,23 @@ fn executes_hot_loop_language_subset_and_native_math() {
 #[test]
 fn hot_loop_matches_quickjs_golden_value_exactly() {
     assert_eq!(number(common::HOT_LOOP), 3_022_237_872.307_638_6);
+}
+
+#[test]
+fn if_else_executes_exactly_one_branch() {
+    let source = r#"
+        function choose(left, right) {
+            if (left < right) { return 10; }
+            else { return 20; }
+        }
+        choose(LEFT, RIGHT);
+    "#;
+    assert_eq!(
+        number(&source.replace("LEFT", "3").replace("RIGHT", "7")),
+        10.0
+    );
+    assert_eq!(
+        number(&source.replace("LEFT", "7").replace("RIGHT", "3")),
+        20.0
+    );
 }

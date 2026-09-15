@@ -23,6 +23,8 @@
   inlining at the same Tier-1 boundary.
 - [Milestone 27](ATOMIC_JS_MILESTONE_27.md): relational helper inlining for
   Tier-1 conditionals.
+- [Milestone 28](ATOMIC_JS_MILESTONE_28.md): optional braced `else` branches
+  across the supported statement pipeline.
 
 ## Historical record
 

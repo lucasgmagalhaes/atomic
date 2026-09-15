@@ -1,3 +1,4 @@
+//! @spec atomicjs-profiling#conditional-else
 //! Lexer for the spike's minimal grammar — see
 //! spec/proposals/ATOMIC_JS_SPIKE.md §5.2. Numbers are plain decimal only
 //! (`[0-9]+(\.[0-9]+)?`, no scientific notation/hex/octal/separators);
@@ -14,6 +15,7 @@ pub enum Token {
     Const,
     For,
     If,
+    Else,
     Return,
     LParen,
     RParen,
@@ -101,6 +103,7 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, LexError> {
                 "const" => Token::Const,
                 "for" => Token::For,
                 "if" => Token::If,
+                "else" => Token::Else,
                 "return" => Token::Return,
                 _ => Token::Identifier(text),
             };

@@ -1,3 +1,4 @@
+//! @spec atomicjs-profiling#conditional-else
 use atomicjs::ast::{BinOp, Expr, Stmt};
 use atomicjs::lexer::tokenize;
 use atomicjs::parser::parse;
@@ -248,4 +249,20 @@ fn rejects_unbalanced_braces() {
 fn rejects_unexpected_token_in_expression_position() {
     let tokens = tokenize("let x = ;").unwrap();
     assert!(parse(tokens).is_err());
+}
+
+#[test]
+fn parses_braced_else_branch() {
+    let program = parse_source("if (n < 1) { return 10; } else { return 20; }");
+    match &program[0] {
+        Stmt::If {
+            then_branch,
+            else_branch,
+            ..
+        } => {
+            assert_eq!(then_branch.len(), 1);
+            assert_eq!(else_branch.len(), 1);
+        }
+        other => panic!("expected If with else branch, got {other:?}"),
+    }
 }

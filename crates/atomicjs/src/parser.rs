@@ -1,3 +1,4 @@
+//! @spec atomicjs-profiling#conditional-else
 //! Recursive-descent parser for the spike's minimal grammar — see
 //! spec/proposals/ATOMIC_JS_SPIKE.md §5.2. Precedence, low to high:
 //! assignment (`=`/`+=`) -> relational (`<`) -> additive (`+`) -> unary
@@ -180,7 +181,20 @@ impl Parser {
             then_branch.push(self.parse_statement()?);
         }
         self.expect(&Token::RBrace)?;
-        Ok(Stmt::If { cond, then_branch })
+        let mut else_branch = Vec::new();
+        if self.check(&Token::Else) {
+            self.advance();
+            self.expect(&Token::LBrace)?;
+            while !self.check(&Token::RBrace) {
+                else_branch.push(self.parse_statement()?);
+            }
+            self.expect(&Token::RBrace)?;
+        }
+        Ok(Stmt::If {
+            cond,
+            then_branch,
+            else_branch,
+        })
     }
 
     fn parse_block(&mut self) -> Result<Stmt, ParseError> {

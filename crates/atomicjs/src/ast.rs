@@ -1,3 +1,4 @@
+//! @spec atomicjs-profiling#conditional-else
 //! AST types produced by `parser` — see spec/proposals/ATOMIC_JS_SPIKE.md
 //! §5.2. Consumed as compiler input starting in step 3 (§8).
 
@@ -82,6 +83,7 @@ pub enum Stmt {
     If {
         cond: Expr,
         then_branch: Vec<Stmt>,
+        else_branch: Vec<Stmt>,
     },
     Return(Option<Expr>),
     Block(Vec<Stmt>),

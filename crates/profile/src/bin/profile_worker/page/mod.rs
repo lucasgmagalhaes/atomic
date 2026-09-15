@@ -106,6 +106,21 @@ pub(crate) struct Page<'rt> {
     /// no longer resolves to a current layer root are pruned each
     /// recompute so this can't grow unboundedly across navigations.
     layers: RefCell<HashMap<NodeId, LayerCacheEntry>>,
+    /// Real CSS transitions (`layout_engine::transition`) - cross-frame
+    /// per-`NodeId` animation state for `opacity`/`transform`, owned here
+    /// (not inside `LayoutCache`/`PaintCache`) because it has to survive a
+    /// cache *hit* too: a transition keeps running every real frame even
+    /// when nothing else about the page changed. See `render.rs`'s own
+    /// doc on `Page::render` for how its return value bypasses both caches
+    /// while a transition is still in flight.
+    transitions: RefCell<layout_engine::TransitionStates>,
+    /// Whether any node had an in-flight transition as of the *previous*
+    /// `render()` call - checked before `render()`'s own `paint_cache`
+    /// lookup so a transition still animating this frame isn't served a
+    /// stale cached frame (see `render.rs`'s own doc at that check).
+    /// Updated at the end of every `render()` call from that call's own
+    /// fresh `TransitionStates::apply` result.
+    transitions_active: std::cell::Cell<bool>,
 }
 
 /// One [`render::Layer`]'s cached pixels plus the `scroll_top` they were

@@ -591,3 +591,20 @@ impl EdgeSizes {
         }
     }
 }
+
+/// Real `transition-property`, scoped to the two paint-time-only
+/// properties this crate already threads through `render`'s display-list
+/// builders per primitive (`opacity`, `transform`) - see `crate::transition`'s
+/// own module doc for the exact animation mechanism and why `width`/
+/// `height`/`color`/... transitions aren't modeled (they'd need re-running
+/// layout mid-animation, not just re-tagging paint primitives). `All` (the
+/// real spec default, and what a bare `transition: 0.3s` shorthand with no
+/// named property means) animates both at once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TransitionProperty {
+    #[default]
+    None,
+    Opacity,
+    Transform,
+    All,
+}

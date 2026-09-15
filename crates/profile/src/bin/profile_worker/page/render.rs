@@ -182,21 +182,34 @@ impl<'rt> Page<'rt> {
         let layout_ver = dom.layout_version();
         let style_ver = dom.style_version();
         let adopted_version = self.ctx.adopted_stylesheet_version();
-        if let Some(cached) = self.paint_cache.borrow().as_ref() {
-            if cached.width == width
-                && cached.height == height
-                && cached.scroll_top == scroll_top
-                && cached.layout_ver == layout_ver
-                && cached.style_ver == style_ver
-                && cached.adopted_version == adopted_version
-            {
-                return cached.pixels.clone();
+        // Real CSS transitions (`layout_engine::transition`): an
+        // in-flight transition repaints every real frame purely from
+        // wall-clock time, with neither `layout_ver`/`style_ver`/
+        // `adopted_version` (nor `scroll_top`) changing at all - so
+        // `PaintCache`'s key alone can't see it, and a transition still
+        // running as of the *previous* frame has to force a cache bypass
+        // this frame too, not just the one frame the underlying style
+        // actually changed on.
+        if !self.transitions_active.get() {
+            if let Some(cached) = self.paint_cache.borrow().as_ref() {
+                if cached.width == width
+                    && cached.height == height
+                    && cached.scroll_top == scroll_top
+                    && cached.layout_ver == layout_ver
+                    && cached.style_ver == style_ver
+                    && cached.adopted_version == adopted_version
+                {
+                    return cached.pixels.clone();
+                }
             }
         }
 
-        let tree = self
+        let mut tree = self
             .layout(width, height)
             .expect("parsed HTML always produces a box");
+        let now = std::time::Instant::now();
+        let transitioning_nodes = self.transitions.borrow_mut().apply(&mut tree, now);
+        self.transitions_active.set(!transitioning_nodes.is_empty());
         self.ctx.set_layout_rects(collect_layout_rects(&tree));
         self.ctx.set_computed_styles(collect_computed_styles(&tree));
         self.ctx.set_scroll_extents(collect_scroll_extents(&tree));
@@ -265,6 +278,19 @@ impl<'rt> Page<'rt> {
         for invalidation in &invalidations {
             for root in &layer_roots {
                 if root.node == invalidation.root || dom.contains(root.node, invalidation.root) {
+                    dirty_layers.insert(root.node);
+                }
+            }
+        }
+        // Same real reasoning as the invalidation loop just above, for a
+        // node whose `opacity`/`transform` a real CSS transition is
+        // actively animating this frame - a layer root's own cached
+        // canvas has to be treated as dirty too, or a transitioning
+        // element that happens to live inside one would visually freeze
+        // at whatever value it had when that layer was last (re)painted.
+        for &node in &transitioning_nodes {
+            for root in &layer_roots {
+                if root.node == node || dom.contains(root.node, node) {
                     dirty_layers.insert(root.node);
                 }
             }

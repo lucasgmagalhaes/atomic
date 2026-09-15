@@ -134,6 +134,19 @@ pub(crate) struct HostState {
     /// (parent window, opener, frame kind) grow here, not as siblings on
     /// `HostState` itself.
     pub window: WindowState,
+    /// Real `HTMLCanvasElement.getContext('2d')` backing state
+    /// (`crate::canvas_bindings`) - one `render::Canvas2D` per canvas
+    /// element that's ever had `getContext('2d')` called on it, keyed by
+    /// the canvas's own `NodeId` so repeat `getContext` calls return a JS
+    /// wrapper sharing the exact same drawn pixels/`fillStyle` (see
+    /// `canvas_bindings`'s own doc for the one real "new JS object per
+    /// call" scope cut this still has). `Rc<RefCell<...>>` so the JS
+    /// wrapper's own opaque pointer and this map's entry are the same
+    /// live object, not a snapshot. A host (`profile-worker`'s
+    /// `Page::render`) reads this every real paint via
+    /// `Context::canvas_snapshots` - nothing here is pushed *to* a host
+    /// the way `layout_rects`/`computed_styles` are pushed *from* one.
+    pub canvases: HashMap<dom::NodeId, std::rc::Rc<std::cell::RefCell<render::Canvas2D>>>,
 }
 
 /// See [`HostState::window`]'s own doc.

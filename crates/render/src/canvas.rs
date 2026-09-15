@@ -205,6 +205,20 @@ impl Canvas2D {
         self.fill_style = color;
     }
 
+    /// `ctx.fillStyle`'s getter side — a JS binding (`js-runtime`'s
+    /// `canvas_bindings`) formats this back to a `#rrggbb` hex string.
+    pub fn fill_style(&self) -> Color {
+        self.fill_style
+    }
+
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
     fn draw_rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color, replace: bool) {
         let view = self
             .texture

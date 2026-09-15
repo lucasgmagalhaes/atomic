@@ -67,3 +67,7 @@ Never overwrite one of these files wholesale — edit the specific line/section 
 ---
 
 Also relevant, outside `spec/`: `CLAUDE.md` (repo-wide conventions, non-JS-engine crate status, native-binding gotchas), `mockup/browser-idle-spec.md` (product/crate-level roadmap), `mockup/rendering-engine-gaps.md` (rendering-engine gap map).
+
+For the isolated interpreter experiment, begin with the
+[AtomicJS proposal index](proposals/ATOMIC_JS_INDEX.md) rather than browsing
+the historical milestone files directly.

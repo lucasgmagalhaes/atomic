@@ -426,6 +426,19 @@ fn tier_one_numeric_subset_matches_tier_zero_and_quickjs() {
                 sumUntil(10);
             "#,
         ),
+        (
+            "nested_while_loops",
+            r#"
+                let outer = 0;
+                let total = 0;
+                while (outer < 3) {
+                    let inner = 0;
+                    while (inner < 2) { total += outer + inner; inner++; }
+                    outer++;
+                }
+                total;
+            "#,
+        ),
     ];
 
     for (name, source) in cases {

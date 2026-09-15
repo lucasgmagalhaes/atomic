@@ -15,6 +15,15 @@ const PROPS: &str = include_str!("../benchmarks/scripts/props.js");
 const CLOSURES: &str = include_str!("../benchmarks/scripts/closures.js");
 const HOT_LOOP: &str = include_str!("../benchmarks/scripts/hot_loop.js");
 const LOCAL_CONST: &str = include_str!("../benchmarks/scripts/local_const.js");
+const NUMERIC_CALL_GRAPH: &str = r#"
+function increment(n) { return n + 1; }
+function accumulate(n) {
+    let total = 0;
+    for (let i = 0; i < n; i++) { total += increment(i); }
+    return total;
+}
+accumulate(1000000);
+"#;
 
 fn bench_reference_workloads(criterion: &mut Criterion) {
     for (name, source) in [
@@ -49,6 +58,22 @@ fn bench_reference_workloads(criterion: &mut Criterion) {
     tiered_sum.run().unwrap();
     criterion.bench_function("sum/tier_one_compiled", |bench| {
         bench.iter(|| black_box(tiered_sum.run().unwrap()))
+    });
+
+    // A hot root and its numeric helper are admitted as one Tier-1 graph.
+    let mut tiered_call_graph = TieredProgram::compile(
+        NUMERIC_CALL_GRAPH,
+        TieringPolicy {
+            enabled: true,
+            call_threshold: 1,
+            loop_threshold: 1,
+            ..TieringPolicy::default()
+        },
+    )
+    .unwrap();
+    tiered_call_graph.run().unwrap();
+    criterion.bench_function("numeric_call_graph/tier_one_compiled", |bench| {
+        bench.iter(|| black_box(tiered_call_graph.run().unwrap()))
     });
 }
 

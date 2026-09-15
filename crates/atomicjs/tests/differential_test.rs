@@ -280,6 +280,14 @@ fn fixed_supported_programs_match_quickjs() {
             "#,
         ),
         (
+            "reassigned_function_stays_dynamic",
+            r#"
+                function value(n) { return n + 1; }
+                value = function(n) { return n + 2; };
+                value(40);
+            "#,
+        ),
+        (
             "property_layout_switches_at_one_read_site",
             r#"
                 let player = { damage: 20 }; let total = 0;
@@ -344,6 +352,14 @@ fn tier_one_numeric_subset_matches_tier_zero_and_quickjs() {
                     return total;
                 }
                 calculate(19, 8);
+            "#,
+        ),
+        (
+            "numeric_direct_call_graph",
+            r#"
+                function increment(n) { return n + 1; }
+                function twiceIncremented(n) { return increment(increment(n)); }
+                twiceIncremented(40);
             "#,
         ),
     ];

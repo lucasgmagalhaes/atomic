@@ -316,6 +316,9 @@ pub struct TieredProgram {
     estimated_code_bytes: Vec<usize>,
     supported: Vec<bool>,
     candidates: Vec<Option<TierOneFunction>>,
+    /// A root index owns its full closure-free, acyclic direct-call graph.
+    /// Non-roots remain interpreter-only until their root is admitted.
+    groups: Vec<Option<Vec<usize>>>,
     tier_one: Vec<Option<TierOneFunction>>,
 }
 
@@ -328,7 +331,7 @@ impl TieredProgram {
             .iter()
             .map(TierOneFunction::compile)
             .collect();
-        let estimated_code_bytes = candidates
+        let individual_bytes: Vec<usize> = candidates
             .iter()
             .map(|candidate| {
                 candidate
@@ -336,7 +339,7 @@ impl TieredProgram {
                     .map_or(0, TierOneFunction::estimated_bytes)
             })
             .collect();
-        let supported = candidates.iter().map(Option::is_some).collect();
+        let (supported, estimated_code_bytes, groups) = call_groups(&candidates, &individual_bytes);
         let function_count = program.module.functions.len();
         let controller = TieringController::new(policy, function_count);
         Ok(Self {
@@ -345,6 +348,7 @@ impl TieredProgram {
             estimated_code_bytes,
             supported,
             candidates,
+            groups,
             tier_one: vec![None; function_count],
         })
     }
@@ -370,8 +374,15 @@ impl TieredProgram {
         let mut tier_one_installs = 0;
         for (index, decision) in decisions.iter().enumerate() {
             if *decision == TierDecision::Eligible && self.tier_one[index].is_none() {
-                self.tier_one[index] = self.candidates[index].clone();
-                tier_one_installs += u32::from(self.tier_one[index].is_some());
+                let members = self.groups[index]
+                    .as_ref()
+                    .expect("eligible Tier-1 root must own a call group");
+                for &member in members {
+                    if self.tier_one[member].is_none() {
+                        self.tier_one[member] = self.candidates[member].clone();
+                        tier_one_installs += u32::from(self.tier_one[member].is_some());
+                    }
+                }
             }
         }
         Ok(TieredRun {
@@ -382,6 +393,73 @@ impl TieredProgram {
             tier_one_fallbacks,
         })
     }
+}
+
+/// Finds Tier-1 roots and their transitive direct-call dependencies. A graph
+/// is admitted only when every member is a numeric candidate and the graph is
+/// acyclic; this keeps code-budget reservation and pause invalidation atomic.
+fn call_groups(
+    candidates: &[Option<TierOneFunction>],
+    individual_bytes: &[usize],
+) -> (Vec<bool>, Vec<usize>, Vec<Option<Vec<usize>>>) {
+    let mut inbound = vec![false; candidates.len()];
+    for candidate in candidates.iter().flatten() {
+        for target in candidate.direct_calls() {
+            if target < candidates.len() && candidates[target].is_some() {
+                inbound[target] = true;
+            }
+        }
+    }
+    let mut supported = vec![false; candidates.len()];
+    let mut estimates = vec![0; candidates.len()];
+    let mut groups = vec![None; candidates.len()];
+    for root in 0..candidates.len() {
+        if candidates[root].is_none() || inbound[root] {
+            continue;
+        }
+        let mut members = Vec::new();
+        let mut visiting = vec![false; candidates.len()];
+        let mut seen = vec![false; candidates.len()];
+        if collect_call_group(root, candidates, &mut visiting, &mut seen, &mut members) {
+            let bytes = members.iter().fold(0usize, |total, &member| {
+                total.saturating_add(individual_bytes[member])
+            });
+            supported[root] = true;
+            estimates[root] = bytes;
+            groups[root] = Some(members);
+        }
+    }
+    (supported, estimates, groups)
+}
+
+fn collect_call_group(
+    index: usize,
+    candidates: &[Option<TierOneFunction>],
+    visiting: &mut [bool],
+    seen: &mut [bool],
+    members: &mut Vec<usize>,
+) -> bool {
+    if visiting[index] {
+        return false;
+    }
+    if seen[index] {
+        return true;
+    }
+    let Some(candidate) = candidates[index].as_ref() else {
+        return false;
+    };
+    visiting[index] = true;
+    for target in candidate.direct_calls() {
+        if target >= candidates.len()
+            || !collect_call_group(target, candidates, visiting, seen, members)
+        {
+            return false;
+        }
+    }
+    visiting[index] = false;
+    seen[index] = true;
+    members.push(index);
+    true
 }
 
 /// Same as [`run_source`], but also returns the per-function
@@ -412,7 +490,7 @@ fn execute_function<F: FeedbackSink>(
         .functions
         .and_then(|functions| functions.get(function_index))
     {
-        if let Some(result) = function.run(args) {
+        if let Some(result) = function.run_with_functions(args, tier_one.functions.unwrap_or(&[])) {
             feedback.on_loop_backedges(function_index, result.loop_backedges);
             *tier_one.calls = tier_one.calls.saturating_add(1);
             return Ok(result.value);
@@ -740,6 +818,33 @@ fn execute_function<F: FeedbackSink>(
                     result
                 }?;
                 stack.push(result);
+                pc += 1;
+            }
+            Instr::CallDirect {
+                function_index: target_index,
+                argc,
+            } => {
+                let argc = *argc as usize;
+                let mut args = pools.take_args();
+                for _ in 0..argc {
+                    args.push(
+                        stack
+                            .pop()
+                            .expect("CallDirect needs argc values on the stack"),
+                    );
+                }
+                args.reverse();
+                let result = execute_function(
+                    module,
+                    *target_index as usize,
+                    &args,
+                    &[],
+                    feedback,
+                    pools,
+                    tier_one,
+                );
+                pools.return_args(args);
+                stack.push(result?);
                 pc += 1;
             }
             Instr::CallLocal0(local) => {

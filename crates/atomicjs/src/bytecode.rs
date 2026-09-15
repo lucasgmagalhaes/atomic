@@ -1,3 +1,4 @@
+//! @spec atomicjs-profiling#tier-one-call-graphs
 //! Bytecode ISA, constant pool, and a disassembler — see
 //! spec/proposals/ATOMIC_JS_SPIKE.md §5.3.
 //!
@@ -51,7 +52,10 @@ pub enum Instr {
         target: u32,
         value: u32,
     },
-    AddLocalConst { target: u32, constant: u32 },
+    AddLocalConst {
+        target: u32,
+        constant: u32,
+    },
     /// Adds a direct local-object property to a local numeric accumulator.
     /// Emitted only for a discarded `target += object.property` expression.
     AddLocalProp {
@@ -98,6 +102,12 @@ pub enum Instr {
         captures: Vec<u32>,
     },
     Call(u32),
+    /// Calls a previously declared, closure-free module function by its
+    /// stable bytecode index. Dynamic calls continue to use [`Instr::Call`].
+    CallDirect {
+        function_index: u32,
+        argc: u32,
+    },
     /// Calls a known local function with no arguments without first loading
     /// its `Rc<FunctionData>` onto the operand stack.
     CallLocal0(u32),
@@ -138,6 +148,9 @@ pub struct BytecodeFunction {
     /// captures. The VM boxes these as `Rc<RefCell<Value>>` at frame-entry
     /// instead of storing them as plain stack slots (spec §5.4).
     pub captured_locals: Vec<usize>,
+    /// Values captured from this function's enclosing frame. Tier 1 only
+    /// admits closure-free functions, in either capture direction.
+    pub upvalue_count: usize,
     /// Whether this function needs per-execution property inline-cache
     /// storage. Functions without direct property reads pay no allocation.
     pub has_property_reads: bool,

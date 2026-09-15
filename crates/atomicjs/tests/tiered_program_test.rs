@@ -7,6 +7,12 @@ function increment(n) { return n + 1; }
 increment(41);
 "#;
 
+const CALL_GRAPH_SOURCE: &str = r#"
+function increment(n) { return n + 1; }
+function twiceIncremented(n) { return increment(increment(n)); }
+twiceIncremented(40);
+"#;
+
 fn eager_policy() -> TieringPolicy {
     TieringPolicy {
         enabled: true,
@@ -69,4 +75,36 @@ fn resume_after_pause_requires_a_fresh_tier_one_warmup() {
 
     let accelerated = program.run().unwrap();
     assert_eq!(accelerated.tier_one_calls, 1);
+}
+
+#[test]
+fn tiered_program_admits_a_numeric_direct_call_graph_atomically() {
+    let mut program = TieredProgram::compile(CALL_GRAPH_SOURCE, eager_policy()).unwrap();
+
+    let first = program.run().unwrap();
+    assert_number(first.value, 42.0);
+    assert_eq!(
+        first.tier_one_installs, 2,
+        "root and helper install together"
+    );
+
+    let accelerated = program.run().unwrap();
+    assert_number(accelerated.value, 42.0);
+    assert_eq!(accelerated.tier_one_calls, 1);
+    assert_eq!(accelerated.tier_one_fallbacks, 0);
+}
+
+#[test]
+fn tiered_program_rejects_an_entire_graph_when_the_budget_cannot_hold_it() {
+    let mut policy = eager_policy();
+    policy.code_budget_bytes = 1;
+    let mut program = TieredProgram::compile(CALL_GRAPH_SOURCE, policy).unwrap();
+
+    let first = program.run().unwrap();
+    assert_number(first.value, 42.0);
+    assert_eq!(first.tier_one_installs, 0);
+
+    let second = program.run().unwrap();
+    assert_number(second.value, 42.0);
+    assert_eq!(second.tier_one_calls, 0);
 }

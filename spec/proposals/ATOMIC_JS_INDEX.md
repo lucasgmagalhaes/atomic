@@ -13,6 +13,8 @@
   observability, correctness gates, and latest performance evidence.
 - [Milestone 22](ATOMIC_JS_MILESTONE_22.md): the maintained AtomicJS Tier-1
   and QuickJS-ng hot-function comparison protocol.
+- [Milestone 23](ATOMIC_JS_MILESTONE_23.md): the active design for admitting
+  closure-free numeric call graphs as one Tier-1 unit.
 
 ## Historical record
 

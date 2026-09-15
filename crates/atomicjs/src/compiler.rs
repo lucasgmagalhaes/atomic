@@ -1,3 +1,4 @@
+//! @spec atomicjs-profiling#tier-one-call-graphs
 //! AST -> bytecode compiler, including the captured-variable pass for
 //! closures — see spec/proposals/ATOMIC_JS_SPIKE.md §5.3/§5.4. Kept as a
 //! module here rather than a separate crate: the rejected proposal split
@@ -12,7 +13,7 @@
 //! closure isn't supported — a documented scope cut, not an oversight.
 
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use crate::ast::{BinOp, Expr, Stmt};
@@ -24,6 +25,8 @@ pub struct CompileError(pub String);
 pub fn compile(program: Vec<Stmt>) -> Result<BytecodeModule, CompileError> {
     let mut compiler = Compiler {
         functions: Vec::new(),
+        direct_globals: HashMap::new(),
+        reassigned_names: assigned_names(&program),
     };
     let (top_index, captures) = compiler.compile_function(None, &[], &program, None, true)?;
     debug_assert!(
@@ -150,6 +153,10 @@ fn collect_locals_stmt(stmt: &Stmt, locals: &mut Vec<String>) {
 
 struct Compiler {
     functions: Vec<BytecodeFunction>,
+    direct_globals: HashMap<String, u32>,
+    /// Conservative semantic guard: a declaration whose name is assigned
+    /// anywhere remains a dynamic closure lookup, even before Tier 1.
+    reassigned_names: HashSet<String>,
 }
 
 impl Compiler {
@@ -195,6 +202,7 @@ impl Compiler {
             param_count: params.len(),
             local_count: inner.locals.len(),
             captured_locals: inner.captured.into_iter().collect(),
+            upvalue_count: upvalues.len(),
             has_property_reads: inner.code.iter().any(|instruction| {
                 matches!(
                     instruction,
@@ -232,7 +240,7 @@ impl Compiler {
                     continue;
                 }
             }
-            self.compile_stmt(stmt, fb, parent, upvalues)?;
+            self.compile_stmt(stmt, fb, parent, upvalues, is_top_level)?;
         }
         Ok(())
     }
@@ -243,6 +251,7 @@ impl Compiler {
         fb: &Scope,
         parent: Option<&Scope>,
         upvalues: &mut Vec<u32>,
+        is_top_level: bool,
     ) -> Result<(), CompileError> {
         match stmt {
             Stmt::Expr(expr) => {
@@ -271,6 +280,12 @@ impl Compiler {
                 });
                 let slot = local_slot(fb, &decl_name);
                 fb.borrow_mut().code.push(Instr::StoreLocal(slot));
+                if is_top_level
+                    && self.functions[function_index as usize].upvalue_count == 0
+                    && !self.reassigned_names.contains(&decl_name)
+                {
+                    self.direct_globals.insert(decl_name, function_index);
+                }
             }
             Stmt::For {
                 init,
@@ -278,13 +293,13 @@ impl Compiler {
                 update,
                 body,
             } => {
-                self.compile_stmt(init, fb, parent, upvalues)?;
+                self.compile_stmt(init, fb, parent, upvalues, false)?;
                 let loop_start = fb.borrow().code.len();
                 self.compile_expr(cond, fb, parent, upvalues)?;
                 let jump_if_false_idx = fb.borrow().code.len();
                 fb.borrow_mut().code.push(Instr::JumpIfFalse(usize::MAX)); // patched below
                 for s in body {
-                    self.compile_stmt(s, fb, parent, upvalues)?;
+                    self.compile_stmt(s, fb, parent, upvalues, false)?;
                 }
                 self.compile_discard_expr(update, fb, parent, upvalues)?;
                 fb.borrow_mut().code.push(Instr::Jump(loop_start));
@@ -299,7 +314,7 @@ impl Compiler {
                 let jump = fb.borrow().code.len();
                 fb.borrow_mut().code.push(Instr::JumpIfFalse(usize::MAX));
                 for stmt in then_branch {
-                    self.compile_stmt(stmt, fb, parent, upvalues)?;
+                    self.compile_stmt(stmt, fb, parent, upvalues, false)?;
                 }
                 let end = fb.borrow().code.len();
                 match &mut fb.borrow_mut().code[jump] {
@@ -319,7 +334,7 @@ impl Compiler {
             }
             Stmt::Block(stmts) => {
                 for s in stmts {
-                    self.compile_stmt(s, fb, parent, upvalues)?;
+                    self.compile_stmt(s, fb, parent, upvalues, false)?;
                 }
             }
         }
@@ -397,6 +412,21 @@ impl Compiler {
                 fb.borrow_mut().code.push(bin_instr(*op));
             }
             Expr::Call { callee, args } => {
+                if let Expr::Identifier(name) = &**callee {
+                    let local_shadows_name = fb.borrow().locals.iter().any(|local| local == name);
+                    if !local_shadows_name {
+                        if let Some(&function_index) = self.direct_globals.get(name) {
+                            for arg in args {
+                                self.compile_expr(arg, fb, parent, upvalues)?;
+                            }
+                            fb.borrow_mut().code.push(Instr::CallDirect {
+                                function_index,
+                                argc: args.len() as u32,
+                            });
+                            return Ok(());
+                        }
+                    }
+                }
                 if args.is_empty() {
                     if let Expr::Identifier(name) = &**callee {
                         if let SlotRef::Local(local) = resolve(name, fb, parent, upvalues)? {
@@ -493,7 +523,9 @@ impl Compiler {
                     if let (Expr::Identifier(target), Expr::Number(value)) = (&**target, &**value) {
                         if let SlotRef::Local(target) = resolve(target, fb, parent, upvalues)? {
                             let constant = fb.borrow_mut().push_const(Const::Number(*value));
-                            fb.borrow_mut().code.push(Instr::AddLocalConst { target, constant });
+                            fb.borrow_mut()
+                                .code
+                                .push(Instr::AddLocalConst { target, constant });
                             return Ok(());
                         }
                     }
@@ -518,7 +550,8 @@ impl Compiler {
                                 resolve(target, fb, parent, upvalues)?,
                                 resolve(object, fb, parent, upvalues)?,
                             ) {
-                                let name = fb.borrow_mut().push_const(Const::String(property.clone()));
+                                let name =
+                                    fb.borrow_mut().push_const(Const::String(property.clone()));
                                 fb.borrow_mut().code.push(Instr::AddLocalProp {
                                     target,
                                     object,
@@ -613,6 +646,95 @@ impl Compiler {
             }
         }
         Ok(())
+    }
+}
+
+fn assigned_names(program: &[Stmt]) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for statement in program {
+        collect_assigned_stmt(statement, &mut names);
+    }
+    names
+}
+
+fn collect_assigned_stmt(statement: &Stmt, names: &mut HashSet<String>) {
+    match statement {
+        Stmt::Expr(expression) => collect_assigned_expr(expression, names),
+        Stmt::Let { value, .. } | Stmt::Const { value, .. } => collect_assigned_expr(value, names),
+        Stmt::Function(declaration) => {
+            for statement in &declaration.body {
+                collect_assigned_stmt(statement, names);
+            }
+        }
+        Stmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            collect_assigned_stmt(init, names);
+            collect_assigned_expr(cond, names);
+            collect_assigned_expr(update, names);
+            for statement in body {
+                collect_assigned_stmt(statement, names);
+            }
+        }
+        Stmt::If { cond, then_branch } => {
+            collect_assigned_expr(cond, names);
+            for statement in then_branch {
+                collect_assigned_stmt(statement, names);
+            }
+        }
+        Stmt::Return(value) => {
+            if let Some(expression) = value {
+                collect_assigned_expr(expression, names);
+            }
+        }
+        Stmt::Block(statements) => {
+            for statement in statements {
+                collect_assigned_stmt(statement, names);
+            }
+        }
+    }
+}
+
+fn collect_assigned_expr(expression: &Expr, names: &mut HashSet<String>) {
+    match expression {
+        Expr::Assign { target, value } | Expr::CompoundAssign { target, value, .. } => {
+            if let Expr::Identifier(name) = &**target {
+                names.insert(name.clone());
+            }
+            collect_assigned_expr(target, names);
+            collect_assigned_expr(value, names);
+        }
+        Expr::Increment { target, .. } => {
+            if let Expr::Identifier(name) = &**target {
+                names.insert(name.clone());
+            }
+            collect_assigned_expr(target, names);
+        }
+        Expr::Binary { left, right, .. } => {
+            collect_assigned_expr(left, names);
+            collect_assigned_expr(right, names);
+        }
+        Expr::Call { callee, args } => {
+            collect_assigned_expr(callee, names);
+            for argument in args {
+                collect_assigned_expr(argument, names);
+            }
+        }
+        Expr::Member { object, .. } => collect_assigned_expr(object, names),
+        Expr::ObjectLiteral(properties) => {
+            for (_, value) in properties {
+                collect_assigned_expr(value, names);
+            }
+        }
+        Expr::FunctionExpr(declaration) => {
+            for statement in &declaration.body {
+                collect_assigned_stmt(statement, names);
+            }
+        }
+        Expr::Number(_) | Expr::Identifier(_) => {}
     }
 }
 

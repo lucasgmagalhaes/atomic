@@ -15,6 +15,16 @@ use std::ffi::CString;
 
 const SUM: &str = include_str!("../benchmarks/scripts/sum.js");
 const EXPECTED_SUM: f64 = 499_999_500_000.0;
+const NUMERIC_CALL_GRAPH: &str = r#"
+function increment(n) { return n + 1; }
+function accumulate(n) {
+    let total = 0;
+    for (let i = 0; i < n; i++) { total += increment(i); }
+    return total;
+}
+accumulate(1000000);
+"#;
+const EXPECTED_CALL_GRAPH: f64 = 500_000_500_000.0;
 
 fn bench_hot_sum(criterion: &mut Criterion) {
     let mut atomic = TieredProgram::compile(
@@ -33,7 +43,7 @@ fn bench_hot_sum(criterion: &mut Criterion) {
     assert!(matches!(accelerated.value, Value::Number(value) if value == EXPECTED_SUM));
     assert!(accelerated.tier_one_calls > 0);
 
-    let mut quickjs = QuickJsSum::new();
+    let mut quickjs = QuickJsFunction::new(SUM, "sum");
     assert_eq!(quickjs.call(), EXPECTED_SUM);
 
     criterion.bench_function("cross_engine/sum_atomicjs_tier_one_hot", |bench| {
@@ -42,17 +52,41 @@ fn bench_hot_sum(criterion: &mut Criterion) {
     criterion.bench_function("cross_engine/sum_quickjs_hot", |bench| {
         bench.iter(|| quickjs.call())
     });
+
+    let mut atomic_graph = TieredProgram::compile(
+        NUMERIC_CALL_GRAPH,
+        TieringPolicy {
+            enabled: true,
+            call_threshold: 1,
+            loop_threshold: 1,
+            ..TieringPolicy::default()
+        },
+    )
+    .unwrap();
+    atomic_graph.run().unwrap();
+    let accelerated = atomic_graph.run().unwrap();
+    assert!(matches!(accelerated.value, Value::Number(value) if value == EXPECTED_CALL_GRAPH));
+    assert!(accelerated.tier_one_calls > 0);
+
+    let mut quickjs_graph = QuickJsFunction::new(NUMERIC_CALL_GRAPH, "accumulate");
+    assert_eq!(quickjs_graph.call(), EXPECTED_CALL_GRAPH);
+    criterion.bench_function("cross_engine/call_graph_atomicjs_tier_one_hot", |bench| {
+        bench.iter(|| atomic_graph.run().unwrap())
+    });
+    criterion.bench_function("cross_engine/call_graph_quickjs_hot", |bench| {
+        bench.iter(|| quickjs_graph.call())
+    });
 }
 
-struct QuickJsSum {
+struct QuickJsFunction {
     runtime: *mut quickjs::JSRuntime,
     context: *mut quickjs::JSContext,
     function: quickjs::JSValue,
 }
 
-impl QuickJsSum {
-    fn new() -> Self {
-        let source = CString::new(SUM).unwrap();
+impl QuickJsFunction {
+    fn new(source: &str, function_name: &str) -> Self {
+        let source = CString::new(source).unwrap();
         let filename = CString::new("atomicjs-cross-engine.js").unwrap();
         unsafe {
             let runtime = quickjs::JS_NewRuntime();
@@ -73,7 +107,7 @@ impl QuickJsSum {
             quickjs::JS_FreeValue(context, value);
 
             let global = quickjs::JS_GetGlobalObject(context);
-            let name = CString::new("sum").unwrap();
+            let name = CString::new(function_name).unwrap();
             let function = quickjs::JS_GetPropertyStr(context, global, name.as_ptr());
             quickjs::JS_FreeValue(context, global);
             assert!(quickjs::JS_IsFunction(context, function));
@@ -97,7 +131,7 @@ impl QuickJsSum {
             );
             assert!(
                 !quickjs::js_is_exception(&result),
-                "QuickJS-ng sum call failed"
+                "QuickJS-ng direct call failed"
             );
             assert_eq!(result.tag, quickjs::JS_TAG_FLOAT64);
             let value = result.u.float64;
@@ -107,7 +141,7 @@ impl QuickJsSum {
     }
 }
 
-impl Drop for QuickJsSum {
+impl Drop for QuickJsFunction {
     fn drop(&mut self) {
         unsafe {
             quickjs::JS_FreeValue(self.context, self.function);

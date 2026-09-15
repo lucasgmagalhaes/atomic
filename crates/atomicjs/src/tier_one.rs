@@ -46,10 +46,46 @@ enum TierOneInstr {
     },
     IncrementLocal(u32),
     Numeric(NumericOp),
+    CallDirect {
+        function_index: usize,
+        argc: usize,
+    },
     Jump(usize),
     JumpIfFalse(usize),
     Return,
     Pop,
+}
+
+/// Per-entry reusable numeric argument buffers. A direct call holds one
+/// buffer while a nested call checks out another; returning it immediately
+/// after the child completes keeps hot call edges allocation-free.
+#[derive(Default)]
+struct TierScratch {
+    args: Vec<Vec<f64>>,
+    locals: Vec<Vec<f64>>,
+}
+
+impl TierScratch {
+    fn take_args(&mut self) -> Vec<f64> {
+        self.args.pop().unwrap_or_default()
+    }
+
+    fn return_args(&mut self, mut args: Vec<f64>) {
+        args.clear();
+        self.args.push(args);
+    }
+
+    fn take_locals(&mut self, local_count: usize) -> Vec<f64> {
+        let mut locals = self.locals.pop().unwrap_or_default();
+        locals.clear();
+        locals.resize(local_count, 0.0);
+        locals
+    }
+
+    fn return_locals(&mut self, mut locals: Vec<f64>) {
+        locals.clear();
+        self.locals.push(locals);
+    }
 }
 
 pub struct TierOneResult {
@@ -59,7 +95,7 @@ pub struct TierOneResult {
 
 impl TierOneFunction {
     pub fn compile(function: &BytecodeFunction) -> Option<Self> {
-        if !function.captured_locals.is_empty() {
+        if !function.captured_locals.is_empty() || function.upvalue_count != 0 {
             return None;
         }
         let mut code = Vec::with_capacity(function.code.len());
@@ -111,6 +147,13 @@ impl TierOneFunction {
                 Instr::Div => TierOneInstr::Numeric(NumericOp::Div),
                 Instr::Mod => TierOneInstr::Numeric(NumericOp::Mod),
                 Instr::Lt => TierOneInstr::Numeric(NumericOp::Lt),
+                Instr::CallDirect {
+                    function_index,
+                    argc,
+                } => TierOneInstr::CallDirect {
+                    function_index: *function_index as usize,
+                    argc: *argc as usize,
+                },
                 Instr::Jump(target) => TierOneInstr::Jump(*target),
                 Instr::JumpIfFalse(target) => TierOneInstr::JumpIfFalse(*target),
                 Instr::Return => TierOneInstr::Return,
@@ -133,11 +176,49 @@ impl TierOneFunction {
         if !args.iter().all(|value| matches!(value, Value::Number(_))) {
             return None;
         }
-        let mut locals = vec![0.0; self.local_count];
+        let numeric_args: Vec<f64> = args
+            .iter()
+            .map(|value| match value {
+                Value::Number(value) => *value,
+                _ => unreachable!(),
+            })
+            .collect();
+        let mut scratch = TierScratch::default();
+        self.run_numeric(&numeric_args, &[], &mut scratch)
+    }
+
+    pub(crate) fn run_with_functions(
+        &self,
+        args: &[Value],
+        functions: &[Option<TierOneFunction>],
+    ) -> Option<TierOneResult> {
+        if args.len() != self.param_count
+            || !args.iter().all(|value| matches!(value, Value::Number(_)))
+        {
+            return None;
+        }
+        let numeric_args: Vec<f64> = args
+            .iter()
+            .map(|value| match value {
+                Value::Number(value) => *value,
+                _ => unreachable!(),
+            })
+            .collect();
+        let mut scratch = TierScratch::default();
+        self.run_numeric(&numeric_args, functions, &mut scratch)
+    }
+
+    fn run_numeric(
+        &self,
+        args: &[f64],
+        functions: &[Option<TierOneFunction>],
+        scratch: &mut TierScratch,
+    ) -> Option<TierOneResult> {
+        if args.len() != self.param_count {
+            return None;
+        }
+        let mut locals = scratch.take_locals(self.local_count);
         for (slot, value) in args.iter().enumerate() {
-            let Value::Number(value) = value else {
-                unreachable!()
-            };
             *locals.get_mut(slot)? = *value;
         }
         let mut stack = Vec::with_capacity(8);
@@ -182,6 +263,29 @@ impl TierOneFunction {
                     };
                     stack.push(numeric(*op, left, right));
                 }
+                TierOneInstr::CallDirect {
+                    function_index,
+                    argc,
+                } => {
+                    let start = stack.len().checked_sub(*argc)?;
+                    let mut child_args = scratch.take_args();
+                    for value in &stack[start..] {
+                        let TierValue::Number(value) = value else {
+                            return None;
+                        };
+                        child_args.push(*value);
+                    }
+                    stack.truncate(start);
+                    let child = functions.get(*function_index)?.as_ref()?;
+                    let child_result = child.run_numeric(&child_args, functions, scratch);
+                    scratch.return_args(child_args);
+                    let child_result = child_result?;
+                    loop_backedges = loop_backedges.saturating_add(child_result.loop_backedges);
+                    let Value::Number(value) = child_result.value else {
+                        return None;
+                    };
+                    stack.push(TierValue::Number(value));
+                }
                 TierOneInstr::Jump(target) => {
                     if *target <= pc {
                         loop_backedges = loop_backedges.saturating_add(1);
@@ -199,14 +303,16 @@ impl TierOneFunction {
                     }
                 }
                 TierOneInstr::Return => {
-                    return Some(TierOneResult {
+                    let result = TierOneResult {
                         value: match stack.pop()? {
                             TierValue::Undefined => Value::Undefined,
                             TierValue::Number(value) => Value::Number(value),
                             TierValue::Bool(value) => Value::Bool(value),
                         },
                         loop_backedges,
-                    })
+                    };
+                    scratch.return_locals(locals);
+                    return Some(result);
                 }
                 TierOneInstr::Pop => {
                     stack.pop()?;
@@ -220,6 +326,15 @@ impl TierOneFunction {
         self.code
             .len()
             .saturating_mul(std::mem::size_of::<TierOneInstr>())
+    }
+
+    pub(crate) fn direct_calls(&self) -> impl Iterator<Item = usize> + '_ {
+        self.code
+            .iter()
+            .filter_map(|instruction| match instruction {
+                TierOneInstr::CallDirect { function_index, .. } => Some(*function_index),
+                _ => None,
+            })
     }
 }
 

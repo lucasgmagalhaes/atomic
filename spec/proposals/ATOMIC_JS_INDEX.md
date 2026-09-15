@@ -11,6 +11,8 @@
   19--21.
 - [Milestone 21](ATOMIC_JS_MILESTONE_21.md): the current Tier-1 lifecycle,
   observability, correctness gates, and latest performance evidence.
+- [Milestone 22](ATOMIC_JS_MILESTONE_22.md): the maintained AtomicJS Tier-1
+  and QuickJS-ng hot-function comparison protocol.
 
 ## Historical record
 

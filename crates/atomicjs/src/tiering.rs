@@ -36,6 +36,37 @@ pub enum TierDecision {
     Eligible,
 }
 
+/// Persistent per-program tiering state. It accumulates opt-in feedback
+/// across isolated executions; execution remains in Tier 0 until a later
+/// executable Tier 1 consumes `Eligible` decisions.
+pub struct TieringController {
+    policy: TieringPolicy,
+    host: HostState,
+    feedback: Vec<FunctionFeedback>,
+}
+
+impl TieringController {
+    pub fn new(policy: TieringPolicy, function_count: usize) -> Self {
+        Self { policy, host: HostState::Running, feedback: (0..function_count).map(|_| FunctionFeedback::default()).collect() }
+    }
+
+    pub fn set_host_state(&mut self, host: HostState) {
+        self.host = host;
+    }
+
+    pub fn observe(&mut self, run_feedback: &[FunctionFeedback], estimated_code_bytes: &[usize]) -> Vec<TierDecision> {
+        assert_eq!(self.feedback.len(), run_feedback.len());
+        assert_eq!(self.feedback.len(), estimated_code_bytes.len());
+        self.feedback.iter_mut().zip(run_feedback).for_each(|(total, run)| {
+            total.call_count = total.call_count.saturating_add(run.call_count);
+            total.loop_count = total.loop_count.saturating_add(run.loop_count);
+        });
+        self.feedback.iter().zip(estimated_code_bytes).map(|(feedback, estimate)| {
+            self.policy.decide(self.host, feedback, 0, *estimate)
+        }).collect()
+    }
+}
+
 impl TieringPolicy {
     pub fn decide(
         self,
@@ -69,5 +100,15 @@ mod tests {
         assert_eq!(policy.decide(HostState::Running, &hot, 4, 6), TierDecision::Eligible);
         assert_eq!(policy.decide(HostState::Paused, &hot, 0, 1), TierDecision::Interpret);
         assert_eq!(policy.decide(HostState::Running, &hot, 5, 6), TierDecision::Interpret);
+    }
+
+    #[test]
+    fn controller_accumulates_runs_and_pause_restores_tier_zero() {
+        let mut controller = TieringController::new(TieringPolicy { enabled: true, call_threshold: 2, loop_threshold: 9, code_budget_bytes: 10 }, 1);
+        let run = [FunctionFeedback { call_count: 1, loop_count: 0 }];
+        assert_eq!(controller.observe(&run, &[1]), vec![TierDecision::Interpret]);
+        assert_eq!(controller.observe(&run, &[1]), vec![TierDecision::Eligible]);
+        controller.set_host_state(HostState::Paused);
+        assert_eq!(controller.observe(&run, &[1]), vec![TierDecision::Interpret]);
     }
 }

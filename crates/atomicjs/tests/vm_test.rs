@@ -111,6 +111,23 @@ fn later_literal_property_overwrites_the_earlier_value() {
 }
 
 #[test]
+fn property_cache_reloads_the_slot_when_an_object_layout_changes() {
+    // Both reads execute at the same bytecode site. The second object puts
+    // `damage` in a different slot, so a stale cache would incorrectly read
+    // `bonus` (1) instead of damage (7).
+    let source = r#"
+        let player = { damage: 20 };
+        let total = 0;
+        for (let i = 0; i < 2; i++) {
+            if (i > 0) { player = { bonus: 1, damage: 7 }; }
+            total += player.damage;
+        }
+        total;
+    "#;
+    assert_eq!(number(source), 27.0);
+}
+
+#[test]
 fn recursive_upgrade_cost_matches_quickjs_golden_value() {
     assert_eq!(number(common::UPGRADE_COST), 19.0);
 }

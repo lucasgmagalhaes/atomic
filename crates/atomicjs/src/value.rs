@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// See spec/proposals/ATOMIC_JS_SPIKE.md §5.1. No NaN-boxing, no `Int32` fast
 /// path — later-optimization concerns with no place in a spike.
@@ -36,9 +37,23 @@ impl fmt::Display for Value {
 /// object literals AtomicJS supports: it avoids hashing on every read while
 /// preserving insertion-order overwrite semantics. A missing-property read
 /// returns `Value::Undefined` (`get`, below), matching real JS semantics.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct JsObject {
+    /// A stable identity for this object's current property layout. It keeps
+    /// inline caches independent from raw pointer identity.
+    pub shape_id: u64,
     pub properties: Vec<(String, Value)>,
+}
+
+static NEXT_SHAPE_ID: AtomicU64 = AtomicU64::new(1);
+
+impl Default for JsObject {
+    fn default() -> Self {
+        Self {
+            shape_id: NEXT_SHAPE_ID.fetch_add(1, Ordering::Relaxed),
+            properties: Vec::new(),
+        }
+    }
 }
 
 impl JsObject {
@@ -49,12 +64,27 @@ impl JsObject {
             .unwrap_or(Value::Undefined)
     }
 
+    pub fn get_with_slot(&self, name: &str) -> Option<(usize, Value)> {
+        self.properties
+            .iter()
+            .enumerate()
+            .find_map(|(slot, (key, value))| (key == name).then(|| (slot, value.clone())))
+    }
+
+    pub fn get_at(&self, slot: usize) -> Value {
+        self.properties
+            .get(slot)
+            .map(|(_, value)| value.clone())
+            .unwrap_or(Value::Undefined)
+    }
+
     pub fn set(&mut self, name: impl Into<String>, value: Value) {
         let name = name.into();
         if let Some((_, existing)) = self.properties.iter_mut().find(|(key, _)| *key == name) {
             *existing = value;
         } else {
             self.properties.push((name, value));
+            self.shape_id = NEXT_SHAPE_ID.fetch_add(1, Ordering::Relaxed);
         }
     }
 }

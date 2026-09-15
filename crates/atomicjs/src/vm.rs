@@ -24,6 +24,12 @@ enum LocalSlot {
     Captured(Rc<RefCell<Value>>),
 }
 
+#[derive(Clone, Copy)]
+struct PropertyCache {
+    shape_id: u64,
+    slot: usize,
+}
+
 impl LocalSlot {
     fn get(&self) -> Value {
         match self {
@@ -39,19 +45,6 @@ impl LocalSlot {
         }
     }
 
-    fn get_property(&self, name: &str) -> Value {
-        match self {
-            LocalSlot::Plain(Value::Object(object)) => object.borrow().get(name),
-            LocalSlot::Captured(cell) => {
-                let value = cell.borrow();
-                match &*value {
-                    Value::Object(object) => object.borrow().get(name),
-                    _ => Value::Undefined,
-                }
-            }
-            _ => Value::Undefined,
-        }
-    }
 }
 
 /// Reusable `Vec<LocalSlot>`/`Vec<Value>` buffers shared across the whole
@@ -265,6 +258,9 @@ fn execute_function<F: FeedbackSink>(
     }
 
     let mut stack: Vec<Value> = pools.take_stack();
+    let mut property_caches = function
+        .has_property_reads
+        .then(|| vec![None::<PropertyCache>; function.code.len()]);
     let mut pc: usize = 0;
 
     loop {
@@ -334,14 +330,19 @@ fn execute_function<F: FeedbackSink>(
             }
             Instr::GetLocalProp { local, name } => {
                 let name = property_name(function, *name);
-                stack.push(locals[*local as usize].get_property(name));
+                let cache = property_caches.as_mut().map(|entries| &mut entries[pc]);
+                stack.push(cached_local_property(&locals[*local as usize], name, cache));
                 pc += 1;
             }
             Instr::GetUpvalueProp { upvalue, name } => {
                 let name = property_name(function, *name);
                 let value = upvalues[*upvalue as usize].borrow();
                 let property = match &*value {
-                    Value::Object(object) => object.borrow().get(name),
+                    Value::Object(object) => cached_property(
+                        object,
+                        name,
+                        property_caches.as_mut().map(|entries| &mut entries[pc]),
+                    ),
                     _ => Value::Undefined,
                 };
                 stack.push(property);
@@ -561,6 +562,47 @@ fn binary_number(stack: &mut Vec<Value>, op: impl FnOnce(f64, f64) -> f64) {
     let b = stack.pop().expect("binary operation needs two operands");
     let a = stack.pop().expect("binary operation needs two operands");
     stack.push(Value::Number(op(as_number(&a), as_number(&b))));
+}
+
+fn cached_local_property(
+    local: &LocalSlot,
+    name: &str,
+    cache: Option<&mut Option<PropertyCache>>,
+) -> Value {
+    match local {
+        LocalSlot::Plain(Value::Object(object)) => cached_property(object, name, cache),
+        LocalSlot::Captured(cell) => match &*cell.borrow() {
+            Value::Object(object) => cached_property(object, name, cache),
+            _ => Value::Undefined,
+        },
+        _ => Value::Undefined,
+    }
+}
+
+fn cached_property(
+    object: &Rc<RefCell<JsObject>>,
+    name: &str,
+    cache: Option<&mut Option<PropertyCache>>,
+) -> Value {
+    let object = object.borrow();
+    if let Some(cache) = cache {
+        if let Some(entry) = *cache {
+            if entry.shape_id == object.shape_id {
+                return object.get_at(entry.slot);
+            }
+        }
+        if let Some((slot, value)) = object.get_with_slot(name) {
+            *cache = Some(PropertyCache {
+                shape_id: object.shape_id,
+                slot,
+            });
+            value
+        } else {
+            Value::Undefined
+        }
+    } else {
+        object.get(name)
+    }
 }
 
 fn property_name(function: &BytecodeFunction, idx: u32) -> &str {

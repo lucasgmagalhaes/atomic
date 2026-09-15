@@ -99,6 +99,9 @@ pub struct BytecodeFunction {
     /// captures. The VM boxes these as `Rc<RefCell<Value>>` at frame-entry
     /// instead of storing them as plain stack slots (spec §5.4).
     pub captured_locals: Vec<usize>,
+    /// Whether this function needs per-execution property inline-cache
+    /// storage. Functions without direct property reads pay no allocation.
+    pub has_property_reads: bool,
     pub code: Vec<Instr>,
     pub constants: Vec<Const>,
 }

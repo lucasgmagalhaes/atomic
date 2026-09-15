@@ -195,6 +195,12 @@ impl Compiler {
             param_count: params.len(),
             local_count: inner.locals.len(),
             captured_locals: inner.captured.into_iter().collect(),
+            has_property_reads: inner.code.iter().any(|instruction| {
+                matches!(
+                    instruction,
+                    Instr::GetLocalProp { .. } | Instr::GetUpvalueProp { .. }
+                )
+            }),
             code: inner.code,
             constants: inner.constants,
         };

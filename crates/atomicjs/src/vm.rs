@@ -297,6 +297,7 @@ pub struct TieredProgram {
     program: CompiledProgram,
     controller: TieringController,
     estimated_code_bytes: Vec<usize>,
+    supported: Vec<bool>,
     candidates: Vec<Option<TierOneFunction>>,
     tier_one: Vec<Option<TierOneFunction>>,
 }
@@ -318,12 +319,14 @@ impl TieredProgram {
                     .map_or(0, TierOneFunction::estimated_bytes)
             })
             .collect();
+        let supported = candidates.iter().map(Option::is_some).collect();
         let function_count = program.module.functions.len();
         let controller = TieringController::new(policy, function_count);
         Ok(Self {
             program,
             controller,
             estimated_code_bytes,
+            supported,
             candidates,
             tier_one: vec![None; function_count],
         })
@@ -344,10 +347,9 @@ impl TieredProgram {
             &mut tier_one_calls,
             &mut tier_one_fallbacks,
         )?;
-        let supported: Vec<bool> = self.candidates.iter().map(Option::is_some).collect();
-        let decisions = self
-            .controller
-            .observe(&feedback, &self.estimated_code_bytes, &supported);
+        let decisions =
+            self.controller
+                .observe(&feedback, &self.estimated_code_bytes, &self.supported);
         let mut tier_one_installs = 0;
         for (index, decision) in decisions.iter().enumerate() {
             if *decision == TierDecision::Eligible && self.tier_one[index].is_none() {

@@ -237,13 +237,12 @@ Files: `crates/atomicjs/benches/atomicjs_bench.rs`,
   admission budget; Tier 1 accepts only exact numeric calls; and a
   `Running -> Paused` transition drops feedback, admitted bytes, and installed
   functions before a later run. Resume therefore requires a fresh warm-up.
-- Criterion: `cargo bench --manifest-path crates/atomicjs/Cargo.toml --bench
-  atomicjs_bench -- --sample-size 10 --warm-up-time 0.1 --measurement-time
-  0.1` reported `sum/tier_one_compiled` at 7.4992 ms median with a
-  6.7040--8.3533 ms 95% interval (10 samples). The stored-baseline comparison
-  flagged a regression (+23.734% to +57.439%, p < 0.05); the intentionally
-  short sampling run is not sufficient for a performance claim, so this
-  milestone makes none.
+- Criterion: the initial 10-sample, 0.1-second probe reported a regression,
+  but proved too noisy to support that conclusion. The follow-up stores Tier-1
+  support metadata at compile time rather than allocating a `Vec<bool>` in
+  every run. A 30-sample, 1-second warm-up / 4-second measurement repeat of
+  the unchanged optimized binary measured -8.53% to +4.55% (p = 0.53), which
+  is statistically inconclusive. No performance claim is made.
 - RSS: five release probes using `tiered-run sum 10` reported 1,687,552 to
   1,720,320 bytes maximum RSS. Each final warm run dispatched Tier 1 once,
   installed zero new entries, and made zero fallbacks; the initial threshold

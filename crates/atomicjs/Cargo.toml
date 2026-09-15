@@ -13,9 +13,8 @@ edition = "2021"
 [dev-dependencies]
 libc = "0.2"
 js-runtime = { path = "../js-runtime" }
+criterion = "0.8"
 
-# `criterion` dev-dependency + `[[bench]]` target land in step 3 (§8) once
-# benches/atomicjs_bench.rs actually exists — declaring either before then
-# would either point at a nonexistent file or force a fresh dependency
-# resolution this crate's separate (non-root) workspace can't do offline
-# with confidence yet. See spec/proposals/ATOMIC_JS_SPIKE.md §6/§7.3.
+[[bench]]
+name = "atomicjs_bench"
+harness = false

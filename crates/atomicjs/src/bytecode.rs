@@ -80,6 +80,8 @@ pub enum Instr {
     /// Increments a local numeric value. Emitted only for a discarded
     /// increment expression.
     IncrementLocal(u32),
+    /// Increments a captured numeric value and pushes its new value.
+    IncrementUpvalue(u32),
     Sub,
     Mul,
     Div,

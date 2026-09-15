@@ -47,8 +47,8 @@ fn closure_program_produces_inner_makecounter_and_top_level_with_capture_wiring(
     let inner = &module.functions[0];
     assert!(inner.name.is_none());
     assert!(
-        inner.code.contains(&Instr::LoadUpvalue(0)),
-        "inner closure should read `count` via LoadUpvalue(0), got: {:?}",
+        inner.code.contains(&Instr::IncrementUpvalue(0)),
+        "inner closure should increment `count` via IncrementUpvalue(0), got: {:?}",
         inner.code
     );
 
@@ -160,6 +160,15 @@ fn local_numeric_binary_expressions_use_direct_opcodes() {
         .code
         .iter()
         .any(|instr| matches!(instr, Instr::BinaryLocalConst { .. })));
+}
+
+#[test]
+fn captured_increment_uses_a_direct_opcode() {
+    let module = compile_source("function outer() { let n = 0; return function () { return ++n; }; }");
+    assert!(module.functions[0]
+        .code
+        .iter()
+        .any(|instr| matches!(instr, Instr::IncrementUpvalue(0))));
 }
 
 #[test]

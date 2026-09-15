@@ -353,6 +353,12 @@ impl Compiler {
                 self.store_and_reload(target, fb, parent, upvalues)?;
             }
             Expr::Increment { target, .. } => {
+                if let Expr::Identifier(name) = &**target {
+                    if let SlotRef::Upvalue(upvalue) = resolve(name, fb, parent, upvalues)? {
+                        fb.borrow_mut().code.push(Instr::IncrementUpvalue(upvalue));
+                        return Ok(());
+                    }
+                }
                 // Prefix and postfix compile identically — see ast.rs's own
                 // doc on `Expr::Increment` for why that's a safe cut here.
                 self.compile_expr(target, fb, parent, upvalues)?;

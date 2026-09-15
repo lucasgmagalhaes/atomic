@@ -451,6 +451,13 @@ fn execute_function<F: FeedbackSink>(
                 locals[*slot as usize].set_number(incremented);
                 pc += 1;
             }
+            Instr::IncrementUpvalue(upvalue) => {
+                let mut value = upvalues[*upvalue as usize].borrow_mut();
+                let incremented = as_number(&value) + 1.0;
+                *value = Value::Number(incremented);
+                stack.push(Value::Number(incremented));
+                pc += 1;
+            }
             Instr::Sub => {
                 binary_number(&mut stack, |a, b| a - b);
                 pc += 1;

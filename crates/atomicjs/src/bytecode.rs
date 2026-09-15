@@ -58,6 +58,12 @@ pub enum Instr {
         object: u32,
         name: u32,
     },
+    /// Calls a zero-argument local function and adds its result to a local
+    /// numeric accumulator. Emitted only for a discarded `target += call()`.
+    AddLocalCallLocal0 {
+        target: u32,
+        callee: u32,
+    },
     /// Increments a local numeric value. Emitted only for a discarded
     /// increment expression.
     IncrementLocal(u32),

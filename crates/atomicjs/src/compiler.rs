@@ -491,6 +491,23 @@ impl Compiler {
                             }
                         }
                     }
+                    if let (Expr::Identifier(target), Expr::Call { callee, args }) =
+                        (&**target, &**value)
+                    {
+                        if args.is_empty() {
+                            if let Expr::Identifier(callee) = &**callee {
+                                if let (SlotRef::Local(target), SlotRef::Local(callee)) = (
+                                    resolve(target, fb, parent, upvalues)?,
+                                    resolve(callee, fb, parent, upvalues)?,
+                                ) {
+                                    fb.borrow_mut()
+                                        .code
+                                        .push(Instr::AddLocalCallLocal0 { target, callee });
+                                    return Ok(());
+                                }
+                            }
+                        }
+                    }
                 }
                 self.compile_expr(target, fb, parent, upvalues)?;
                 self.compile_expr(value, fb, parent, upvalues)?;

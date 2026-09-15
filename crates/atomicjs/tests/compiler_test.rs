@@ -135,6 +135,20 @@ fn discarded_local_property_accumulation_uses_a_direct_opcode() {
 }
 
 #[test]
+fn discarded_local_call_accumulation_uses_a_direct_opcode() {
+    let module = compile_source("let total = 0; function next() { return 1; } total += next(); 0;");
+    let top_level = &module.functions[module.top_level];
+    assert!(top_level
+        .code
+        .iter()
+        .any(|instr| matches!(instr, Instr::AddLocalCallLocal0 { .. })));
+    assert!(!top_level
+        .code
+        .iter()
+        .any(|instr| matches!(instr, Instr::CallLocal0(_))));
+}
+
+#[test]
 fn for_loop_compiles_a_backward_jump_and_a_patched_forward_jump() {
     let module = compile_source(
         r#"

@@ -128,6 +128,19 @@ fn property_cache_reloads_the_slot_when_an_object_layout_changes() {
 }
 
 #[test]
+fn direct_call_accumulation_reads_the_left_value_before_the_call() {
+    let source = r#"
+        let total = 1;
+        function next() { total = 2; return 3; }
+        total += next();
+        total;
+    "#;
+    // JavaScript evaluates the left-hand value before calling `next`, so
+    // this is 1 + 3 rather than the post-call value 2 + 3.
+    assert_eq!(number(source), 4.0);
+}
+
+#[test]
 fn recursive_upgrade_cost_matches_quickjs_golden_value() {
     assert_eq!(number(common::UPGRADE_COST), 19.0);
 }

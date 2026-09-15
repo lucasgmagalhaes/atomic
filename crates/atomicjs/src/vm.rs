@@ -399,6 +399,14 @@ fn execute_function<F: FeedbackSink>(
                 locals[*target as usize].set(Value::Number(as_number(&total) + as_number(&property)));
                 pc += 1;
             }
+            Instr::AddLocalCallLocal0 { target, callee } => {
+                // Preserve compound-assignment evaluation order: a call can
+                // mutate a captured `target` local before it returns.
+                let total = locals[*target as usize].get();
+                let result = call_local0(module, &locals[*callee as usize], feedback, pools)?;
+                locals[*target as usize].set(Value::Number(as_number(&total) + as_number(&result)));
+                pc += 1;
+            }
             Instr::IncrementLocal(slot) => {
                 let value = locals[*slot as usize].get();
                 locals[*slot as usize].set(Value::Number(as_number(&value) + 1.0));
@@ -517,36 +525,7 @@ fn execute_function<F: FeedbackSink>(
                 pc += 1;
             }
             Instr::CallLocal0(local) => {
-                let result = match &locals[*local as usize] {
-                    // The hot closure benchmark keeps its callee in a plain
-                    // local slot. Borrow FunctionData directly so this path
-                    // avoids LoadLocal, an operand-stack round trip, and an
-                    // Rc clone for every zero-argument call.
-                    LocalSlot::Plain(Value::Function(function_data)) => execute_function(
-                        module,
-                        function_data.function_index,
-                        &[],
-                        &function_data.captured_env,
-                        feedback,
-                        pools,
-                    ),
-                    // A captured local cannot hold a RefCell borrow across a
-                    // recursive call: the callee could mutate that same cell.
-                    // Fall back to the generic, ownership-safe value path.
-                    _ => match locals[*local as usize].get() {
-                        Value::Function(function_data) => execute_function(
-                            module,
-                            function_data.function_index,
-                            &[],
-                            &function_data.captured_env,
-                            feedback,
-                            pools,
-                        ),
-                        other => Err(AtomicJsError(format!(
-                            "attempted to call a non-function value: {other}"
-                        ))),
-                    },
-                }?;
+                let result = call_local0(module, &locals[*local as usize], feedback, pools)?;
                 stack.push(result);
                 pc += 1;
             }
@@ -569,6 +548,40 @@ fn execute_function<F: FeedbackSink>(
                 pc += 1;
             }
         }
+    }
+}
+
+/// Invokes a known zero-argument local without materializing its function
+/// value on the operand stack. Captured locals still use an owned fallback so
+/// their RefCell borrow cannot outlive a recursive JS call.
+fn call_local0<F: FeedbackSink>(
+    module: &BytecodeModule,
+    local: &LocalSlot,
+    feedback: &mut F,
+    pools: &VmPools,
+) -> Result<Value, AtomicJsError> {
+    match local {
+        LocalSlot::Plain(Value::Function(function_data)) => execute_function(
+            module,
+            function_data.function_index,
+            &[],
+            &function_data.captured_env,
+            feedback,
+            pools,
+        ),
+        _ => match local.get() {
+            Value::Function(function_data) => execute_function(
+                module,
+                function_data.function_index,
+                &[],
+                &function_data.captured_env,
+                feedback,
+                pools,
+            ),
+            other => Err(AtomicJsError(format!(
+                "attempted to call a non-function value: {other}"
+            ))),
+        },
     }
 }
 

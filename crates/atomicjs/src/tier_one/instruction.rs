@@ -28,6 +28,15 @@ pub(super) enum TierOneInstr {
         value: f64,
     },
     IncrementLocal(u32),
+    GetLocalProp {
+        local: u32,
+        name: String,
+    },
+    AddLocalProp {
+        target: u32,
+        object: u32,
+        name: String,
+    },
     Numeric(NumericOp),
     Native(NativeFn),
     CallDirect {

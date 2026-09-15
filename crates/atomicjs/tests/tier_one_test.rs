@@ -89,3 +89,25 @@ fn tier_one_guards_a_numeric_object_property_read() {
     ));
     assert!(tier_one.run(&[Value::Number(12.0)]).is_none());
 }
+
+#[test]
+fn tier_one_specializes_numeric_property_accumulation_loops() {
+    let function = compile_function(
+        "function sum(player, n) { let total = 0; for (let i = 0; i < n; i++) { total += player.damage; } return total; }",
+        "sum",
+    );
+    let tier_one = TierOneFunction::compile(&function).expect("property loop must be eligible");
+    let player = std::rc::Rc::new(std::cell::RefCell::new(atomicjs::JsObject::default()));
+    player.borrow_mut().set("damage", Value::Number(12.0));
+
+    let result = tier_one
+        .run(&[Value::Object(player.clone()), Value::Number(10.0)])
+        .expect("numeric property guard must hold");
+    assert!(matches!(result.value, Value::Number(120.0)));
+    assert_eq!(result.loop_backedges, 10);
+
+    player.borrow_mut().set("damage", Value::Bool(true));
+    assert!(tier_one
+        .run(&[Value::Object(player), Value::Number(10.0)])
+        .is_none());
+}

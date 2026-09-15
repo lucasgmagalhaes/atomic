@@ -48,6 +48,16 @@ const player = { damage: 12 };
 read(player);
 "#;
 
+const PROPERTY_LOOP_SOURCE: &str = r#"
+function sum(player, n) {
+    let total = 0;
+    for (let i = 0; i < n; i++) { total += player.damage; }
+    return total;
+}
+const player = { damage: 12 };
+sum(player, 100);
+"#;
+
 const CLOSURE_COUNTER_SOURCE: &str = r#"
 function makeCounter() {
     let count = 0;
@@ -206,6 +216,16 @@ fn tiered_program_executes_guarded_numeric_property_reads() {
     assert_number(program.run().unwrap().value, 12.0);
     let accelerated = program.run().unwrap();
     assert_number(accelerated.value, 12.0);
+    assert_eq!(accelerated.tier_one_calls, 1);
+    assert_eq!(accelerated.tier_one_fallbacks, 0);
+}
+
+#[test]
+fn tiered_program_executes_guarded_numeric_property_loops() {
+    let mut program = TieredProgram::compile(PROPERTY_LOOP_SOURCE, eager_policy()).unwrap();
+    assert_number(program.run().unwrap().value, 1200.0);
+    let accelerated = program.run().unwrap();
+    assert_number(accelerated.value, 1200.0);
     assert_eq!(accelerated.tier_one_calls, 1);
     assert_eq!(accelerated.tier_one_fallbacks, 0);
 }

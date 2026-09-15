@@ -5,6 +5,7 @@
 
 use crate::bytecode::{BytecodeFunction, Const, Instr, NumericOp};
 use crate::value::Value;
+mod execution;
 mod guards;
 mod inlining;
 mod instruction;
@@ -12,7 +13,7 @@ mod scratch;
 mod value;
 use instruction::TierOneInstr;
 use scratch::TierScratch;
-use value::{numeric, TierValue};
+use value::TierValue;
 
 #[derive(Debug, Clone)]
 pub struct TierOneFunction {
@@ -98,6 +99,29 @@ impl TierOneFunction {
                     }
                 }
                 Instr::IncrementLocal(slot) => TierOneInstr::IncrementLocal(*slot),
+                Instr::GetLocalProp { local, name } => {
+                    let Const::String(name) = function.constants.get(*name as usize)? else {
+                        return None;
+                    };
+                    TierOneInstr::GetLocalProp {
+                        local: *local,
+                        name: name.clone(),
+                    }
+                }
+                Instr::AddLocalProp {
+                    target,
+                    object,
+                    name,
+                } => {
+                    let Const::String(name) = function.constants.get(*name as usize)? else {
+                        return None;
+                    };
+                    TierOneInstr::AddLocalProp {
+                        target: *target,
+                        object: *object,
+                        name: name.clone(),
+                    }
+                }
                 Instr::Add => TierOneInstr::Numeric(NumericOp::Add),
                 Instr::Sub => TierOneInstr::Numeric(NumericOp::Sub),
                 Instr::Mul => TierOneInstr::Numeric(NumericOp::Mul),
@@ -136,18 +160,12 @@ impl TierOneFunction {
         if args.len() != self.param_count {
             return None;
         }
-        if !args.iter().all(|value| matches!(value, Value::Number(_))) {
-            return None;
-        }
-        let numeric_args: Vec<f64> = args
+        let tier_args: Vec<TierValue> = args
             .iter()
-            .map(|value| match value {
-                Value::Number(value) => *value,
-                _ => unreachable!(),
-            })
-            .collect();
+            .map(TierValue::from_value)
+            .collect::<Option<_>>()?;
         let mut scratch = TierScratch::default();
-        self.run_numeric(&numeric_args, &[], &mut scratch)
+        self.run_values(&tier_args, &[], &mut scratch)
     }
 
     pub(crate) fn run_with_functions(
@@ -162,164 +180,31 @@ impl TierOneFunction {
         if let Some(index) = self.increment_upvalue {
             return guards::increment_upvalue(upvalues, index);
         }
-        if args.len() != self.param_count
-            || !args.iter().all(|value| matches!(value, Value::Number(_)))
-        {
-            return None;
-        }
-        let numeric_args: Vec<f64> = args
-            .iter()
-            .map(|value| match value {
-                Value::Number(value) => *value,
-                _ => unreachable!(),
-            })
-            .collect();
-        let mut scratch = TierScratch::default();
-        self.run_numeric(&numeric_args, functions, &mut scratch)
-    }
-
-    fn run_numeric(
-        &self,
-        args: &[f64],
-        functions: &[Option<TierOneFunction>],
-        scratch: &mut TierScratch,
-    ) -> Option<TierOneResult> {
         if args.len() != self.param_count {
             return None;
         }
-        let mut locals = scratch.take_locals(self.local_count);
-        for (slot, value) in args.iter().enumerate() {
-            *locals.get_mut(slot)? = *value;
-        }
-        let mut stack = Vec::with_capacity(8);
-        let mut pc = 0;
-        let mut loop_backedges: u32 = 0;
-        loop {
-            match self.code.get(pc)? {
-                TierOneInstr::Const(value) => stack.push(TierValue::Number(*value)),
-                TierOneInstr::Undefined => stack.push(TierValue::Undefined),
-                TierOneInstr::Load(slot) => {
-                    stack.push(TierValue::Number(*locals.get(*slot as usize)?))
-                }
-                TierOneInstr::Store(slot) => {
-                    let TierValue::Number(value) = stack.pop()? else {
-                        return None;
-                    };
-                    *locals.get_mut(*slot as usize)? = value;
-                }
-                TierOneInstr::AddLocalLocal { target, value } => {
-                    *locals.get_mut(*target as usize)? += *locals.get(*value as usize)?;
-                }
-                TierOneInstr::AddLocalConst { target, value } => {
-                    *locals.get_mut(*target as usize)? += value;
-                }
-                TierOneInstr::BinaryLocalLocal { op, left, right } => {
-                    stack.push(numeric(
-                        *op,
-                        *locals.get(*left as usize)?,
-                        *locals.get(*right as usize)?,
-                    ));
-                }
-                TierOneInstr::BinaryLocalConst { op, local, value } => {
-                    stack.push(numeric(*op, *locals.get(*local as usize)?, *value));
-                }
-                TierOneInstr::IncrementLocal(slot) => *locals.get_mut(*slot as usize)? += 1.0,
-                TierOneInstr::Numeric(op) => {
-                    let TierValue::Number(right) = stack.pop()? else {
-                        return None;
-                    };
-                    let TierValue::Number(left) = stack.pop()? else {
-                        return None;
-                    };
-                    stack.push(numeric(*op, left, right));
-                }
-                TierOneInstr::Native(native) => {
-                    let TierValue::Number(value) = stack.pop()? else {
-                        return None;
-                    };
-                    stack.push(TierValue::Number(match native {
-                        crate::bytecode::NativeFn::Sqrt => value.sqrt(),
-                        crate::bytecode::NativeFn::Log => value.ln(),
-                    }));
-                }
-                TierOneInstr::CallDirect {
-                    function_index,
-                    argc,
-                } => {
-                    let start = stack.len().checked_sub(*argc)?;
-                    let mut child_args = scratch.take_args();
-                    for value in &stack[start..] {
-                        let TierValue::Number(value) = value else {
-                            return None;
-                        };
-                        child_args.push(*value);
-                    }
-                    stack.truncate(start);
-                    let child = functions.get(*function_index)?.as_ref()?;
-                    let child_result = child.run_numeric(&child_args, functions, scratch);
-                    scratch.return_args(child_args);
-                    let child_result = child_result?;
-                    loop_backedges = loop_backedges.saturating_add(child_result.loop_backedges);
-                    let Value::Number(value) = child_result.value else {
-                        return None;
-                    };
-                    stack.push(TierValue::Number(value));
-                }
-                TierOneInstr::InlineUnaryConst { op, value } => {
-                    let TierValue::Number(argument) = stack.pop()? else {
-                        return None;
-                    };
-                    stack.push(numeric(*op, argument, *value));
-                }
-                TierOneInstr::InlineConstUnary { value, op } => {
-                    let TierValue::Number(argument) = stack.pop()? else {
-                        return None;
-                    };
-                    stack.push(numeric(*op, *value, argument));
-                }
-                TierOneInstr::InlineBinaryArgs { op } => {
-                    let TierValue::Number(right) = stack.pop()? else {
-                        return None;
-                    };
-                    let TierValue::Number(left) = stack.pop()? else {
-                        return None;
-                    };
-                    stack.push(numeric(*op, left, right));
-                }
-                TierOneInstr::Jump(target) => {
-                    if *target <= pc {
-                        loop_backedges = loop_backedges.saturating_add(1);
-                    }
-                    pc = *target;
-                    continue;
-                }
-                TierOneInstr::JumpIfFalse(target) => {
-                    let TierValue::Bool(condition) = stack.pop()? else {
-                        return None;
-                    };
-                    if !condition {
-                        pc = *target;
-                        continue;
-                    }
-                }
-                TierOneInstr::Return => {
-                    let result = TierOneResult {
-                        value: match stack.pop()? {
-                            TierValue::Undefined => Value::Undefined,
-                            TierValue::Number(value) => Value::Number(value),
-                            TierValue::Bool(value) => Value::Bool(value),
-                        },
-                        loop_backedges,
-                    };
-                    scratch.return_locals(locals);
-                    return Some(result);
-                }
-                TierOneInstr::Pop => {
-                    stack.pop()?;
-                }
-            }
-            pc += 1;
-        }
+        let tier_args: Vec<TierValue> = args
+            .iter()
+            .map(TierValue::from_value)
+            .collect::<Option<_>>()?;
+        let mut scratch = TierScratch::default();
+        self.run_values(&tier_args, functions, &mut scratch)
+    }
+
+    pub(super) fn run_values(
+        &self,
+        args: &[TierValue],
+        functions: &[Option<TierOneFunction>],
+        scratch: &mut TierScratch,
+    ) -> Option<TierOneResult> {
+        execution::run(
+            &self.code,
+            self.param_count,
+            self.local_count,
+            args,
+            functions,
+            scratch,
+        )
     }
 
     pub fn estimated_bytes(&self) -> usize {

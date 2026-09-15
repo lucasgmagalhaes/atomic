@@ -12,6 +12,7 @@ edition = "2021"
 
 [dev-dependencies]
 libc = "0.2"
+js-runtime = { path = "../js-runtime" }
 
 # `criterion` dev-dependency + `[[bench]]` target land in step 3 (§8) once
 # benches/atomicjs_bench.rs actually exists — declaring either before then

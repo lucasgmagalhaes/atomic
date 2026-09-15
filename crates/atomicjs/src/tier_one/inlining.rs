@@ -16,18 +16,21 @@ impl TierOneFunction {
             if *argc != 1 {
                 continue;
             }
-            let Some((op, value)) = candidates
+            let Some(leaf) = candidates
                 .get(*function_index)
                 .and_then(Option::as_ref)
                 .and_then(TierOneFunction::unary_const_leaf)
             else {
                 continue;
             };
-            *instruction = TierOneInstr::InlineUnaryConst { op, value };
+            *instruction = match leaf {
+                UnaryConstLeaf::Right { op, value } => TierOneInstr::InlineUnaryConst { op, value },
+                UnaryConstLeaf::Left { value, op } => TierOneInstr::InlineConstUnary { value, op },
+            };
         }
     }
 
-    fn unary_const_leaf(&self) -> Option<(NumericOp, f64)> {
+    fn unary_const_leaf(&self) -> Option<UnaryConstLeaf> {
         if self.param_count != 1 || self.local_count != 1 || self.direct_calls().next().is_some() {
             return None;
         }
@@ -46,9 +49,32 @@ impl TierOneFunction {
                         | NumericOp::Mod
                 ) =>
             {
-                Some((*op, *value))
+                Some(UnaryConstLeaf::Right {
+                    op: *op,
+                    value: *value,
+                })
+            }
+            [TierOneInstr::Const(value), TierOneInstr::Load(0), TierOneInstr::Numeric(op), TierOneInstr::Return, ..]
+                if matches!(
+                    op,
+                    NumericOp::Add
+                        | NumericOp::Sub
+                        | NumericOp::Mul
+                        | NumericOp::Div
+                        | NumericOp::Mod
+                ) =>
+            {
+                Some(UnaryConstLeaf::Left {
+                    value: *value,
+                    op: *op,
+                })
             }
             _ => None,
         }
     }
+}
+
+enum UnaryConstLeaf {
+    Right { op: NumericOp, value: f64 },
+    Left { value: f64, op: NumericOp },
 }

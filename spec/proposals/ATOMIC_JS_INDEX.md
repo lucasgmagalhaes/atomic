@@ -17,6 +17,8 @@
   closure-free numeric call graphs as one Tier-1 unit.
 - [Milestone 24](ATOMIC_JS_MILESTONE_24.md): the shipped narrow inlining path
   for numeric Tier-1 helper leaves.
+- [Milestone 25](ATOMIC_JS_MILESTONE_25.md): constant-left numeric helper
+  inlining for the same one-argument Tier-1 boundary.
 
 ## Historical record
 

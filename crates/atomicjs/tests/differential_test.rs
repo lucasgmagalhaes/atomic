@@ -362,6 +362,20 @@ fn tier_one_numeric_subset_matches_tier_zero_and_quickjs() {
                 twiceIncremented(40);
             "#,
         ),
+        (
+            "constant_left_numeric_helper_graph",
+            r#"
+                function add(n) { return 10 + n; }
+                function subtract(n) { return 100 - n; }
+                function multiply(n) { return 3 * n; }
+                function divide(n) { return 120 / n; }
+                function remainder(n) { return 17 % n; }
+                function calculate(n) {
+                    return remainder(divide(multiply(subtract(add(n)))));
+                }
+                calculate(2);
+            "#,
+        ),
     ];
 
     for (name, source) in cases {

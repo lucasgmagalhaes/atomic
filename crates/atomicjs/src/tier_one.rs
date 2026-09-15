@@ -55,6 +55,11 @@ enum TierOneInstr {
         op: NumericOp,
         value: f64,
     },
+    /// A one-argument numeric leaf whose constant is the left operand.
+    InlineConstUnary {
+        value: f64,
+        op: NumericOp,
+    },
     Jump(usize),
     JumpIfFalse(usize),
     Return,
@@ -264,6 +269,12 @@ impl TierOneFunction {
                         return None;
                     };
                     stack.push(numeric(*op, argument, *value));
+                }
+                TierOneInstr::InlineConstUnary { value, op } => {
+                    let TierValue::Number(argument) = stack.pop()? else {
+                        return None;
+                    };
+                    stack.push(numeric(*op, *value, argument));
                 }
                 TierOneInstr::Jump(target) => {
                     if *target <= pc {

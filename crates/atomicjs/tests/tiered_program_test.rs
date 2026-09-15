@@ -1,4 +1,4 @@
-//! @spec atomicjs-profiling#tier-one-lifecycle
+//! @spec atomicjs-profiling#tier-one-inlining
 use atomicjs::tiering::{HostState, TierDecision, TieringPolicy};
 use atomicjs::{TieredProgram, Value};
 
@@ -11,6 +11,12 @@ const CALL_GRAPH_SOURCE: &str = r#"
 function increment(n) { return n + 1; }
 function twiceIncremented(n) { return increment(increment(n)); }
 twiceIncremented(40);
+"#;
+
+const CONSTANT_LEFT_HELPER_SOURCE: &str = r#"
+function remaining(n) { return 100 - n; }
+function invoke(n) { return remaining(n); }
+invoke(42);
 "#;
 
 fn eager_policy() -> TieringPolicy {
@@ -90,6 +96,17 @@ fn tiered_program_admits_a_numeric_direct_call_graph_atomically() {
 
     let accelerated = program.run().unwrap();
     assert_number(accelerated.value, 42.0);
+    assert_eq!(accelerated.tier_one_calls, 1);
+    assert_eq!(accelerated.tier_one_fallbacks, 0);
+}
+
+#[test]
+fn tiered_program_inlines_a_constant_left_numeric_helper() {
+    let mut program = TieredProgram::compile(CONSTANT_LEFT_HELPER_SOURCE, eager_policy()).unwrap();
+
+    assert_number(program.run().unwrap().value, 58.0);
+    let accelerated = program.run().unwrap();
+    assert_number(accelerated.value, 58.0);
     assert_eq!(accelerated.tier_one_calls, 1);
     assert_eq!(accelerated.tier_one_fallbacks, 0);
 }

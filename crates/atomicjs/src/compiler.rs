@@ -19,6 +19,10 @@ use std::rc::Rc;
 use crate::ast::{BinOp, Expr, Stmt};
 use crate::bytecode::{BytecodeFunction, BytecodeModule, Const, Instr, NativeFn, NumericOp};
 
+mod analysis;
+
+use analysis::{assigned_names, collect_locals, resolve};
+
 #[derive(Debug, PartialEq)]
 pub struct CompileError(pub String);
 
@@ -39,12 +43,12 @@ pub fn compile(program: Vec<Stmt>) -> Result<BytecodeModule, CompileError> {
     })
 }
 
-struct FunctionBuilder {
-    locals: Vec<String>,
+pub(super) struct FunctionBuilder {
+    pub(super) locals: Vec<String>,
     code: Vec<Instr>,
     constants: Vec<Const>,
     /// Indices into `locals` that some nested function captures.
-    captured: HashSet<usize>,
+    pub(super) captured: HashSet<usize>,
 }
 
 impl FunctionBuilder {
@@ -59,108 +63,11 @@ impl FunctionBuilder {
 /// fighting the borrow checker over a mutable-reference chain — compiler-
 /// internal bookkeeping only, not a runtime concern (spike scope, §3: no
 /// performance pressure here).
-type Scope = Rc<RefCell<FunctionBuilder>>;
+pub(super) type Scope = Rc<RefCell<FunctionBuilder>>;
 
-enum SlotRef {
+pub(super) enum SlotRef {
     Local(u32),
     Upvalue(u32),
-}
-
-/// Resolves `name` against `fb`'s own locals first, then (one level only)
-/// against `parent`'s locals — registering a new upvalue and marking the
-/// parent's slot captured on first reference. `upvalues` is this function's
-/// own accumulating list of parent-slot-indices, one per upvalue it uses (in
-/// first-reference order) — exactly the `captures` list `MakeClosure` needs
-/// once this function itself is done compiling.
-fn resolve(
-    name: &str,
-    fb: &Scope,
-    parent: Option<&Scope>,
-    upvalues: &mut Vec<u32>,
-) -> Result<SlotRef, CompileError> {
-    if let Some(pos) = fb.borrow().locals.iter().position(|n| n == name) {
-        return Ok(SlotRef::Local(pos as u32));
-    }
-    if let Some(parent) = parent {
-        // Bound to an owned `Option<usize>` first, not matched on directly —
-        // `if let Some(x) = parent.borrow().foo` would keep that `Ref` alive
-        // for the whole `if let` body (temporary lifetime extension), and
-        // the `parent.borrow_mut()` a few lines down would then panic with
-        // "already borrowed". A real bug caught by
-        // `compiler_test.rs`'s closure-capture test, not a hypothetical.
-        let parent_pos = parent.borrow().locals.iter().position(|n| n == name);
-        if let Some(parent_pos) = parent_pos {
-            if let Some(existing) = upvalues.iter().position(|&s| s == parent_pos as u32) {
-                return Ok(SlotRef::Upvalue(existing as u32));
-            }
-            let upvalue_index = upvalues.len() as u32;
-            upvalues.push(parent_pos as u32);
-            parent.borrow_mut().captured.insert(parent_pos);
-            return Ok(SlotRef::Upvalue(upvalue_index));
-        }
-    }
-    Err(CompileError(format!("undefined variable: {name}")))
-}
-
-/// Collects this function's *own* local names (params first, then every
-/// `let`/`const`/named-function-declaration found directly in its body) —
-/// nested function bodies are excluded, they get their own locals list when
-/// `compile_function` recurses into them. No block scoping: a `for` loop's
-/// init and body flatten into the enclosing function's locals, same as any
-/// other `let` (documented in §5.4 — none of the reference programs shadow a
-/// name in a way this would break).
-fn collect_locals(body: &[Stmt], locals: &mut Vec<String>) {
-    for stmt in body {
-        collect_locals_stmt(stmt, locals);
-    }
-}
-
-fn collect_locals_stmt(stmt: &Stmt, locals: &mut Vec<String>) {
-    match stmt {
-        Stmt::Let { name, .. } | Stmt::Const { name, .. } => {
-            if !locals.contains(name) {
-                locals.push(name.clone());
-            }
-        }
-        Stmt::Function(decl) => {
-            let name = decl
-                .name
-                .as_ref()
-                .expect("statement-level function declarations are always named");
-            if !locals.contains(name) {
-                locals.push(name.clone());
-            }
-        }
-        Stmt::For { init, body, .. } => {
-            collect_locals_stmt(init, locals);
-            for s in body {
-                collect_locals_stmt(s, locals);
-            }
-        }
-        Stmt::While { body, .. } => {
-            for s in body {
-                collect_locals_stmt(s, locals);
-            }
-        }
-        Stmt::If {
-            then_branch,
-            else_branch,
-            ..
-        } => {
-            for s in then_branch {
-                collect_locals_stmt(s, locals);
-            }
-            for s in else_branch {
-                collect_locals_stmt(s, locals);
-            }
-        }
-        Stmt::Block(stmts) => {
-            for s in stmts {
-                collect_locals_stmt(s, locals);
-            }
-        }
-        Stmt::Expr(_) | Stmt::Return(_) => {}
-    }
 }
 
 struct Compiler {
@@ -695,108 +602,6 @@ impl Compiler {
             }
         }
         Ok(())
-    }
-}
-
-fn assigned_names(program: &[Stmt]) -> HashSet<String> {
-    let mut names = HashSet::new();
-    for statement in program {
-        collect_assigned_stmt(statement, &mut names);
-    }
-    names
-}
-
-fn collect_assigned_stmt(statement: &Stmt, names: &mut HashSet<String>) {
-    match statement {
-        Stmt::Expr(expression) => collect_assigned_expr(expression, names),
-        Stmt::Let { value, .. } | Stmt::Const { value, .. } => collect_assigned_expr(value, names),
-        Stmt::Function(declaration) => {
-            for statement in &declaration.body {
-                collect_assigned_stmt(statement, names);
-            }
-        }
-        Stmt::For {
-            init,
-            cond,
-            update,
-            body,
-        } => {
-            collect_assigned_stmt(init, names);
-            collect_assigned_expr(cond, names);
-            collect_assigned_expr(update, names);
-            for statement in body {
-                collect_assigned_stmt(statement, names);
-            }
-        }
-        Stmt::While { cond, body } => {
-            collect_assigned_expr(cond, names);
-            for statement in body {
-                collect_assigned_stmt(statement, names);
-            }
-        }
-        Stmt::If {
-            cond,
-            then_branch,
-            else_branch,
-        } => {
-            collect_assigned_expr(cond, names);
-            for statement in then_branch {
-                collect_assigned_stmt(statement, names);
-            }
-            for statement in else_branch {
-                collect_assigned_stmt(statement, names);
-            }
-        }
-        Stmt::Return(value) => {
-            if let Some(expression) = value {
-                collect_assigned_expr(expression, names);
-            }
-        }
-        Stmt::Block(statements) => {
-            for statement in statements {
-                collect_assigned_stmt(statement, names);
-            }
-        }
-    }
-}
-
-fn collect_assigned_expr(expression: &Expr, names: &mut HashSet<String>) {
-    match expression {
-        Expr::Assign { target, value } | Expr::CompoundAssign { target, value, .. } => {
-            if let Expr::Identifier(name) = &**target {
-                names.insert(name.clone());
-            }
-            collect_assigned_expr(target, names);
-            collect_assigned_expr(value, names);
-        }
-        Expr::Increment { target, .. } => {
-            if let Expr::Identifier(name) = &**target {
-                names.insert(name.clone());
-            }
-            collect_assigned_expr(target, names);
-        }
-        Expr::Binary { left, right, .. } => {
-            collect_assigned_expr(left, names);
-            collect_assigned_expr(right, names);
-        }
-        Expr::Call { callee, args } => {
-            collect_assigned_expr(callee, names);
-            for argument in args {
-                collect_assigned_expr(argument, names);
-            }
-        }
-        Expr::Member { object, .. } => collect_assigned_expr(object, names),
-        Expr::ObjectLiteral(properties) => {
-            for (_, value) in properties {
-                collect_assigned_expr(value, names);
-            }
-        }
-        Expr::FunctionExpr(declaration) => {
-            for statement in &declaration.body {
-                collect_assigned_stmt(statement, names);
-            }
-        }
-        Expr::Number(_) | Expr::Identifier(_) => {}
     }
 }
 

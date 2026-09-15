@@ -51,6 +51,7 @@ pub enum Instr {
         target: u32,
         value: u32,
     },
+    AddLocalConst { target: u32, constant: u32 },
     /// Adds a direct local-object property to a local numeric accumulator.
     /// Emitted only for a discarded `target += object.property` expression.
     AddLocalProp {

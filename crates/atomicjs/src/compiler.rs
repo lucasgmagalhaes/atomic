@@ -490,6 +490,13 @@ impl Compiler {
             }
             Expr::CompoundAssign { op, target, value } => {
                 if *op == BinOp::Add {
+                    if let (Expr::Identifier(target), Expr::Number(value)) = (&**target, &**value) {
+                        if let SlotRef::Local(target) = resolve(target, fb, parent, upvalues)? {
+                            let constant = fb.borrow_mut().push_const(Const::Number(*value));
+                            fb.borrow_mut().code.push(Instr::AddLocalConst { target, constant });
+                            return Ok(());
+                        }
+                    }
                     if let (Expr::Identifier(target), Expr::Identifier(value)) =
                         (&**target, &**value)
                     {

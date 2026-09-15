@@ -402,6 +402,15 @@ fn execute_function<F: FeedbackSink>(
                 locals[*target as usize].set_number(sum);
                 pc += 1;
             }
+            Instr::AddLocalConst { target, constant } => {
+                let constant = match &function.constants[*constant as usize] {
+                    Const::Number(value) => *value,
+                    other => panic!("internal error: AddLocalConst requires Number, got {other:?}"),
+                };
+                let sum = locals[*target as usize].number() + constant;
+                locals[*target as usize].set_number(sum);
+                pc += 1;
+            }
             Instr::AddLocalProp {
                 target,
                 object,

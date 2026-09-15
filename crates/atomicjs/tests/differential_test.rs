@@ -1,8 +1,10 @@
+//! @spec atomicjs-profiling#tier-one-differential
 //! Differential correctness gate for the intentionally supported AtomicJS
 //! subset. QuickJS-ng is a development-only oracle: no production crate
 //! depends on AtomicJS, and this test is never part of its public runtime API.
 
-use atomicjs::run_source;
+use atomicjs::tiering::TieringPolicy;
+use atomicjs::{run_source, TieredProgram};
 use quickjs_sys as quickjs;
 use std::ffi::{CStr, CString};
 
@@ -61,6 +63,49 @@ fn assert_matches_quickjs(name: &str, source: &str) {
         atomic_result(source).unwrap_or_else(|error| panic!("AtomicJS failed {name}: {error}"));
     let quickjs = quickjs_result(source);
     assert_eq!(atomic, quickjs, "differential mismatch in {name}: {source}");
+}
+
+fn assert_tier_one_matches_tier_zero_and_quickjs(name: &str, source: &str) {
+    let tier_zero = atomic_result(source)
+        .unwrap_or_else(|error| panic!("AtomicJS Tier 0 failed {name}: {error}"));
+    let quickjs = quickjs_result(source);
+    assert_eq!(
+        tier_zero, quickjs,
+        "Tier 0 differential mismatch in {name}: {source}"
+    );
+
+    let mut program = TieredProgram::compile(
+        source,
+        TieringPolicy {
+            enabled: true,
+            call_threshold: 1,
+            loop_threshold: u32::MAX,
+            ..TieringPolicy::default()
+        },
+    )
+    .unwrap_or_else(|error| panic!("TieredProgram failed to compile {name}: {error}"));
+
+    let warmup = program
+        .run()
+        .unwrap_or_else(|error| panic!("Tier 1 warmup failed {name}: {error}"));
+    assert_eq!(
+        warmup.value.to_string(),
+        tier_zero,
+        "Tier 1 warmup changed the result in {name}: {source}"
+    );
+
+    let accelerated = program
+        .run()
+        .unwrap_or_else(|error| panic!("Tier 1 execution failed {name}: {error}"));
+    assert!(
+        accelerated.tier_one_calls > 0,
+        "expected specialized execution in {name}: {source}"
+    );
+    assert_eq!(
+        accelerated.value.to_string(),
+        quickjs,
+        "Tier 1 differential mismatch in {name}: {source}"
+    );
 }
 
 #[derive(Clone, Debug)]
@@ -269,5 +314,41 @@ fn seeded_arithmetic_and_control_cases_match_quickjs() {
     const SEED: u32 = 0xA70C_1C5;
     for (index, case) in generated_cases(SEED, 64).enumerate() {
         assert_generated_case_matches_quickjs(SEED, index, &case);
+    }
+}
+
+#[test]
+fn tier_one_numeric_subset_matches_tier_zero_and_quickjs() {
+    let cases = [
+        (
+            "numeric_loop",
+            r#"
+                function sum(n) {
+                    let total = 0;
+                    for (let i = 0; i < n; i++) { total += i; }
+                    return total;
+                }
+                sum(1000);
+            "#,
+        ),
+        (
+            "numeric_operators",
+            r#"
+                function calculate(left, right) {
+                    let total = left + right;
+                    total = total - 3;
+                    total = total * 2;
+                    total = total / 5;
+                    total = total % 7;
+                    if (total < 4) { total += 11; }
+                    return total;
+                }
+                calculate(19, 8);
+            "#,
+        ),
+    ];
+
+    for (name, source) in cases {
+        assert_tier_one_matches_tier_zero_and_quickjs(name, source);
     }
 }

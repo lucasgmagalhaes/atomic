@@ -240,9 +240,10 @@ Files: `crates/atomicjs/benches/atomicjs_bench.rs`,
 - Criterion: the initial 10-sample, 0.1-second probe reported a regression,
   but proved too noisy to support that conclusion. The follow-up stores Tier-1
   support metadata at compile time rather than allocating a `Vec<bool>` in
-  every run. A 30-sample, 1-second warm-up / 4-second measurement repeat of
-  the unchanged optimized binary measured -8.53% to +4.55% (p = 0.53), which
-  is statistically inconclusive. No performance claim is made.
+  every run, then batches Tier-1 loop feedback instead of replaying each
+  backedge through the host. Against a 30-sample, 1-second warm-up / 4-second
+  baseline, `sum/tier_one_compiled` improved by 13.92% to 23.31%
+  (p < 0.05), with a 4.7773 ms median and 4.6546--4.9322 ms 95% interval.
 - RSS: five release probes using `tiered-run sum 10` reported 1,687,552 to
   1,720,320 bytes maximum RSS. Each final warm run dispatched Tier 1 once,
   installed zero new entries, and made zero fallbacks; the initial threshold

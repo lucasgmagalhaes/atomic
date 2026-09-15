@@ -102,6 +102,13 @@ struct VmPools {
 trait FeedbackSink {
     fn on_function_call(&mut self, function_index: usize);
     fn on_loop_backedge(&mut self, function_index: usize);
+
+    #[inline(always)]
+    fn on_loop_backedges(&mut self, function_index: usize, count: u32) {
+        for _ in 0..count {
+            self.on_loop_backedge(function_index);
+        }
+    }
 }
 
 struct NoFeedback;
@@ -112,6 +119,9 @@ impl FeedbackSink for NoFeedback {
 
     #[inline(always)]
     fn on_loop_backedge(&mut self, _: usize) {}
+
+    #[inline(always)]
+    fn on_loop_backedges(&mut self, _: usize, _: u32) {}
 }
 
 struct CollectingFeedback<'a> {
@@ -127,6 +137,13 @@ impl FeedbackSink for CollectingFeedback<'_> {
     #[inline(always)]
     fn on_loop_backedge(&mut self, function_index: usize) {
         self.entries[function_index].loop_count += 1;
+    }
+
+    #[inline(always)]
+    fn on_loop_backedges(&mut self, function_index: usize, count: u32) {
+        self.entries[function_index].loop_count = self.entries[function_index]
+            .loop_count
+            .saturating_add(count);
     }
 }
 
@@ -396,9 +413,7 @@ fn execute_function<F: FeedbackSink>(
         .and_then(|functions| functions.get(function_index))
     {
         if let Some(result) = function.run(args) {
-            for _ in 0..result.loop_backedges {
-                feedback.on_loop_backedge(function_index);
-            }
+            feedback.on_loop_backedges(function_index, result.loop_backedges);
             *tier_one.calls = tier_one.calls.saturating_add(1);
             return Ok(result.value);
         }

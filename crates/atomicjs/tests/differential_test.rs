@@ -227,6 +227,25 @@ fn fixed_supported_programs_match_quickjs() {
             "#,
         ),
         (
+            "compound_call_reads_left_before_mutation",
+            r#"
+                let total = 1;
+                function next() { total = 2; return 3; }
+                total += next(); total;
+            "#,
+        ),
+        (
+            "property_layout_switches_at_one_read_site",
+            r#"
+                let player = { damage: 20 }; let total = 0;
+                for (let i = 0; i < 2; i++) {
+                    if (i > 0) { player = { bonus: 1, damage: 7 }; }
+                    total += player.damage;
+                }
+                total;
+            "#,
+        ),
+        (
             "if_and_native_math",
             "let value = Math.sqrt(81) + Math.log(1); if (value > 8) { value *= 2; } value;",
         ),

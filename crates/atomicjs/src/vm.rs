@@ -385,6 +385,20 @@ fn execute_function<F: FeedbackSink>(
                 locals[*target as usize].set(Value::Number(as_number(&left) + as_number(&right)));
                 pc += 1;
             }
+            Instr::AddLocalProp {
+                target,
+                object,
+                name,
+            } => {
+                let property = cached_local_property(
+                    &locals[*object as usize],
+                    property_name(function, *name),
+                    property_caches.as_mut().map(|entries| &mut entries[pc]),
+                );
+                let total = locals[*target as usize].get();
+                locals[*target as usize].set(Value::Number(as_number(&total) + as_number(&property)));
+                pc += 1;
+            }
             Instr::IncrementLocal(slot) => {
                 let value = locals[*slot as usize].get();
                 locals[*slot as usize].set(Value::Number(as_number(&value) + 1.0));

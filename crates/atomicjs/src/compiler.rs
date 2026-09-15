@@ -198,7 +198,9 @@ impl Compiler {
             has_property_reads: inner.code.iter().any(|instruction| {
                 matches!(
                     instruction,
-                    Instr::GetLocalProp { .. } | Instr::GetUpvalueProp { .. }
+                    Instr::GetLocalProp { .. }
+                        | Instr::GetUpvalueProp { .. }
+                        | Instr::AddLocalProp { .. }
                 )
             }),
             code: inner.code,
@@ -469,6 +471,24 @@ impl Compiler {
                                 .code
                                 .push(Instr::AddLocalLocal { target, value });
                             return Ok(());
+                        }
+                    }
+                    if let (Expr::Identifier(target), Expr::Member { object, property }) =
+                        (&**target, &**value)
+                    {
+                        if let Expr::Identifier(object) = &**object {
+                            if let (SlotRef::Local(target), SlotRef::Local(object)) = (
+                                resolve(target, fb, parent, upvalues)?,
+                                resolve(object, fb, parent, upvalues)?,
+                            ) {
+                                let name = fb.borrow_mut().push_const(Const::String(property.clone()));
+                                fb.borrow_mut().code.push(Instr::AddLocalProp {
+                                    target,
+                                    object,
+                                    name,
+                                });
+                                return Ok(());
+                            }
                         }
                     }
                 }

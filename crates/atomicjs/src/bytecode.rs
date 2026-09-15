@@ -51,6 +51,13 @@ pub enum Instr {
         target: u32,
         value: u32,
     },
+    /// Adds a direct local-object property to a local numeric accumulator.
+    /// Emitted only for a discarded `target += object.property` expression.
+    AddLocalProp {
+        target: u32,
+        object: u32,
+        name: u32,
+    },
     /// Increments a local numeric value. Emitted only for a discarded
     /// increment expression.
     IncrementLocal(u32),

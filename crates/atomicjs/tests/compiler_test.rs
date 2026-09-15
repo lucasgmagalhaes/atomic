@@ -119,6 +119,22 @@ fn discarded_local_arithmetic_updates_use_direct_opcodes() {
 }
 
 #[test]
+fn discarded_local_property_accumulation_uses_a_direct_opcode() {
+    let module = compile_source(
+        "let total = 0; const player = { damage: 20 }; total += player.damage; 0;",
+    );
+    let top_level = &module.functions[module.top_level];
+    assert!(top_level
+        .code
+        .iter()
+        .any(|instr| matches!(instr, Instr::AddLocalProp { .. })));
+    assert!(!top_level
+        .code
+        .iter()
+        .any(|instr| matches!(instr, Instr::GetLocalProp { .. })));
+}
+
+#[test]
 fn for_loop_compiles_a_backward_jump_and_a_patched_forward_jump() {
     let module = compile_source(
         r#"

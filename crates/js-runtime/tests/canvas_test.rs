@@ -1,0 +1,140 @@
+//! Real `HTMLCanvasElement.getContext('2d')` (`crate::canvas_bindings`) —
+//! see that module's own doc for the exact scope cut (`fillRect`/
+//! `clearRect`/`fillStyle` only, `#rrggbb`/`#rgb` hex only, a new JS
+//! wrapper object per `getContext()` call sharing one real backing
+//! `render::Canvas2D`).
+
+use js_runtime::{Context, Runtime};
+
+fn dom_with_canvas() -> (dom::Dom, dom::NodeId) {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let body = d.create_element("body");
+    d.append_child(root, body);
+    let canvas = d.create_element("canvas");
+    d.append_child(body, canvas);
+    (d, canvas)
+}
+
+#[test]
+fn get_context_2d_returns_a_real_context() {
+    let (d, _) = dom_with_canvas();
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { \
+               const c = document.querySelector('canvas'); \
+               const ctx2d = c.getContext('2d'); \
+               return `${ctx2d !== null},${typeof ctx2d.fillRect},${typeof ctx2d.clearRect}`; \
+             })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "true,function,function");
+}
+
+#[test]
+fn get_context_with_an_unsupported_id_returns_null() {
+    let (d, _) = dom_with_canvas();
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { \
+               const c = document.querySelector('canvas'); \
+               return c.getContext('webgl') === null; \
+             })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "true");
+}
+
+#[test]
+fn fill_style_round_trips_a_hex_color() {
+    let (d, _) = dom_with_canvas();
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { \
+               const ctx2d = document.querySelector('canvas').getContext('2d'); \
+               ctx2d.fillStyle = '#ff0000'; \
+               return ctx2d.fillStyle; \
+             })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "#ff0000");
+}
+
+#[test]
+fn a_3_digit_hex_fill_style_expands_correctly() {
+    let (d, _) = dom_with_canvas();
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { \
+               const ctx2d = document.querySelector('canvas').getContext('2d'); \
+               ctx2d.fillStyle = '#0f0'; \
+               return ctx2d.fillStyle; \
+             })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "#00ff00");
+}
+
+#[test]
+fn repeated_get_context_calls_share_one_real_backing() {
+    // Real per-canvas persistence (`canvas_bindings`'s own doc): each
+    // `getContext('2d')` call returns a new JS wrapper object, but every
+    // wrapper for the same canvas shares the exact same `render::Canvas2D`
+    // backing - so state set through one wrapper is visible through
+    // another later `getContext()` call.
+    let (d, _) = dom_with_canvas();
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { \
+               const c = document.querySelector('canvas'); \
+               const a = c.getContext('2d'); \
+               a.fillStyle = '#123456'; \
+               const b = c.getContext('2d'); \
+               return `${a !== b},${b.fillStyle}`; \
+             })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "true,#123456");
+}
+
+#[test]
+fn an_unrecognized_context_id_never_creates_a_backing() {
+    let (d, _) = dom_with_canvas();
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    ctx.eval(
+        "document.querySelector('canvas').getContext('nonsense')",
+        "<test>",
+    )
+    .unwrap();
+    assert!(!ctx.has_active_canvases());
+}
+
+#[test]
+fn getting_a_2d_context_registers_it_as_an_active_canvas() {
+    let (d, _) = dom_with_canvas();
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    ctx.eval(
+        "document.querySelector('canvas').getContext('2d')",
+        "<test>",
+    )
+    .unwrap();
+    assert!(ctx.has_active_canvases());
+    assert_eq!(ctx.canvas_snapshots().len(), 1);
+}

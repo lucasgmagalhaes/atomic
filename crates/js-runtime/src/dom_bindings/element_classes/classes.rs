@@ -19,8 +19,9 @@ use crate::dom_bindings::iframe::define_iframe_properties;
 use crate::dom_bindings::mutation::define_mutation_methods;
 use crate::dom_bindings::navigation::define_navigation;
 use crate::dom_bindings::node_registry::{
-    node_opaque, ELEMENT_CLASS_KIND, HTML_ELEMENT_CLASS_KIND, HTML_FORM_CLASS_KIND,
-    HTML_IFRAME_CLASS_KIND, HTML_SELECT_CLASS_KIND, HTML_TEMPLATE_CLASS_KIND, NODE_CLASS_KIND,
+    node_opaque, ELEMENT_CLASS_KIND, HTML_CANVAS_CLASS_KIND, HTML_ELEMENT_CLASS_KIND,
+    HTML_FORM_CLASS_KIND, HTML_IFRAME_CLASS_KIND, HTML_SELECT_CLASS_KIND, HTML_TEMPLATE_CLASS_KIND,
+    NODE_CLASS_KIND,
 };
 use crate::dom_bindings::pointer_capture::define_pointer_capture_methods;
 use crate::dom_bindings::scroll_focus::{define_focus_methods, define_scroll_methods};
@@ -177,6 +178,8 @@ pub(super) unsafe fn ensure_html_subclass(
         define_iframe_properties(ctx, proto);
     } else if kind == HTML_TEMPLATE_CLASS_KIND {
         define_template_properties(ctx, proto);
+    } else if kind == HTML_CANVAS_CLASS_KIND {
+        crate::canvas_bindings::define_canvas_properties(ctx, proto);
     }
     sys::JS_SetClassProto(ctx, class_id, proto);
 

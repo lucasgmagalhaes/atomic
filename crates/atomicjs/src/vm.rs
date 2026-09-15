@@ -325,12 +325,17 @@ pub struct TieredProgram {
 impl TieredProgram {
     pub fn compile(source: &str, policy: TieringPolicy) -> Result<Self, AtomicJsError> {
         let program = CompiledProgram::compile(source)?;
-        let candidates: Vec<Option<TierOneFunction>> = program
+        let mut candidates: Vec<Option<TierOneFunction>> = program
             .module
             .functions
             .iter()
             .map(TierOneFunction::compile)
             .collect();
+        let leaf_catalog = candidates.clone();
+        candidates
+            .iter_mut()
+            .flatten()
+            .for_each(|candidate| candidate.inline_leaf_calls(&leaf_catalog));
         let individual_bytes: Vec<usize> = candidates
             .iter()
             .map(|candidate| {

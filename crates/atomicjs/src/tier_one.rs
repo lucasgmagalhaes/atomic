@@ -50,6 +50,12 @@ enum TierOneInstr {
         function_index: usize,
         argc: usize,
     },
+    /// A one-argument numeric leaf folded into its caller during Tier-1
+    /// candidate preparation. It has no call frame or argument buffer.
+    InlineUnaryConst {
+        op: NumericOp,
+        value: f64,
+    },
     Jump(usize),
     JumpIfFalse(usize),
     Return,
@@ -286,6 +292,12 @@ impl TierOneFunction {
                     };
                     stack.push(TierValue::Number(value));
                 }
+                TierOneInstr::InlineUnaryConst { op, value } => {
+                    let TierValue::Number(argument) = stack.pop()? else {
+                        return None;
+                    };
+                    stack.push(numeric(*op, argument, *value));
+                }
                 TierOneInstr::Jump(target) => {
                     if *target <= pc {
                         loop_backedges = loop_backedges.saturating_add(1);
@@ -335,6 +347,57 @@ impl TierOneFunction {
                 TierOneInstr::CallDirect { function_index, .. } => Some(*function_index),
                 _ => None,
             })
+    }
+
+    /// Replaces only a proven one-argument numeric leaf with its arithmetic
+    /// body. Any control flow, local state, capture, or nonnumeric result
+    /// keeps the normal guarded direct-call path.
+    pub(crate) fn inline_leaf_calls(&mut self, candidates: &[Option<TierOneFunction>]) {
+        for instruction in &mut self.code {
+            let TierOneInstr::CallDirect {
+                function_index,
+                argc,
+            } = instruction
+            else {
+                continue;
+            };
+            if *argc != 1 {
+                continue;
+            }
+            let Some((op, value)) = candidates
+                .get(*function_index)
+                .and_then(Option::as_ref)
+                .and_then(TierOneFunction::unary_const_leaf)
+            else {
+                continue;
+            };
+            *instruction = TierOneInstr::InlineUnaryConst { op, value };
+        }
+    }
+
+    fn unary_const_leaf(&self) -> Option<(NumericOp, f64)> {
+        if self.param_count != 1 || self.local_count != 1 || self.direct_calls().next().is_some() {
+            return None;
+        }
+        match self.code.as_slice() {
+            [TierOneInstr::BinaryLocalConst {
+                op,
+                local: 0,
+                value,
+            }, TierOneInstr::Return, ..]
+                if matches!(
+                    op,
+                    NumericOp::Add
+                        | NumericOp::Sub
+                        | NumericOp::Mul
+                        | NumericOp::Div
+                        | NumericOp::Mod
+                ) =>
+            {
+                Some((*op, *value))
+            }
+            _ => None,
+        }
     }
 }
 

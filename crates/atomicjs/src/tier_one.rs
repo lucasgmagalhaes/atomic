@@ -6,12 +6,11 @@
 use crate::bytecode::{BytecodeFunction, Const, Instr, NumericOp};
 use crate::value::Value;
 
-#[derive(Debug, Clone, Copy)]
-enum TierValue {
-    Undefined,
-    Number(f64),
-    Bool(bool),
-}
+mod inlining;
+mod scratch;
+mod value;
+use scratch::TierScratch;
+use value::{numeric, TierValue};
 
 #[derive(Debug, Clone)]
 pub struct TierOneFunction {
@@ -60,38 +59,6 @@ enum TierOneInstr {
     JumpIfFalse(usize),
     Return,
     Pop,
-}
-
-/// Per-entry reusable numeric argument buffers. A direct call holds one
-/// buffer while a nested call checks out another; returning it immediately
-/// after the child completes keeps hot call edges allocation-free.
-#[derive(Default)]
-struct TierScratch {
-    args: Vec<Vec<f64>>,
-    locals: Vec<Vec<f64>>,
-}
-
-impl TierScratch {
-    fn take_args(&mut self) -> Vec<f64> {
-        self.args.pop().unwrap_or_default()
-    }
-
-    fn return_args(&mut self, mut args: Vec<f64>) {
-        args.clear();
-        self.args.push(args);
-    }
-
-    fn take_locals(&mut self, local_count: usize) -> Vec<f64> {
-        let mut locals = self.locals.pop().unwrap_or_default();
-        locals.clear();
-        locals.resize(local_count, 0.0);
-        locals
-    }
-
-    fn return_locals(&mut self, mut locals: Vec<f64>) {
-        locals.clear();
-        self.locals.push(locals);
-    }
 }
 
 pub struct TierOneResult {
@@ -347,67 +314,5 @@ impl TierOneFunction {
                 TierOneInstr::CallDirect { function_index, .. } => Some(*function_index),
                 _ => None,
             })
-    }
-
-    /// Replaces only a proven one-argument numeric leaf with its arithmetic
-    /// body. Any control flow, local state, capture, or nonnumeric result
-    /// keeps the normal guarded direct-call path.
-    pub(crate) fn inline_leaf_calls(&mut self, candidates: &[Option<TierOneFunction>]) {
-        for instruction in &mut self.code {
-            let TierOneInstr::CallDirect {
-                function_index,
-                argc,
-            } = instruction
-            else {
-                continue;
-            };
-            if *argc != 1 {
-                continue;
-            }
-            let Some((op, value)) = candidates
-                .get(*function_index)
-                .and_then(Option::as_ref)
-                .and_then(TierOneFunction::unary_const_leaf)
-            else {
-                continue;
-            };
-            *instruction = TierOneInstr::InlineUnaryConst { op, value };
-        }
-    }
-
-    fn unary_const_leaf(&self) -> Option<(NumericOp, f64)> {
-        if self.param_count != 1 || self.local_count != 1 || self.direct_calls().next().is_some() {
-            return None;
-        }
-        match self.code.as_slice() {
-            [TierOneInstr::BinaryLocalConst {
-                op,
-                local: 0,
-                value,
-            }, TierOneInstr::Return, ..]
-                if matches!(
-                    op,
-                    NumericOp::Add
-                        | NumericOp::Sub
-                        | NumericOp::Mul
-                        | NumericOp::Div
-                        | NumericOp::Mod
-                ) =>
-            {
-                Some((*op, *value))
-            }
-            _ => None,
-        }
-    }
-}
-
-fn numeric(op: NumericOp, left: f64, right: f64) -> TierValue {
-    match op {
-        NumericOp::Add => TierValue::Number(left + right),
-        NumericOp::Sub => TierValue::Number(left - right),
-        NumericOp::Mul => TierValue::Number(left * right),
-        NumericOp::Div => TierValue::Number(left / right),
-        NumericOp::Mod => TierValue::Number(left % right),
-        NumericOp::Lt => TierValue::Bool(left < right),
     }
 }

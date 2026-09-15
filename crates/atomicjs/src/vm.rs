@@ -45,6 +45,24 @@ impl LocalSlot {
         }
     }
 
+    #[inline(always)]
+    fn number(&self) -> f64 {
+        match self {
+            LocalSlot::Plain(Value::Number(number)) => *number,
+            LocalSlot::Captured(cell) => as_number(&cell.borrow()),
+            LocalSlot::Plain(value) => as_number(value),
+        }
+    }
+
+    #[inline(always)]
+    fn set_number(&mut self, number: f64) {
+        match self {
+            LocalSlot::Plain(Value::Number(value)) => *value = number,
+            LocalSlot::Captured(cell) => *cell.borrow_mut() = Value::Number(number),
+            LocalSlot::Plain(value) => *value = Value::Number(number),
+        }
+    }
+
 }
 
 /// Reusable `Vec<LocalSlot>`/`Vec<Value>` buffers shared across the whole
@@ -380,9 +398,8 @@ fn execute_function<F: FeedbackSink>(
                 pc += 1;
             }
             Instr::AddLocalLocal { target, value } => {
-                let left = locals[*target as usize].get();
-                let right = locals[*value as usize].get();
-                locals[*target as usize].set(Value::Number(as_number(&left) + as_number(&right)));
+                let sum = locals[*target as usize].number() + locals[*value as usize].number();
+                locals[*target as usize].set_number(sum);
                 pc += 1;
             }
             Instr::AddLocalProp {
@@ -395,22 +412,24 @@ fn execute_function<F: FeedbackSink>(
                     property_name(function, *name),
                     property_caches.as_mut().map(|entries| &mut entries[pc]),
                 );
-                let total = locals[*target as usize].get();
-                locals[*target as usize].set(Value::Number(as_number(&total) + as_number(&property)));
+                let sum = locals[*target as usize].number() + as_number(&property);
+                locals[*target as usize].set_number(sum);
                 pc += 1;
             }
             Instr::AddLocalCallLocal0 { target, callee } => {
                 // Preserve compound-assignment evaluation order: a call can
                 // mutate a captured `target` local before it returns.
-                let total = locals[*target as usize].get();
+                let total = locals[*target as usize].number();
                 let result = call_local0(module, &locals[*callee as usize], feedback, pools)?;
-                locals[*target as usize].set(Value::Number(as_number(&total) + as_number(&result)));
+                locals[*target as usize].set_number(total + as_number(&result));
                 pc += 1;
             }
             Instr::BinaryLocalLocal { op, left, right } => {
-                let left = locals[*left as usize].get();
-                let right = locals[*right as usize].get();
-                stack.push(numeric_value(*op, as_number(&left), as_number(&right)));
+                stack.push(numeric_value(
+                    *op,
+                    locals[*left as usize].number(),
+                    locals[*right as usize].number(),
+                ));
                 pc += 1;
             }
             Instr::BinaryLocalConst {
@@ -418,19 +437,18 @@ fn execute_function<F: FeedbackSink>(
                 local,
                 constant,
             } => {
-                let local = locals[*local as usize].get();
                 let constant = match &function.constants[*constant as usize] {
                     Const::Number(number) => *number,
                     other => panic!(
                         "internal error: BinaryLocalConst's constant must be a Number, got {other:?}"
                     ),
                 };
-                stack.push(numeric_value(*op, as_number(&local), constant));
+                stack.push(numeric_value(*op, locals[*local as usize].number(), constant));
                 pc += 1;
             }
             Instr::IncrementLocal(slot) => {
-                let value = locals[*slot as usize].get();
-                locals[*slot as usize].set(Value::Number(as_number(&value) + 1.0));
+                let incremented = locals[*slot as usize].number() + 1.0;
+                locals[*slot as usize].set_number(incremented);
                 pc += 1;
             }
             Instr::Sub => {

@@ -12,8 +12,28 @@ use super::property_parsers::{
 use super::types::{
     AlignItems, BorderStyle, Clear, Color, Display, FlexDirection, Float, FontFamily,
     GenericFontFamily, GridTrackSize, GridTracks, JustifyContent, LinearGradient,
-    ListStylePosition, ListStyleType, Overflow, Position,
+    ListStylePosition, ListStyleType, Overflow, Position, TransitionProperty,
 };
+
+/// `None` for anything but `s`/`ms` - see [`TransitionProperty`]'s own doc
+/// for the rest of this crate's `transition` scope cut.
+fn parse_transition_duration_secs(token: &Token) -> Option<f64> {
+    match token {
+        Token::Dimension(n, unit) if unit.eq_ignore_ascii_case("s") => Some(*n),
+        Token::Dimension(n, unit) if unit.eq_ignore_ascii_case("ms") => Some(*n / 1000.0),
+        _ => None,
+    }
+}
+
+fn parse_transition_property(v: &str) -> Option<TransitionProperty> {
+    match v {
+        "none" => Some(TransitionProperty::None),
+        "opacity" => Some(TransitionProperty::Opacity),
+        "transform" => Some(TransitionProperty::Transform),
+        "all" => Some(TransitionProperty::All),
+        _ => None,
+    }
+}
 
 /// `None` for anything but the 5 real CSS generic keywords this crate
 /// models - see [`GenericFontFamily`]'s own doc.
@@ -495,6 +515,49 @@ pub(super) fn apply_declaration(style: &mut ComputedStyle, decl: &Declaration) {
         "font-family" => {
             if let Some(f) = parse_font_family(&decl.value) {
                 style.font_family = Some(f);
+            }
+        }
+        "transition-property" => {
+            if let Some(Token::Ident(v)) = decl.value.first() {
+                if let Some(p) = parse_transition_property(v) {
+                    style.transition_property = p;
+                }
+            }
+        }
+        "transition-duration" => {
+            if let Some(token) = decl.value.first() {
+                if let Some(secs) = parse_transition_duration_secs(token) {
+                    style.transition_duration = secs.max(0.0);
+                }
+            }
+        }
+        "transition" => {
+            // Real `transition` shorthand, scoped to its own two real
+            // longhands: `<property> <duration>`, in either order (real
+            // CSS allows either) - `transition-delay`/`transition-timing-
+            // function` aren't modeled (see `TransitionProperty`'s own
+            // doc), so a duration-only shorthand (`transition: 0.3s`, the
+            // real spec default omitting the property, meaning `all`)
+            // is read the same as `transition: all 0.3s`.
+            let mut property = None;
+            let mut duration = None;
+            for token in &decl.value {
+                match token {
+                    Token::Ident(v) => {
+                        if let Some(p) = parse_transition_property(v) {
+                            property = Some(p);
+                        }
+                    }
+                    _ => {
+                        if let Some(secs) = parse_transition_duration_secs(token) {
+                            duration = Some(secs.max(0.0));
+                        }
+                    }
+                }
+            }
+            if let Some(secs) = duration {
+                style.transition_duration = secs;
+                style.transition_property = property.unwrap_or(TransitionProperty::All);
             }
         }
         "column-count" => {

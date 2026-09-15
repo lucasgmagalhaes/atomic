@@ -148,6 +148,8 @@ impl<'rt> Page<'rt> {
             layout_cache: std::cell::RefCell::new(None),
             paint_cache: std::cell::RefCell::new(None),
             layers: std::cell::RefCell::new(std::collections::HashMap::new()),
+            transitions: std::cell::RefCell::new(layout_engine::TransitionStates::new()),
+            transitions_active: std::cell::Cell::new(false),
         }
     }
 }

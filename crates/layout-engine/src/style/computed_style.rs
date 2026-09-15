@@ -5,7 +5,7 @@
 use super::types::{
     AlignItems, BorderStyle, BoxShadow, Clear, Color, Display, EdgeSizes, FlexDirection, Float,
     FontFamily, GridTracks, JustifyContent, Length, LinearGradient, ListStylePosition,
-    ListStyleType, Overflow, Position,
+    ListStyleType, Overflow, Position, TransitionProperty,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -159,6 +159,18 @@ pub struct ComputedStyle {
     /// for the exact layout scope (count-based chunking, not real height
     /// balancing).
     pub column_count: Option<u32>,
+    /// Real `transition-property` — see [`TransitionProperty`]'s own doc
+    /// for the two-property scope cut. `None` (the initial value, matching
+    /// real `transition-property: none`) means this box never animates
+    /// regardless of `transition_duration`.
+    pub transition_property: TransitionProperty,
+    /// Real `transition-duration` in seconds — `0.0` (the initial value)
+    /// disables animation even if `transition_property` names a property,
+    /// matching real CSS (a zero duration transition is a no-op). Only
+    /// `s`/`ms` units are parsed (`crate::style::apply_declaration`); no
+    /// `transition-delay`, and `transition-timing-function` is always
+    /// linear - see `crate::transition`'s own module doc.
+    pub transition_duration: f64,
 }
 
 impl ComputedStyle {
@@ -212,6 +224,8 @@ impl ComputedStyle {
             list_style_type: None,
             list_style_position: ListStylePosition::Outside,
             column_count: None,
+            transition_property: TransitionProperty::None,
+            transition_duration: 0.0,
         }
     }
 }

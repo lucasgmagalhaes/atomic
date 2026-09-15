@@ -27,6 +27,8 @@
   across the supported statement pipeline.
 - [Milestone 29](ATOMIC_JS_MILESTONE_29.md): braced `while` loops across the
   parser, compiler, VM, and Tier-1 numeric subset.
+- [Milestone 30](ATOMIC_JS_MILESTONE_30.md): active modular execution-core
+  refactor with a 350-line implementation-module limit.
 
 ## Historical record
 

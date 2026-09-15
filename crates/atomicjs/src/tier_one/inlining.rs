@@ -46,6 +46,7 @@ impl TierOneFunction {
                         | NumericOp::Mul
                         | NumericOp::Div
                         | NumericOp::Mod
+                        | NumericOp::Lt
                 ) =>
             {
                 Some(Leaf::UnaryRight {
@@ -61,6 +62,7 @@ impl TierOneFunction {
                         | NumericOp::Mul
                         | NumericOp::Div
                         | NumericOp::Mod
+                        | NumericOp::Lt
                 ) =>
             {
                 Some(Leaf::UnaryLeft {
@@ -81,6 +83,7 @@ impl TierOneFunction {
                             | NumericOp::Mul
                             | NumericOp::Div
                             | NumericOp::Mod
+                            | NumericOp::Lt
                     ) =>
             {
                 Some(Leaf::Binary { op: *op })

@@ -390,6 +390,17 @@ fn tier_one_numeric_subset_matches_tier_zero_and_quickjs() {
                 calculate(9, 5);
             "#,
         ),
+        (
+            "relational_helper_conditional_graph",
+            r#"
+                function isBelow(left, right) { return left < right; }
+                function choose(left, right) {
+                    if (isBelow(left, right)) { return 10; }
+                    return 20;
+                }
+                choose(3, 7);
+            "#,
+        ),
     ];
 
     for (name, source) in cases {

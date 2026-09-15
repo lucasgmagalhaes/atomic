@@ -21,6 +21,8 @@
   inlining for the same one-argument Tier-1 boundary.
 - [Milestone 26](ATOMIC_JS_MILESTONE_26.md): two-argument numeric helper
   inlining at the same Tier-1 boundary.
+- [Milestone 27](ATOMIC_JS_MILESTONE_27.md): relational helper inlining for
+  Tier-1 conditionals.
 
 ## Historical record
 

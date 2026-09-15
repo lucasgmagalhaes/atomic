@@ -25,6 +25,15 @@ function invoke(left, right) { return remainder(left, right); }
 invoke(17, 5);
 "#;
 
+const RELATIONAL_HELPER_SOURCE: &str = r#"
+function isBelow(left, right) { return left < right; }
+function choose(left, right) {
+    if (isBelow(left, right)) { return 1; }
+    return 0;
+}
+choose(3, 7);
+"#;
+
 fn eager_policy() -> TieringPolicy {
     TieringPolicy {
         enabled: true,
@@ -124,6 +133,17 @@ fn tiered_program_inlines_a_binary_numeric_helper() {
     assert_number(program.run().unwrap().value, 2.0);
     let accelerated = program.run().unwrap();
     assert_number(accelerated.value, 2.0);
+    assert_eq!(accelerated.tier_one_calls, 1);
+    assert_eq!(accelerated.tier_one_fallbacks, 0);
+}
+
+#[test]
+fn tiered_program_inlines_a_relational_helper_for_a_conditional() {
+    let mut program = TieredProgram::compile(RELATIONAL_HELPER_SOURCE, eager_policy()).unwrap();
+
+    assert_number(program.run().unwrap().value, 1.0);
+    let accelerated = program.run().unwrap();
+    assert_number(accelerated.value, 1.0);
     assert_eq!(accelerated.tier_one_calls, 1);
     assert_eq!(accelerated.tier_one_fallbacks, 0);
 }

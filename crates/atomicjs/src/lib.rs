@@ -11,6 +11,7 @@ pub mod error;
 pub mod lexer;
 pub mod parser;
 pub mod tiering;
+pub mod tier_one;
 pub mod value;
 pub mod vm;
 

@@ -1,7 +1,6 @@
 //! @spec atomicjs-profiling#tier-one-policy
-//! Pause-aware, memory-bounded tiering policy. This module intentionally makes
-//! decisions only: Tier 0 remains the interpreter until an executable Tier 1
-//! is installed by a later isolated milestone.
+//! Pause-aware, memory-bounded tiering policy for the isolated Tier 1
+//! executor. Unsupported functions remain in Tier 0.
 
 use crate::value::FunctionFeedback;
 
@@ -37,8 +36,7 @@ pub enum TierDecision {
 }
 
 /// Persistent per-program tiering state. It accumulates opt-in feedback
-/// across isolated executions; execution remains in Tier 0 until a later
-/// executable Tier 1 consumes `Eligible` decisions.
+/// across isolated executions and admits eligible functions to Tier 1.
 pub struct TieringController {
     policy: TieringPolicy,
     host: HostState,

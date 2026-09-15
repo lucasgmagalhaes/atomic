@@ -7,19 +7,24 @@
 fn main() {
     let name = std::env::args().nth(1).unwrap_or_else(|| "sum".to_string());
     let source = script_for(&name);
+    let repetitions = std::env::args()
+        .nth(2)
+        .map(|value| value.parse().expect("repetitions must be an integer"))
+        .unwrap_or(1);
 
     let t0 = std::time::Instant::now();
-    let result = atomicjs::run_source(source);
+    let mut result = Ok(atomicjs::Value::Undefined);
+    for _ in 0..repetitions {
+        result = atomicjs::run_source(source);
+    }
     let elapsed = t0.elapsed();
 
     let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
     unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut usage) };
 
     println!(
-        "elapsed_us={} maxrss_bytes={} result={:?}",
-        elapsed.as_micros(),
-        usage.ru_maxrss,
-        result
+        "elapsed_us={} maxrss_bytes={} repetitions={} result={:?}",
+        elapsed.as_micros(), usage.ru_maxrss, repetitions, result
     );
 }
 

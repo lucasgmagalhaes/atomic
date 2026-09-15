@@ -53,6 +53,7 @@ fn main() {
 
 fn script_for(name: &str) -> &'static str {
     match name {
+        "sum" => SUM,
         "hot_loop" => HOT_LOOP,
         "closures" => CLOSURES,
         other => panic!("unknown script name: {other}"),
@@ -61,3 +62,4 @@ fn script_for(name: &str) -> &'static str {
 
 const HOT_LOOP: &str = include_str!("../benchmarks/scripts/hot_loop.js");
 const CLOSURES: &str = include_str!("../benchmarks/scripts/closures.js");
+const SUM: &str = include_str!("../benchmarks/scripts/sum.js");

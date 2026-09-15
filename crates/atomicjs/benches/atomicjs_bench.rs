@@ -34,10 +34,10 @@ fn bench_reference_workloads(criterion: &mut Criterion) {
         });
     }
 
-    // Tier 1 is admission-only in this milestone, so measure its real
-    // feedback overhead separately instead of presenting it as a speedup.
-    let mut tiered = TieredProgram::compile(
-        HOT_LOOP,
+    // `sum` is in the Tier 1 numeric subset. Warm it once to admit/compile
+    // the function, then measure steady-state specialized execution.
+    let mut tiered_sum = TieredProgram::compile(
+        SUM,
         TieringPolicy {
             enabled: true,
             call_threshold: 1,
@@ -46,8 +46,9 @@ fn bench_reference_workloads(criterion: &mut Criterion) {
         },
     )
     .unwrap();
-    criterion.bench_function("hot_loop/tiered_feedback", |bench| {
-        bench.iter(|| black_box(tiered.run().unwrap()))
+    tiered_sum.run().unwrap();
+    criterion.bench_function("sum/tier_one_compiled", |bench| {
+        bench.iter(|| black_box(tiered_sum.run().unwrap()))
     });
 }
 

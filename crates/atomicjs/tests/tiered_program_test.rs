@@ -33,6 +33,7 @@ fn tiered_program_keeps_interpreter_result_while_admitting_hot_functions() {
     let second = program.run().unwrap();
     assert_number(second.value, 42.0);
     assert_eq!(second.decisions, first.decisions);
+    assert_eq!(second.tier_one_calls, 1);
 }
 
 #[test]
@@ -51,4 +52,5 @@ fn paused_tiered_program_uses_tier_zero_and_forgets_admission() {
         .decisions
         .iter()
         .all(|decision| *decision == TierDecision::Interpret));
+    assert_eq!(paused.tier_one_calls, 0);
 }

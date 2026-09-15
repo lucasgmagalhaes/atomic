@@ -7,8 +7,10 @@ use crate::bytecode::{BytecodeFunction, Const, Instr, NumericOp};
 use crate::value::Value;
 
 mod inlining;
+mod instruction;
 mod scratch;
 mod value;
+use instruction::TierOneInstr;
 use scratch::TierScratch;
 use value::{numeric, TierValue};
 
@@ -17,57 +19,6 @@ pub struct TierOneFunction {
     param_count: usize,
     local_count: usize,
     code: Vec<TierOneInstr>,
-}
-
-#[derive(Debug, Clone)]
-enum TierOneInstr {
-    Const(f64),
-    Undefined,
-    Load(u32),
-    Store(u32),
-    AddLocalLocal {
-        target: u32,
-        value: u32,
-    },
-    AddLocalConst {
-        target: u32,
-        value: f64,
-    },
-    BinaryLocalLocal {
-        op: NumericOp,
-        left: u32,
-        right: u32,
-    },
-    BinaryLocalConst {
-        op: NumericOp,
-        local: u32,
-        value: f64,
-    },
-    IncrementLocal(u32),
-    Numeric(NumericOp),
-    CallDirect {
-        function_index: usize,
-        argc: usize,
-    },
-    /// A one-argument numeric leaf folded into its caller during Tier-1
-    /// candidate preparation. It has no call frame or argument buffer.
-    InlineUnaryConst {
-        op: NumericOp,
-        value: f64,
-    },
-    /// A one-argument numeric leaf whose constant is the left operand.
-    InlineConstUnary {
-        value: f64,
-        op: NumericOp,
-    },
-    /// A two-argument numeric leaf folded into its caller during preparation.
-    InlineBinaryArgs {
-        op: NumericOp,
-    },
-    Jump(usize),
-    JumpIfFalse(usize),
-    Return,
-    Pop,
 }
 
 pub struct TierOneResult {

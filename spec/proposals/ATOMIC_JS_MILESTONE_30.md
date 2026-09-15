@@ -17,6 +17,11 @@ semantics.
 - Preserve bytecode layout, closure capture behavior, direct-call admission,
   feedback counters, and Tier-1 fallback behavior.
 
+## modular-execution-core
+
+The VM and compiler modules belong to this milestone while their
+responsibilities are being separated.
+
 ## Gates
 
 - `cargo test --manifest-path crates/atomicjs/Cargo.toml`

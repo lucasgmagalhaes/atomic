@@ -1,4 +1,4 @@
-//! @spec atomicjs-profiling#tier-one-policy
+//! @spec atomicjs-profiling#modular-execution-core
 //! Interpreter loop, call frames, and execution — see
 //! spec/proposals/ATOMIC_JS_SPIKE.md §5.4. Each JS call is a real, recursive
 //! Rust function call (`execute_function` calling itself) — Rust's own call

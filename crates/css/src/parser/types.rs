@@ -180,8 +180,26 @@ pub struct ImportRule {
     pub media: Option<MediaQuery>,
 }
 
+/// One real `@font-face` — same division of labor as [`ImportRule`]: this
+/// crate only recognizes and extracts it, a caller with network access
+/// (`profile-worker`'s `page_source::load_font_faces`) fetches `url` and
+/// registers the bytes with the text-shaping layer. Scoped to the one
+/// real-world-common shape: a `font-family` name plus a single `src:
+/// url(...)` - no comma-separated `src` fallback list (`url(...)
+/// format(...), url(...) format(...)`, only the first `url(...)` is kept),
+/// no `font-weight`/`font-style`/`unicode-range` (this crate's
+/// `FontFamily` has no concept of font weight/style variants - see that
+/// type's own doc), matching the same "one value, not a list" scope cut
+/// `BoxShadow`/`LinearGradient` already take elsewhere in this workspace.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FontFaceRule {
+    pub family: String,
+    pub url: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Stylesheet {
     pub rules: Vec<Rule>,
     pub imports: Vec<ImportRule>,
+    pub font_faces: Vec<FontFaceRule>,
 }

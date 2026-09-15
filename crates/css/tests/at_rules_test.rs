@@ -148,7 +148,6 @@ fn multiple_imports_and_a_following_rule_all_parse() {
 fn unknown_at_rules_are_skipped_without_corrupting_the_rest_of_the_sheet() {
     let sheet = parse_stylesheet(
         r#"
-        @font-face { font-family: "Foo"; src: url("foo.woff"); }
         @keyframes spin { from { color: red; } to { color: blue; } }
         @charset "utf-8";
         div { color: green; }
@@ -156,4 +155,40 @@ fn unknown_at_rules_are_skipped_without_corrupting_the_rest_of_the_sheet() {
     );
     assert_eq!(sheet.rules.len(), 1);
     assert_eq!(sheet.rules[0].declarations[0].name, "color");
+}
+
+#[test]
+fn font_face_is_parsed_into_a_family_and_url() {
+    let sheet = parse_stylesheet(r#"@font-face { font-family: "Foo"; src: url("foo.woff"); }"#);
+    assert_eq!(sheet.font_faces.len(), 1);
+    assert_eq!(sheet.font_faces[0].family, "Foo");
+    assert_eq!(sheet.font_faces[0].url, "foo.woff");
+}
+
+#[test]
+fn font_face_does_not_corrupt_the_rest_of_the_sheet() {
+    let sheet = parse_stylesheet(
+        r#"
+        @font-face { font-family: "Foo"; src: url("foo.woff"); }
+        div { color: green; }
+        "#,
+    );
+    assert_eq!(sheet.font_faces.len(), 1);
+    assert_eq!(sheet.rules.len(), 1);
+    assert_eq!(sheet.rules[0].declarations[0].name, "color");
+}
+
+#[test]
+fn font_face_missing_a_real_src_url_is_dropped() {
+    let sheet = parse_stylesheet(r#"@font-face { font-family: "Foo"; }"#);
+    assert!(sheet.font_faces.is_empty());
+}
+
+#[test]
+fn font_face_src_takes_only_the_first_url_of_a_fallback_list() {
+    let sheet = parse_stylesheet(
+        r#"@font-face { font-family: "Foo"; src: url("foo.woff2"), url("foo.woff"); }"#,
+    );
+    assert_eq!(sheet.font_faces.len(), 1);
+    assert_eq!(sheet.font_faces[0].url, "foo.woff2");
 }

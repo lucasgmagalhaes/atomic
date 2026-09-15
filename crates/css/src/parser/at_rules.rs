@@ -2,7 +2,7 @@
 
 use crate::lexer::Token;
 
-use super::types::{ImportRule, MediaFeature, MediaQuery, Rule};
+use super::types::{FontFaceRule, ImportRule, MediaFeature, MediaQuery, Rule};
 use super::Parser;
 
 impl<'a> Parser<'a> {
@@ -54,6 +54,54 @@ impl<'a> Parser<'a> {
             self.tokens.next();
         }
         Some(ImportRule { url, media })
+    }
+
+    /// Parses `@font-face`'s `{ ... }` body, already past the `AtKeyword`,
+    /// by reusing [`Parser::parse_declarations`] (the same plain
+    /// `name: value;` grammar as an ordinary rule body) then picking out
+    /// the two real declarations this crate models: `font-family` (its
+    /// first `String`/`Ident` token) and `src`'s first `url(...)` token
+    /// sequence (`Ident("url")`, `LParen`, `String`, `RParen` — the only
+    /// shape `parse_declaration` ever produces for a `url(...)` value,
+    /// since this lexer has no dedicated `url(...)` token - see the
+    /// lexer's own note). Missing either declaration (or a body that never
+    /// opens with `{`) yields `None` - same "recognized but incomplete,
+    /// don't corrupt the rest of the sheet" stance `parse_import` already
+    /// takes for a malformed `@import`.
+    pub(super) fn parse_font_face(&mut self) -> Option<FontFaceRule> {
+        self.skip_whitespace();
+        if self.tokens.next() != Some(Token::LBrace) {
+            return None;
+        }
+        let declarations = self.parse_declarations();
+
+        let mut family = None;
+        let mut url = None;
+        for decl in &declarations {
+            if decl.name.eq_ignore_ascii_case("font-family") {
+                family = match decl.value.first() {
+                    Some(Token::String(s)) => Some(s.clone()),
+                    Some(Token::Ident(s)) => Some(s.clone()),
+                    _ => None,
+                };
+            } else if decl.name.eq_ignore_ascii_case("src") {
+                for window in decl.value.windows(4) {
+                    if let [Token::Ident(name), Token::LParen, Token::String(s), Token::RParen] =
+                        window
+                    {
+                        if name.eq_ignore_ascii_case("url") {
+                            url = Some(s.clone());
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        Some(FontFaceRule {
+            family: family?,
+            url: url?,
+        })
     }
 
     /// Parses `@media`'s condition + `{ ... }` block, already past the

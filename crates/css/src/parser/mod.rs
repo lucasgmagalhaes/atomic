@@ -15,16 +15,19 @@
 //! CSS values (lengths, colors, ...) — that's cascade/layout's job, once
 //! they exist to consume it.
 //!
-//! Also handles two `@`-rules for real: `@media` ([`MediaQuery`], attached
+//! Also handles three `@`-rules for real: `@media` ([`MediaQuery`], attached
 //! to every [`Rule`] parsed inside its block — [`crate::matching_declarations`]
-//! filters on it) and `@import` (collected into [`Stylesheet::imports`] as
+//! filters on it), `@import` (collected into [`Stylesheet::imports`] as
 //! [`ImportRule`]s for a caller with network access to resolve/fetch/merge,
 //! same division of labor this crate already has with `<link>` extraction
-//! living in `profile-worker`, not here). Any other `@`-rule (`@font-face`,
-//! `@keyframes`, `@charset`, ...) is recognized and skipped without
-//! corrupting the rest of the parse — its prelude and body (a `{...}`
-//! block if it has one, tracking nested-brace depth) are just consumed and
-//! discarded, not interpreted.
+//! living in `profile-worker`, not here), and `@font-face` (collected into
+//! [`Stylesheet::font_faces`] as [`FontFaceRule`]s — same division of
+//! labor as `@import`; see that type's own doc for the exact
+//! `font-family`+`src: url(...)` scope). Any other `@`-rule (`@keyframes`,
+//! `@charset`, ...) is recognized and skipped without corrupting the rest
+//! of the parse — its prelude and body (a `{...}` block if it has one,
+//! tracking nested-brace depth) are just consumed and discarded, not
+//! interpreted.
 //!
 //! `@media`'s own scope: features are `px`-only `min-width`/`max-width`/
 //! `width` (matches this workspace's own px-only length model), ANDed
@@ -52,8 +55,8 @@ mod types;
 
 pub use types::{
     AttributeMatch, AttributeSelector, Combinator, ComplexSelector, CompoundSelector, Declaration,
-    ImportRule, MediaFeature, MediaQuery, NthFormula, PseudoClass, Rule, SelectorList,
-    SimpleSelector, Stylesheet,
+    FontFaceRule, ImportRule, MediaFeature, MediaQuery, NthFormula, PseudoClass, Rule,
+    SelectorList, SimpleSelector, Stylesheet,
 };
 
 struct Parser<'a> {
@@ -88,6 +91,7 @@ impl<'a> Parser<'a> {
     fn parse_stylesheet(&mut self) -> Stylesheet {
         let mut rules = Vec::new();
         let mut imports = Vec::new();
+        let mut font_faces = Vec::new();
         self.skip_whitespace();
         while let Some(tok) = self.tokens.peek().cloned() {
             match tok {
@@ -100,6 +104,12 @@ impl<'a> Parser<'a> {
                 Token::AtKeyword(name) if name.eq_ignore_ascii_case("media") => {
                     self.tokens.next();
                     self.parse_media_block(&mut rules);
+                }
+                Token::AtKeyword(name) if name.eq_ignore_ascii_case("font-face") => {
+                    self.tokens.next();
+                    if let Some(font_face) = self.parse_font_face() {
+                        font_faces.push(font_face);
+                    }
                 }
                 Token::AtKeyword(_) => {
                     self.tokens.next();
@@ -115,7 +125,11 @@ impl<'a> Parser<'a> {
             }
             self.skip_whitespace();
         }
-        Stylesheet { rules, imports }
+        Stylesheet {
+            rules,
+            imports,
+            font_faces,
+        }
     }
 
     /// Real CSS error recovery for a rule `parse_rule` failed partway

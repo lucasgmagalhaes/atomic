@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/lsmagalhaes/.local/bin/graphify hook-check"
+            "command": "PYTHONPATH=/Users/lsmagalhaes/.agents/skills/graphify python3 -m graphify hook-check"
           }
         ]
       }

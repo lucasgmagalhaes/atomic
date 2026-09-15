@@ -1,0 +1,73 @@
+//! @spec atomicjs-profiling#tier-one-policy
+//! Pause-aware, memory-bounded tiering policy. This module intentionally makes
+//! decisions only: Tier 0 remains the interpreter until an executable Tier 1
+//! is installed by a later isolated milestone.
+
+use crate::value::FunctionFeedback;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostState {
+    Running,
+    Paused,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct TieringPolicy {
+    pub call_threshold: u32,
+    pub loop_threshold: u32,
+    pub code_budget_bytes: usize,
+    pub enabled: bool,
+}
+
+impl Default for TieringPolicy {
+    fn default() -> Self {
+        Self {
+            call_threshold: 1_000,
+            loop_threshold: 10_000,
+            code_budget_bytes: 64 * 1024,
+            enabled: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TierDecision {
+    Interpret,
+    Eligible,
+}
+
+impl TieringPolicy {
+    pub fn decide(
+        self,
+        host: HostState,
+        feedback: &FunctionFeedback,
+        installed_bytes: usize,
+        estimated_code_bytes: usize,
+    ) -> TierDecision {
+        if !self.enabled
+            || host == HostState::Paused
+            || installed_bytes.saturating_add(estimated_code_bytes) > self.code_budget_bytes
+        {
+            return TierDecision::Interpret;
+        }
+        if feedback.call_count >= self.call_threshold || feedback.loop_count >= self.loop_threshold {
+            TierDecision::Eligible
+        } else {
+            TierDecision::Interpret
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_running_hot_functions_within_budget_are_eligible() {
+        let policy = TieringPolicy { enabled: true, call_threshold: 3, loop_threshold: 9, code_budget_bytes: 10 };
+        let hot = FunctionFeedback { call_count: 3, loop_count: 0 };
+        assert_eq!(policy.decide(HostState::Running, &hot, 4, 6), TierDecision::Eligible);
+        assert_eq!(policy.decide(HostState::Paused, &hot, 0, 1), TierDecision::Interpret);
+        assert_eq!(policy.decide(HostState::Running, &hot, 5, 6), TierDecision::Interpret);
+    }
+}

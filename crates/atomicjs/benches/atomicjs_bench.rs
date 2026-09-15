@@ -4,7 +4,9 @@
 //! public one-shot API honest, while `run_compiled` measures the host-ready
 //! compile-once/run-many boundary without leaking execution state between runs.
 
-use atomicjs::{run_source, CompiledProgram};
+// @spec atomicjs-profiling#tier-one-policy
+use atomicjs::tiering::TieringPolicy;
+use atomicjs::{run_source, CompiledProgram, TieredProgram};
 use criterion::{criterion_group, criterion_main, Criterion};
 use std::hint::black_box;
 
@@ -31,6 +33,22 @@ fn bench_reference_workloads(criterion: &mut Criterion) {
             bench.iter(|| black_box(program.run().unwrap()))
         });
     }
+
+    // Tier 1 is admission-only in this milestone, so measure its real
+    // feedback overhead separately instead of presenting it as a speedup.
+    let mut tiered = TieredProgram::compile(
+        HOT_LOOP,
+        TieringPolicy {
+            enabled: true,
+            call_threshold: 1,
+            loop_threshold: 1,
+            ..TieringPolicy::default()
+        },
+    )
+    .unwrap();
+    criterion.bench_function("hot_loop/tiered_feedback", |bench| {
+        bench.iter(|| black_box(tiered.run().unwrap()))
+    });
 }
 
 criterion_group!(benches, bench_reference_workloads);

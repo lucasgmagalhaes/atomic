@@ -1,3 +1,4 @@
+//! @spec atomicjs-profiling#tier-one-policy
 //! Interpreter loop, call frames, and execution — see
 //! spec/proposals/ATOMIC_JS_SPIKE.md §5.4. Each JS call is a real, recursive
 //! Rust function call (`execute_function` calling itself) — Rust's own call
@@ -11,6 +12,7 @@ use std::rc::Rc;
 
 use crate::bytecode::{BytecodeFunction, BytecodeModule, Const, Instr, NativeFn, NumericOp};
 use crate::error::AtomicJsError;
+use crate::tiering::{HostState, TierDecision, TieringController, TieringPolicy};
 use crate::value::{FunctionData, FunctionFeedback, JsObject, Value};
 
 /// A local slot is boxed (`Captured`) iff the compiler recorded it in its
@@ -62,7 +64,6 @@ impl LocalSlot {
             LocalSlot::Plain(value) => *value = Value::Number(number),
         }
     }
-
 }
 
 /// Reusable `Vec<LocalSlot>`/`Vec<Value>` buffers shared across the whole
@@ -238,6 +239,74 @@ impl CompiledProgram {
         )?;
         Ok((value, feedback))
     }
+}
+
+/// Result of one [`TieredProgram`] execution. `decisions` is indexed exactly
+/// like the compiled module's functions; `Eligible` means the function is hot
+/// and has been admitted under the configured Tier 1 code budget.
+#[derive(Debug)]
+pub struct TieredRun {
+    pub value: Value,
+    pub decisions: Vec<TierDecision>,
+}
+
+/// Compile-once, run-many boundary with persistent tiering feedback.
+///
+/// This first isolated tier intentionally still executes every call through
+/// the interpreter. It makes promotion, pause invalidation, and code-budget
+/// admission observable and testable while retaining the interpreter as the
+/// semantic fallback. A later executable backend can consume `Eligible`
+/// functions without changing this public contract.
+pub struct TieredProgram {
+    program: CompiledProgram,
+    controller: TieringController,
+    estimated_code_bytes: Vec<usize>,
+}
+
+impl TieredProgram {
+    pub fn compile(source: &str, policy: TieringPolicy) -> Result<Self, AtomicJsError> {
+        let program = CompiledProgram::compile(source)?;
+        let estimated_code_bytes = program
+            .module
+            .functions
+            .iter()
+            .map(estimate_tier_one_bytes)
+            .collect();
+        let controller = TieringController::new(policy, program.module.functions.len());
+        Ok(Self {
+            program,
+            controller,
+            estimated_code_bytes,
+        })
+    }
+
+    pub fn set_host_state(&mut self, host: HostState) {
+        self.controller.set_host_state(host);
+    }
+
+    pub fn run(&mut self) -> Result<TieredRun, AtomicJsError> {
+        let (value, feedback) = self.program.run_with_feedback()?;
+        let decisions = self
+            .controller
+            .observe(&feedback, &self.estimated_code_bytes);
+        Ok(TieredRun { value, decisions })
+    }
+}
+
+/// Conservative, allocation-free admission estimate. It bounds each
+/// instruction and constant at the Rust representation size, avoiding a
+/// pretend precise code-size claim before there is generated native code.
+fn estimate_tier_one_bytes(function: &BytecodeFunction) -> usize {
+    function
+        .code
+        .len()
+        .saturating_mul(std::mem::size_of::<Instr>())
+        .saturating_add(
+            function
+                .constants
+                .len()
+                .saturating_mul(std::mem::size_of::<Const>()),
+        )
 }
 
 /// Same as [`run_source`], but also returns the per-function

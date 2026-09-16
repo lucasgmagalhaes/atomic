@@ -94,6 +94,7 @@ impl Canvas2D {
     /// gradient object back out).
     pub fn set_fill_gradient(&mut self, gradient: FillGradient) {
         self.fill_gradient = Some(gradient);
+        self.fill_pattern = None;
     }
 
     /// `Some` when the current fill paint is a gradient, not a plain

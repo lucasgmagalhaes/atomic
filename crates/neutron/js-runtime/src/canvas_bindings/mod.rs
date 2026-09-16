@@ -84,6 +84,7 @@ mod gradient;
 mod helpers;
 mod image_data;
 mod path;
+mod pattern;
 mod state;
 mod text;
 
@@ -163,6 +164,7 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
         gradient::create_conic_gradient,
         3,
     );
+    define_method(ctx, proto, "createPattern", pattern::create_pattern, 2);
     define_method(ctx, proto, "drawImage", image_data::draw_image, 3);
     define_method(ctx, proto, "beginPath", path::begin_path, 0);
     define_method(ctx, proto, "moveTo", path::move_to, 2);

@@ -9,7 +9,9 @@
 //! `lineWidth`/`strokeRect`, `save`/`restore`, `translate`, a `fillStyle`
 //! gradient via `createLinearGradient`/`createRadialGradient`/
 //! `createConicGradient` (see [`LinearGradient`]/[`RadialGradient`]/
-//! [`ConicGradient`]'s own docs for their exact scope cuts), and a
+//! [`ConicGradient`]'s own docs for their exact scope cuts), a `fillStyle`
+//! tiled-image pattern via `createPattern` (see [`Pattern`]'s own doc for
+//! its `'repeat'`-only scope cut), and a
 //! convex-only filled path
 //! (`beginPath`/`moveTo`/`lineTo`/`arc`/`closePath`/`fill` - see
 //! [`Canvas2D::fill`]'s own doc for why only convex polygons render
@@ -25,8 +27,8 @@
 //! doc — composed CTM, applied to every coordinate before painting, though
 //! text glyph bitmaps themselves are only ever translated/scaled by their
 //! anchor point, never actually rotated). No stroking a
-//! path (only `strokeRect`'s rectangle-outline shortcut), no drawImage
-//! sources beyond another `<canvas>`, no patterns, no
+//! path (only `strokeRect`'s rectangle-outline shortcut), no drawImage/
+//! createPattern sources beyond another `<canvas>`, no
 //! compositing modes beyond `fillRect`'s source-over and
 //! `clearRect`'s hard replace-with-transparent. `to_data_url` is real PNG
 //! encoding (`image_decode::encode_png`) plus base64, not a stub - see
@@ -48,6 +50,7 @@ use layout_engine::{Color, FontFamily, GenericFontFamily};
 mod gradients;
 mod helpers;
 mod path;
+mod patterns;
 mod pipeline;
 mod pixels;
 mod shapes;
@@ -55,6 +58,7 @@ mod state;
 mod text;
 
 pub use gradients::{ConicGradient, FillGradient, LinearGradient, RadialGradient};
+pub use patterns::Pattern;
 
 use state::CanvasState;
 
@@ -93,6 +97,11 @@ pub struct Canvas2D {
     /// back to `None`, matching real spec's "assigning `fillStyle` replaces
     /// whatever was there before, solid or gradient".
     fill_gradient: Option<FillGradient>,
+    /// `ctx.fillStyle = pattern`'s backing, when set - same override
+    /// relationship to `fill_style`/`fill_gradient` as those two have to
+    /// each other (mutually exclusive; whichever was set most recently
+    /// wins). See [`Pattern`]'s own doc for its scope cuts.
+    fill_pattern: Option<Pattern>,
     /// `ctx.translate`/`scale`/`rotate`/`setTransform`'s composed CTM
     /// (current transformation matrix), `[a, b, c, d, e, f]` matching real
     /// spec's `DOMMatrix` layout (`x' = a*x + c*y + e`, `y' = b*x + d*y +
@@ -158,6 +167,7 @@ impl Canvas2D {
             font_size: text::DEFAULT_FONT_SIZE,
             font_family: FontFamily::generic(GenericFontFamily::SansSerif),
             fill_gradient: None,
+            fill_pattern: None,
             transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
             state_stack: Vec::new(),
             path_points: Vec::new(),

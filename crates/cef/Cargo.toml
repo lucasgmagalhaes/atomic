@@ -11,3 +11,5 @@ edition = "2021"
 # made before `execute_process`/`initialize`, which upstream's own
 # examples call at the exact same point without issue once sandbox is off.
 cef = { version = "152", default-features = false, features = ["build-util", "resources"] }
+serde_json = "1"
+ipc = { path = "../ipc" }

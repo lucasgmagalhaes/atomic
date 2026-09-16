@@ -1,6 +1,8 @@
-//! Convex-only filled paths - `beginPath`/`moveTo`/`lineTo`/`closePath`/
-//! `fill`. See [`Canvas2D::fill`]'s own doc for exactly why only convex
-//! polygons render correctly.
+//! Convex-only filled paths - `beginPath`/`moveTo`/`lineTo`/`arc`/
+//! `closePath`/`fill`. See [`Canvas2D::fill`]'s own doc for exactly why
+//! only convex polygons render correctly, and [`Canvas2D::arc`]'s own
+//! doc for why arcs are a straight-line polyline approximation, not a
+//! true curve.
 use super::helpers::{color_to_f32, point_to_ndc};
 use super::pipeline::Vertex;
 use super::Canvas2D;
@@ -21,6 +23,50 @@ impl Canvas2D {
     /// `ctx.lineTo(x, y)`.
     pub fn line_to(&mut self, x: f32, y: f32) {
         self.path_points.push((x, y));
+    }
+
+    /// `ctx.arc(x, y, radius, startAngle, endAngle, anticlockwise)` —
+    /// appends a circular arc to the current path as a straight-line
+    /// polyline approximation (this crate's [`Self::fill`] only knows how
+    /// to fan-triangulate straight `path_points`, no real curve
+    /// primitive), same "narrower than spec, clearly documented"
+    /// convention as [`Self::fill`]'s own convex-only cut. Segment count
+    /// scales with the angle span (up to 64 for a full circle, fewer for
+    /// a smaller arc) - visually smooth at typical UI radii, not a true
+    /// curve. If the path already has points, the first arc point simply
+    /// gets appended after them - `path_points` has no `moveTo`/`lineTo`
+    /// distinction (see that field's own doc), so the "implicit straight
+    /// line from the current point to the arc's start" real spec draws
+    /// falls out for free from the existing fan-triangulation, not
+    /// special-cased here. `anticlockwise` flips the sweep direction,
+    /// matching real spec.
+    pub fn arc(
+        &mut self,
+        x: f32,
+        y: f32,
+        radius: f32,
+        start_angle: f32,
+        end_angle: f32,
+        anticlockwise: bool,
+    ) {
+        const TWO_PI: f32 = std::f32::consts::PI * 2.0;
+        let mut span = end_angle - start_angle;
+        if anticlockwise {
+            while span > 0.0 {
+                span -= TWO_PI;
+            }
+        } else {
+            while span < 0.0 {
+                span += TWO_PI;
+            }
+        }
+        let segments = ((span.abs() / TWO_PI) * 64.0).ceil().max(2.0) as usize;
+        for i in 0..=segments {
+            let t = i as f32 / segments as f32;
+            let angle = start_angle + span * t;
+            self.path_points
+                .push((x + radius * angle.cos(), y + radius * angle.sin()));
+        }
     }
 
     /// `ctx.closePath()` — a no-op: [`Self::fill`]'s fan triangulation

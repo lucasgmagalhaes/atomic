@@ -17,11 +17,15 @@
 //! (see [`Canvas2D::set_font`]'s own doc for its parser scope cut), and
 //! one-line `fillText`/`strokeText`/`measureText` (see
 //! [`Canvas2D::fill_text`]/[`Canvas2D::stroke_text`]'s own docs - no
-//! wrapping, `strokeText` isn't a real outline stroke). No stroking a
-//! path (only `strokeRect`'s rectangle-outline shortcut), no
-//! `bezierCurveTo`/`quadraticCurveTo`, no drawImage sources
-//! beyond another `<canvas>`, no conic gradients or patterns, no
-//! `scale`/`rotate`/general transform matrix (just plain translation), no
+//! wrapping, `strokeText` isn't a real outline stroke), curves
+//! (`bezierCurveTo`/`quadraticCurveTo`, see [`Canvas2D::bezier_curve_to`]'s
+//! own doc), and a full 2D affine transform (`translate`/`scale`/`rotate`/
+//! `setTransform`/`resetTransform`, see [`Canvas2D::transform_point`]'s own
+//! doc — composed CTM, applied to every coordinate before painting, though
+//! text glyph bitmaps themselves are only ever translated/scaled by their
+//! anchor point, never actually rotated). No stroking a
+//! path (only `strokeRect`'s rectangle-outline shortcut), no drawImage
+//! sources beyond another `<canvas>`, no conic gradients or patterns, no
 //! compositing modes beyond `fillRect`'s source-over and
 //! `clearRect`'s hard replace-with-transparent. `to_data_url` is real PNG
 //! encoding (`image_decode::encode_png`) plus base64, not a stub - see
@@ -84,12 +88,13 @@ pub struct Canvas2D {
     /// back to `None`, matching real spec's "assigning `fillStyle` replaces
     /// whatever was there before, solid or gradient".
     fill_gradient: Option<FillGradient>,
-    /// `ctx.translate(x, y)`'s accumulated offset - the one transform this
-    /// crate supports (no scale/rotate/general matrix - see
-    /// [`Canvas2D::translate`]'s own doc). Added to every `fillRect`/
-    /// `clearRect`/`strokeRect` coordinate before painting.
-    translate_x: f32,
-    translate_y: f32,
+    /// `ctx.translate`/`scale`/`rotate`/`setTransform`'s composed CTM
+    /// (current transformation matrix), `[a, b, c, d, e, f]` matching real
+    /// spec's `DOMMatrix` layout (`x' = a*x + c*y + e`, `y' = b*x + d*y +
+    /// f`). Applied to every coordinate before painting, via
+    /// [`Canvas2D::transform_point`]. Identity `[1, 0, 0, 1, 0, 0]` by
+    /// default.
+    transform: [f32; 6],
     /// `ctx.save()`/`ctx.restore()`'s backing stack - scoped to just the
     /// drawing-state fields this crate actually has (`fillStyle`/
     /// `strokeStyle`/`lineWidth`/`font`/translate offset), not real spec's
@@ -146,8 +151,7 @@ impl Canvas2D {
             font_size: text::DEFAULT_FONT_SIZE,
             font_family: FontFamily::generic(GenericFontFamily::SansSerif),
             fill_gradient: None,
-            translate_x: 0.0,
-            translate_y: 0.0,
+            transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
             state_stack: Vec::new(),
             path_points: Vec::new(),
         };

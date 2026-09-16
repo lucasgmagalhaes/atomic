@@ -136,6 +136,10 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     define_method(ctx, proto, "save", state::save, 0);
     define_method(ctx, proto, "restore", state::restore, 0);
     define_method(ctx, proto, "translate", state::translate, 2);
+    define_method(ctx, proto, "scale", state::scale, 2);
+    define_method(ctx, proto, "rotate", state::rotate, 1);
+    define_method(ctx, proto, "setTransform", state::set_transform, 6);
+    define_method(ctx, proto, "resetTransform", state::reset_transform, 0);
     define_method(ctx, proto, "getImageData", image_data::get_image_data, 4);
     define_method(ctx, proto, "putImageData", image_data::put_image_data, 3);
     define_method(

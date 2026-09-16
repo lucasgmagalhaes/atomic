@@ -93,6 +93,19 @@ pub struct Canvas2D {
     fill_style: Color,
     stroke_style: Color,
     line_width: f32,
+    /// `ctx.save()`/`ctx.restore()`'s backing stack - scoped to just the
+    /// drawing-state fields this crate actually has (`fillStyle`/
+    /// `strokeStyle`/`lineWidth`), not real spec's full state (no clip
+    /// region, transform matrix, or compositing/font state exists here to
+    /// save).
+    state_stack: Vec<CanvasState>,
+}
+
+#[derive(Clone, Copy)]
+struct CanvasState {
+    fill_style: Color,
+    stroke_style: Color,
+    line_width: f32,
 }
 
 impl Canvas2D {
@@ -208,6 +221,7 @@ impl Canvas2D {
                 a: 255,
             },
             line_width: 1.0,
+            state_stack: Vec::new(),
         };
         // The real spec starts a canvas fully transparent, not undefined.
         canvas.clear_rect(0.0, 0.0, width as f32, height as f32);
@@ -240,6 +254,27 @@ impl Canvas2D {
     /// `ctx.lineWidth`'s getter side.
     pub fn line_width(&self) -> f32 {
         self.line_width
+    }
+
+    /// `ctx.save()` — pushes the current drawing state onto
+    /// [`Self::state_stack`].
+    pub fn save(&mut self) {
+        self.state_stack.push(CanvasState {
+            fill_style: self.fill_style,
+            stroke_style: self.stroke_style,
+            line_width: self.line_width,
+        });
+    }
+
+    /// `ctx.restore()` — pops and applies the most recently saved drawing
+    /// state. A no-op on an empty stack (matches real spec: calling
+    /// `restore()` with nothing left to restore does nothing, not error).
+    pub fn restore(&mut self) {
+        if let Some(state) = self.state_stack.pop() {
+            self.fill_style = state.fill_style;
+            self.stroke_style = state.stroke_style;
+            self.line_width = state.line_width;
+        }
     }
 
     pub fn width(&self) -> u32 {

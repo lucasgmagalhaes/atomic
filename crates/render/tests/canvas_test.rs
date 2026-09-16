@@ -248,6 +248,73 @@ fn line_width_and_stroke_style_getters_round_trip() {
 }
 
 #[test]
+fn restore_undoes_state_changes_made_since_the_matching_save() {
+    let mut canvas = Canvas2D::new(4, 4);
+    canvas.set_fill_style(Color {
+        r: 255,
+        g: 0,
+        b: 0,
+        a: 255,
+    });
+    canvas.set_line_width(1.0);
+    canvas.save();
+    canvas.set_fill_style(Color {
+        r: 0,
+        g: 255,
+        b: 0,
+        a: 255,
+    });
+    canvas.set_line_width(5.0);
+    canvas.restore();
+
+    assert_eq!(
+        canvas.fill_style(),
+        Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255,
+        }
+    );
+    assert_eq!(canvas.line_width(), 1.0);
+}
+
+#[test]
+fn restore_on_an_empty_stack_is_a_no_op() {
+    let mut canvas = Canvas2D::new(4, 4);
+    canvas.set_fill_style(Color {
+        r: 9,
+        g: 9,
+        b: 9,
+        a: 255,
+    });
+    canvas.restore();
+    assert_eq!(
+        canvas.fill_style(),
+        Color {
+            r: 9,
+            g: 9,
+            b: 9,
+            a: 255,
+        }
+    );
+}
+
+#[test]
+fn nested_save_restore_unwinds_in_lifo_order() {
+    let mut canvas = Canvas2D::new(4, 4);
+    canvas.set_line_width(1.0);
+    canvas.save();
+    canvas.set_line_width(2.0);
+    canvas.save();
+    canvas.set_line_width(3.0);
+    canvas.restore();
+    assert_eq!(canvas.line_width(), 2.0);
+    canvas.restore();
+    assert_eq!(canvas.line_width(), 1.0);
+}
+
+#[test]
 fn put_image_data_clips_a_negative_origin() {
     let mut canvas = Canvas2D::new(4, 4);
     // A 4x4 solid-yellow region positioned so its top-left spills off the

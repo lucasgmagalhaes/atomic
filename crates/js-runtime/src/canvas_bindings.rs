@@ -78,6 +78,16 @@ unsafe fn read_js_f32(val: sys::JSValue) -> f32 {
     }
 }
 
+unsafe fn get_prop(ctx: *mut sys::JSContext, obj: sys::JSValue, key: &str) -> sys::JSValue {
+    let name = CString::new(key).unwrap();
+    sys::JS_GetPropertyStr(ctx, obj, name.as_ptr())
+}
+
+unsafe fn set_prop_f64(ctx: *mut sys::JSContext, obj: sys::JSValue, key: &str, val: f64) {
+    let name = CString::new(key).unwrap();
+    sys::JS_SetPropertyStr(ctx, obj, name.as_ptr(), sys::js_float64(val));
+}
+
 /// `#rgb`/`#rrggbb` only - no `rgb()`/`rgba()`/`hsl()`/named color
 /// keywords. Neither `render::Canvas2D` nor a publicly exposed
 /// `layout_engine` API has a general CSS-color-string parser to reuse
@@ -202,6 +212,87 @@ unsafe extern "C" fn fill_style_set(
     sys::js_undefined()
 }
 
+/// `ctx.getImageData(x, y, w, h)` — scoped to always returning the
+/// *whole* canvas's current pixels regardless of `x`/`y`/`w`/`h` (real
+/// spec allows reading an arbitrary sub-rectangle; `render::Canvas2D::
+/// get_image_data` only ever reads back the full backing texture, and
+/// adding a windowed GPU readback wasn't worth it for this pass - a
+/// documented, narrower-than-spec scope cut, same shape this crate's
+/// other "one value, not the full generality" cuts already take). The
+/// returned plain object is spec's own `ImageData` shape (`width`,
+/// `height`, `data`) but not a real `ImageData` instance (`instanceof
+/// ImageData` would be `false` - no such class is registered, since
+/// nothing yet needs to construct one directly via `new ImageData(...)`).
+/// `data` is a real `Uint8Array` (not spec's own `Uint8ClampedArray` -
+/// this crate only has a `Uint8Array` constructor bound, same "one typed
+/// array kind, not every element size" cut `crypto.getRandomValues`'s own
+/// doc already takes) holding the exact tightly-packed RGBA8 bytes
+/// `get_image_data` produced - reading/writing it as plain 0-255 byte
+/// values already matches `Uint8ClampedArray`'s own clamping behavior
+/// for any value actually written back through `putImageData`.
+unsafe extern "C" fn get_image_data(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let ptr = context2d_opaque(sys::JS_GetRuntime(ctx), this_val);
+    if ptr.is_null() {
+        return sys::js_null();
+    }
+    let (width, height, pixels) = {
+        let canvas = (*ptr).borrow();
+        (canvas.width(), canvas.height(), canvas.get_image_data())
+    };
+
+    let obj = sys::JS_NewObject(ctx);
+    set_prop_f64(ctx, obj, "width", width as f64);
+    set_prop_f64(ctx, obj, "height", height as f64);
+    let data = sys::JS_NewUint8ArrayCopy(ctx, pixels.as_ptr(), pixels.len());
+    let data_name = CString::new("data").unwrap();
+    sys::JS_SetPropertyStr(ctx, obj, data_name.as_ptr(), data);
+    obj
+}
+
+/// `ctx.putImageData(imageData, x, y)` — writes `imageData.data` (read as
+/// a real `Uint8Array`, per [`get_image_data`]'s own doc on the
+/// `Uint8Array`-not-`Uint8ClampedArray` scope cut) directly into the
+/// backing texture at `(x, y)`, clipped to the canvas's own bounds by
+/// `Canvas2D::put_image_data`. No optional `dirtyX`/`dirtyY`/
+/// `dirtyWidth`/`dirtyHeight` sub-rectangle arguments (real spec's own
+/// 7-argument overload) - only the 3-argument form.
+unsafe extern "C" fn put_image_data(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let ptr = context2d_opaque(sys::JS_GetRuntime(ctx), this_val);
+    if ptr.is_null() || argc < 3 {
+        return sys::js_undefined();
+    }
+    let image_data = *argv;
+    let x = read_js_f32(*argv.add(1)) as i32;
+    let y = read_js_f32(*argv.add(2)) as i32;
+
+    let width_val = get_prop(ctx, image_data, "width");
+    let height_val = get_prop(ctx, image_data, "height");
+    let w = read_js_f32(width_val) as u32;
+    let h = read_js_f32(height_val) as u32;
+    sys::JS_FreeValue(ctx, width_val);
+    sys::JS_FreeValue(ctx, height_val);
+
+    let data_val = get_prop(ctx, image_data, "data");
+    let mut size: usize = 0;
+    let data_ptr = sys::JS_GetUint8Array(ctx, &mut size, data_val);
+    if !data_ptr.is_null() {
+        let bytes = std::slice::from_raw_parts(data_ptr, size);
+        (*ptr).borrow_mut().put_image_data(x, y, w, h, bytes);
+    }
+    sys::JS_FreeValue(ctx, data_val);
+    sys::js_undefined()
+}
+
 /// Registers the `CanvasRenderingContext2D` class on `ctx`'s runtime (if
 /// not already done) - no global constructor is exposed, matching real
 /// spec (it's never `new`-able; only reachable via `getContext('2d')`).
@@ -226,6 +317,8 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     let proto = sys::JS_NewObject(ctx);
     define_method(ctx, proto, "fillRect", fill_rect, 4);
     define_method(ctx, proto, "clearRect", clear_rect, 4);
+    define_method(ctx, proto, "getImageData", get_image_data, 4);
+    define_method(ctx, proto, "putImageData", put_image_data, 3);
     define_getter_setter(
         ctx,
         proto,

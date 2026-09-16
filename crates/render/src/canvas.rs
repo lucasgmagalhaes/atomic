@@ -5,12 +5,13 @@
 //! backing bitmap. Starts fully transparent, like the real spec.
 //!
 //! Scoped to solid-color rectangles: `fillStyle`/`fillRect`/`clearRect`
-//! plus `strokeStyle`/`lineWidth`/`strokeRect`. No paths
-//! (`beginPath`/`lineTo`/`arc`/...) or general strokes along one - just
-//! the one rectangle-outline shortcut real Canvas2D also exposes
-//! directly. No text, no images/`drawImage`, no gradients/patterns, no
-//! transforms, no compositing modes beyond `fillRect`'s source-over and
-//! `clearRect`'s hard replace-with-transparent.
+//! plus `strokeStyle`/`lineWidth`/`strokeRect`, `save`/`restore`, and
+//! `translate`. No paths (`beginPath`/`lineTo`/`arc`/...) or general
+//! strokes - just the one rectangle-outline shortcut real Canvas2D also
+//! exposes directly. No text, no images/`drawImage`, no
+//! gradients/patterns, no `scale`/`rotate`/general transform matrix (just
+//! plain translation), no compositing modes beyond `fillRect`'s
+//! source-over and `clearRect`'s hard replace-with-transparent.
 use bytemuck::{Pod, Zeroable};
 
 use layout_engine::Color;
@@ -93,11 +94,17 @@ pub struct Canvas2D {
     fill_style: Color,
     stroke_style: Color,
     line_width: f32,
+    /// `ctx.translate(x, y)`'s accumulated offset - the one transform this
+    /// crate supports (no scale/rotate/general matrix - see
+    /// [`Self::translate`]'s own doc). Added to every `fillRect`/
+    /// `clearRect`/`strokeRect` coordinate before painting.
+    translate_x: f32,
+    translate_y: f32,
     /// `ctx.save()`/`ctx.restore()`'s backing stack - scoped to just the
     /// drawing-state fields this crate actually has (`fillStyle`/
-    /// `strokeStyle`/`lineWidth`), not real spec's full state (no clip
-    /// region, transform matrix, or compositing/font state exists here to
-    /// save).
+    /// `strokeStyle`/`lineWidth`/translate offset), not real spec's full
+    /// state (no clip region, general transform matrix, or compositing/
+    /// font state exists here to save).
     state_stack: Vec<CanvasState>,
 }
 
@@ -106,6 +113,8 @@ struct CanvasState {
     fill_style: Color,
     stroke_style: Color,
     line_width: f32,
+    translate_x: f32,
+    translate_y: f32,
 }
 
 impl Canvas2D {
@@ -221,6 +230,8 @@ impl Canvas2D {
                 a: 255,
             },
             line_width: 1.0,
+            translate_x: 0.0,
+            translate_y: 0.0,
             state_stack: Vec::new(),
         };
         // The real spec starts a canvas fully transparent, not undefined.
@@ -263,6 +274,8 @@ impl Canvas2D {
             fill_style: self.fill_style,
             stroke_style: self.stroke_style,
             line_width: self.line_width,
+            translate_x: self.translate_x,
+            translate_y: self.translate_y,
         });
     }
 
@@ -274,7 +287,21 @@ impl Canvas2D {
             self.fill_style = state.fill_style;
             self.stroke_style = state.stroke_style;
             self.line_width = state.line_width;
+            self.translate_x = state.translate_x;
+            self.translate_y = state.translate_y;
         }
+    }
+
+    /// `ctx.translate(x, y)` — offsets every subsequent `fillRect`/
+    /// `clearRect`/`strokeRect` call by `(x, y)`, accumulating across
+    /// repeated calls (real spec's own behavior: `translate` composes with
+    /// the existing transform, it doesn't replace it). The one transform
+    /// this crate supports - no `scale`/`rotate`/`setTransform`/general
+    /// matrix, since none of those can be expressed as a plain coordinate
+    /// offset the way translation can.
+    pub fn translate(&mut self, x: f32, y: f32) {
+        self.translate_x += x;
+        self.translate_y += y;
     }
 
     pub fn width(&self) -> u32 {
@@ -285,7 +312,11 @@ impl Canvas2D {
         self.height
     }
 
+    /// Applies `translate_x`/`translate_y` to every rect this crate paints -
+    /// `fill_rect`/`clear_rect`/`stroke_rect` all funnel through here, so
+    /// this is the one place the translate offset needs to be added.
     fn draw_rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color, replace: bool) {
+        let (x, y) = (x + self.translate_x, y + self.translate_y);
         let view = self
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());

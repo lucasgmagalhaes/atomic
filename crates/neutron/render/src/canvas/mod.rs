@@ -4,12 +4,13 @@
 //! texture that accumulates draws across calls, same as a real `<canvas>`
 //! backing bitmap. Starts fully transparent, like the real spec.
 //!
-//! Scoped to solid-color/2-stop-gradient (linear or radial) rectangles:
-//! `fillStyle`/`fillRect`/`clearRect` plus `strokeStyle`/`lineWidth`/
-//! `strokeRect`, `save`/`restore`, `translate`, a `fillStyle` gradient via
-//! `createLinearGradient`/`createRadialGradient` (see
-//! [`LinearGradient`]/[`RadialGradient`]'s own docs for their exact scope
-//! cuts), and a convex-only filled path
+//! Scoped to solid-color/2-stop-gradient (linear, radial, or conic)
+//! rectangles: `fillStyle`/`fillRect`/`clearRect` plus `strokeStyle`/
+//! `lineWidth`/`strokeRect`, `save`/`restore`, `translate`, a `fillStyle`
+//! gradient via `createLinearGradient`/`createRadialGradient`/
+//! `createConicGradient` (see [`LinearGradient`]/[`RadialGradient`]/
+//! [`ConicGradient`]'s own docs for their exact scope cuts), and a
+//! convex-only filled path
 //! (`beginPath`/`moveTo`/`lineTo`/`arc`/`closePath`/`fill` - see
 //! [`Canvas2D::fill`]'s own doc for why only convex polygons render
 //! correctly and [`Canvas2D::arc`]'s own doc for its polyline-
@@ -25,7 +26,7 @@
 //! text glyph bitmaps themselves are only ever translated/scaled by their
 //! anchor point, never actually rotated). No stroking a
 //! path (only `strokeRect`'s rectangle-outline shortcut), no drawImage
-//! sources beyond another `<canvas>`, no conic gradients or patterns, no
+//! sources beyond another `<canvas>`, no patterns, no
 //! compositing modes beyond `fillRect`'s source-over and
 //! `clearRect`'s hard replace-with-transparent. `to_data_url` is real PNG
 //! encoding (`image_decode::encode_png`) plus base64, not a stub - see
@@ -53,7 +54,7 @@ mod shapes;
 mod state;
 mod text;
 
-pub use gradients::{FillGradient, LinearGradient, RadialGradient};
+pub use gradients::{ConicGradient, FillGradient, LinearGradient, RadialGradient};
 
 use state::CanvasState;
 
@@ -72,6 +73,10 @@ pub struct Canvas2D {
     /// doc for why this needs a dedicated pipeline/shader rather than
     /// reusing `fill_pipeline`'s 4-corner-color trick.
     radial_pipeline: wgpu::RenderPipeline,
+    /// Exact per-pixel angular gradient - see [`ConicGradient`]'s own doc,
+    /// same "nonlinear math, needs its own pipeline" reasoning as
+    /// `radial_pipeline`.
+    conic_pipeline: wgpu::RenderPipeline,
     width: u32,
     height: u32,
     fill_style: Color,
@@ -124,6 +129,7 @@ impl Canvas2D {
             fill_pipeline,
             clear_pipeline,
             radial_pipeline,
+            conic_pipeline,
         } = pipeline::build(width, height).await;
 
         let mut canvas = Canvas2D {
@@ -133,6 +139,7 @@ impl Canvas2D {
             fill_pipeline,
             clear_pipeline,
             radial_pipeline,
+            conic_pipeline,
             width,
             height,
             fill_style: Color {

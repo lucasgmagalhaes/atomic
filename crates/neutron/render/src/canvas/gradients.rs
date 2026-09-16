@@ -4,7 +4,7 @@
 use layout_engine::Color;
 
 use super::helpers::{color_to_f32, gradient_t, lerp_color, point_to_ndc};
-use super::pipeline::{rect_vertices_colors, RadialVertex};
+use super::pipeline::{rect_vertices_colors, ConicVertex, RadialVertex};
 use super::Canvas2D;
 
 /// `ctx.createLinearGradient(x0, y0, x1, y1)` + two `addColorStop` calls -
@@ -57,12 +57,31 @@ pub struct RadialGradient {
     pub end: Color,
 }
 
-/// `ctx.fillStyle = gradient`'s two real shapes - see [`LinearGradient`]
-/// and [`RadialGradient`]'s own docs for what's real vs cut in each.
+/// `ctx.createConicGradient(startAngle, x, y)` — an angular sweep around
+/// `(x, y)` starting at `startAngle` (radians, clockwise, matching real
+/// spec). Same "2 effective stops" cut as [`LinearGradient`]/
+/// [`RadialGradient`]. Like [`RadialGradient`], `t` (here, angle around
+/// the center) is not affine in screen position, so this gets its own
+/// dedicated GPU pipeline (`pipeline::CONIC_SHADER_SRC`) rather than the
+/// 4-corner-interpolation trick — `local_pos` interpolates exactly across
+/// the rect, and the nonlinear `atan2` happens per-fragment.
+#[derive(Clone, Copy)]
+pub struct ConicGradient {
+    pub start_angle: f32,
+    pub cx: f32,
+    pub cy: f32,
+    pub start: Color,
+    pub end: Color,
+}
+
+/// `ctx.fillStyle = gradient`'s three real shapes - see [`LinearGradient`],
+/// [`RadialGradient`], and [`ConicGradient`]'s own docs for what's real
+/// vs cut in each.
 #[derive(Clone, Copy)]
 pub enum FillGradient {
     Linear(LinearGradient),
     Radial(RadialGradient),
+    Conic(ConicGradient),
 }
 
 impl Canvas2D {
@@ -188,6 +207,78 @@ impl Canvas2D {
                 occlusion_query_set: None,
             });
             pass.set_pipeline(&self.radial_pipeline);
+            pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+            pass.draw(0..vertices.len() as u32, 0..1);
+        }
+        self.queue.submit(std::iter::once(encoder.finish()));
+    }
+
+    /// Same as [`Self::draw_radial_gradient_rect`] but for a
+    /// [`ConicGradient`] - `local_pos` feeds `atan2` per-fragment instead
+    /// of `length`, same dedicated-pipeline reasoning ([`ConicGradient`]'s
+    /// own doc). Gradient coordinates (including `start_angle`) are *not*
+    /// run through the current transform matrix, same documented cut as
+    /// the linear/radial cases.
+    pub(super) fn draw_conic_gradient_rect(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        gradient: ConicGradient,
+    ) {
+        let corners = self.transformed_corners(x, y, w, h);
+        let (vw, vh) = (self.width as f32, self.height as f32);
+        let start = color_to_f32(gradient.start);
+        let end = color_to_f32(gradient.end);
+        let corner = |(px, py): (f32, f32)| ConicVertex {
+            position: point_to_ndc(px, py, vw, vh),
+            local_pos: [px - gradient.cx, py - gradient.cy],
+            start_angle: gradient.start_angle,
+            start,
+            end,
+        };
+        let [tl_p, tr_p, bl_p, br_p] = corners;
+        let (tl, tr, bl, br) = (corner(tl_p), corner(tr_p), corner(bl_p), corner(br_p));
+        let vertices = [tl, bl, tr, tr, bl, br];
+        self.submit_conic_vertices(&vertices);
+    }
+
+    /// Same as [`Self::submit_radial_vertices`] but for a [`ConicGradient`]
+    /// fill (`conic_pipeline`/[`ConicVertex`]).
+    fn submit_conic_vertices(&mut self, vertices: &[ConicVertex]) {
+        let view = self
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        use wgpu::util::DeviceExt;
+        let vertex_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("canvas2d-conic-vertices"),
+                contents: bytemuck::cast_slice(vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("canvas2d-conic-draw"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&self.conic_pipeline);
             pass.set_vertex_buffer(0, vertex_buffer.slice(..));
             pass.draw(0..vertices.len() as u32, 0..1);
         }

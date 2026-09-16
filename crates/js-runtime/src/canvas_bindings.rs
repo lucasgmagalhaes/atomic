@@ -1,15 +1,16 @@
 //! Real `HTMLCanvasElement.getContext('2d')` (`spec/matrix/browser-apis.md`'s
 //! Canvas2D gap): wires the already-existing, GPU-backed `render::Canvas2D`
-//! (`fillRect`/`clearRect`/`fillStyle` — see that module's own scope-cut
-//! doc, which this binding inherits unchanged) into JavaScript and into
-//! this worker's real page compositing.
+//! (`fillRect`/`clearRect`/`fillStyle`/`strokeRect`/`strokeStyle`/
+//! `lineWidth` — see that module's own scope-cut doc, which this binding
+//! inherits unchanged) into JavaScript and into this worker's real page
+//! compositing.
 //!
 //! `getContext(id)` only recognizes `"2d"` (any other value, including
 //! `"webgl"`, returns `null` - no WebGL/`OffscreenCanvas` context here).
 //! The returned `CanvasRenderingContext2D` is a real, minimal object with
-//! just the three methods/properties `render::Canvas2D` itself
-//! implements - no paths, strokes, text, images, gradients, or
-//! transforms. Real per-canvas persistence: the backing `render::Canvas2D`
+//! just the methods/properties `render::Canvas2D` itself implements - no
+//! paths, general strokes, text, images, gradients, or transforms. Real
+//! per-canvas persistence: the backing `render::Canvas2D`
 //! lives in `HostState::canvases`, keyed by the canvas element's own
 //! `NodeId`, so its drawn pixels and `fillStyle` survive across separate
 //! `getContext('2d')` calls on the same element - the one real deviation
@@ -158,6 +159,25 @@ unsafe extern "C" fn fill_rect(
     sys::js_undefined()
 }
 
+unsafe extern "C" fn stroke_rect(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let ptr = context2d_opaque(sys::JS_GetRuntime(ctx), this_val);
+    if !ptr.is_null() && argc >= 4 {
+        let (x, y, w, h) = (
+            read_js_f32(*argv),
+            read_js_f32(*argv.add(1)),
+            read_js_f32(*argv.add(2)),
+            read_js_f32(*argv.add(3)),
+        );
+        (*ptr).borrow_mut().stroke_rect(x, y, w, h);
+    }
+    sys::js_undefined()
+}
+
 unsafe extern "C" fn clear_rect(
     ctx: *mut sys::JSContext,
     this_val: sys::JSValue,
@@ -207,6 +227,69 @@ unsafe extern "C" fn fill_style_set(
             if let Some(color) = parse_hex_color(s.trim()) {
                 (*ptr).borrow_mut().set_fill_style(color);
             }
+        }
+    }
+    sys::js_undefined()
+}
+
+unsafe extern "C" fn stroke_style_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    let ptr = context2d_opaque(sys::JS_GetRuntime(ctx), this_val);
+    let color = if ptr.is_null() {
+        Color {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 255,
+        }
+    } else {
+        (*ptr).borrow().stroke_style()
+    };
+    let s = format_hex_color(color);
+    sys::JS_NewStringLen(ctx, s.as_ptr() as *const std::os::raw::c_char, s.len())
+}
+
+unsafe extern "C" fn stroke_style_set(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    val: sys::JSValue,
+) -> sys::JSValue {
+    let ptr = context2d_opaque(sys::JS_GetRuntime(ctx), this_val);
+    if !ptr.is_null() {
+        if let Some(s) = read_js_string(ctx, val) {
+            if let Some(color) = parse_hex_color(s.trim()) {
+                (*ptr).borrow_mut().set_stroke_style(color);
+            }
+        }
+    }
+    sys::js_undefined()
+}
+
+unsafe extern "C" fn line_width_get(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+) -> sys::JSValue {
+    let ptr = context2d_opaque(sys::JS_GetRuntime(ctx), this_val);
+    let width = if ptr.is_null() {
+        1.0
+    } else {
+        (*ptr).borrow().line_width()
+    };
+    sys::js_float64(width as f64)
+}
+
+unsafe extern "C" fn line_width_set(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    val: sys::JSValue,
+) -> sys::JSValue {
+    let ptr = context2d_opaque(sys::JS_GetRuntime(ctx), this_val);
+    if !ptr.is_null() {
+        let width = read_js_f32(val);
+        if width > 0.0 {
+            (*ptr).borrow_mut().set_line_width(width);
         }
     }
     sys::js_undefined()
@@ -317,6 +400,7 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     let proto = sys::JS_NewObject(ctx);
     define_method(ctx, proto, "fillRect", fill_rect, 4);
     define_method(ctx, proto, "clearRect", clear_rect, 4);
+    define_method(ctx, proto, "strokeRect", stroke_rect, 4);
     define_method(ctx, proto, "getImageData", get_image_data, 4);
     define_method(ctx, proto, "putImageData", put_image_data, 3);
     define_getter_setter(
@@ -325,6 +409,20 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
         "fillStyle",
         fill_style_get as Getter,
         fill_style_set as Setter,
+    );
+    define_getter_setter(
+        ctx,
+        proto,
+        "strokeStyle",
+        stroke_style_get as Getter,
+        stroke_style_set as Setter,
+    );
+    define_getter_setter(
+        ctx,
+        proto,
+        "lineWidth",
+        line_width_get as Getter,
+        line_width_set as Setter,
     );
     sys::JS_SetClassProto(ctx, class_id, proto);
 }

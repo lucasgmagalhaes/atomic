@@ -4,11 +4,13 @@
 //! texture that accumulates draws across calls, same as a real `<canvas>`
 //! backing bitmap. Starts fully transparent, like the real spec.
 //!
-//! Scoped to solid-color rectangles: `fillStyle` + `fillRect`/`clearRect`
-//! only. No paths (`beginPath`/`lineTo`/`arc`/...), no strokes, no text,
-//! no images/`drawImage`, no gradients/patterns, no transforms, no
-//! compositing modes beyond `fillRect`'s source-over and `clearRect`'s
-//! hard replace-with-transparent.
+//! Scoped to solid-color rectangles: `fillStyle`/`fillRect`/`clearRect`
+//! plus `strokeStyle`/`lineWidth`/`strokeRect`. No paths
+//! (`beginPath`/`lineTo`/`arc`/...) or general strokes along one - just
+//! the one rectangle-outline shortcut real Canvas2D also exposes
+//! directly. No text, no images/`drawImage`, no gradients/patterns, no
+//! transforms, no compositing modes beyond `fillRect`'s source-over and
+//! `clearRect`'s hard replace-with-transparent.
 use bytemuck::{Pod, Zeroable};
 
 use layout_engine::Color;
@@ -89,6 +91,8 @@ pub struct Canvas2D {
     width: u32,
     height: u32,
     fill_style: Color,
+    stroke_style: Color,
+    line_width: f32,
 }
 
 impl Canvas2D {
@@ -197,6 +201,13 @@ impl Canvas2D {
                 b: 0,
                 a: 255,
             },
+            stroke_style: Color {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 255,
+            },
+            line_width: 1.0,
         };
         // The real spec starts a canvas fully transparent, not undefined.
         canvas.clear_rect(0.0, 0.0, width as f32, height as f32);
@@ -211,6 +222,24 @@ impl Canvas2D {
     /// `canvas_bindings`) formats this back to a `#rrggbb` hex string.
     pub fn fill_style(&self) -> Color {
         self.fill_style
+    }
+
+    pub fn set_stroke_style(&mut self, color: Color) {
+        self.stroke_style = color;
+    }
+
+    /// `ctx.strokeStyle`'s getter side, same shape as [`Canvas2D::fill_style`].
+    pub fn stroke_style(&self) -> Color {
+        self.stroke_style
+    }
+
+    pub fn set_line_width(&mut self, width: f32) {
+        self.line_width = width;
+    }
+
+    /// `ctx.lineWidth`'s getter side.
+    pub fn line_width(&self) -> f32 {
+        self.line_width
     }
 
     pub fn width(&self) -> u32 {
@@ -284,6 +313,25 @@ impl Canvas2D {
     /// `fillStyle`, and always a hard replace (see `clear_pipeline`).
     pub fn clear_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         self.draw_rect(x, y, w, h, Color::TRANSPARENT, true);
+    }
+
+    /// `ctx.strokeRect(x, y, w, h)` — draws the rectangle's outline only,
+    /// using the current `strokeStyle`/`lineWidth`, as four filled bars (one
+    /// per side) each centered on that edge - matching real Canvas2D's own
+    /// "stroke straddles the path" positioning, not drawn fully inside or
+    /// outside the rect. Scoped to axis-aligned rectangles only, since
+    /// there is no general path/line-join machinery here (no miter/bevel/
+    /// round joins) - the four bars simply overlap at each corner, which is
+    /// visually correct for an opaque `strokeStyle` but would double-blend
+    /// a semi-transparent one.
+    pub fn stroke_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        let lw = self.line_width;
+        let half = lw / 2.0;
+        let color = self.stroke_style;
+        self.draw_rect(x - half, y - half, w + lw, lw, color, false);
+        self.draw_rect(x - half, y + h - half, w + lw, lw, color, false);
+        self.draw_rect(x - half, y - half, lw, h + lw, color, false);
+        self.draw_rect(x + w - half, y - half, lw, h + lw, color, false);
     }
 
     /// `ctx.getImageData(0, 0, width, height).data` — tightly-packed RGBA8

@@ -170,6 +170,84 @@ fn put_image_data_clips_a_region_that_spills_past_the_canvas_edge() {
 }
 
 #[test]
+fn stroke_rect_paints_only_the_border_not_the_interior() {
+    let mut canvas = Canvas2D::new(10, 10);
+    canvas.set_stroke_style(Color {
+        r: 0,
+        g: 255,
+        b: 0,
+        a: 255,
+    });
+    canvas.set_line_width(2.0);
+    canvas.stroke_rect(2.0, 2.0, 6.0, 6.0);
+
+    let pixels = canvas.get_image_data();
+    // Right on the top edge: stroked.
+    assert_eq!(pixel(&pixels, 10, 5, 2), [0, 255, 0, 255]);
+    // Center of the rect: untouched (still transparent).
+    assert_eq!(pixel(&pixels, 10, 5, 5), [0, 0, 0, 0]);
+    // Outside the rect entirely: untouched.
+    assert_eq!(pixel(&pixels, 10, 0, 0), [0, 0, 0, 0]);
+}
+
+#[test]
+fn stroke_rect_uses_stroke_style_not_fill_style() {
+    let mut canvas = Canvas2D::new(10, 10);
+    canvas.set_fill_style(Color {
+        r: 255,
+        g: 0,
+        b: 0,
+        a: 255,
+    });
+    canvas.set_stroke_style(Color {
+        r: 0,
+        g: 0,
+        b: 255,
+        a: 255,
+    });
+    canvas.set_line_width(2.0);
+    canvas.stroke_rect(2.0, 2.0, 6.0, 6.0);
+
+    let pixels = canvas.get_image_data();
+    assert_eq!(pixel(&pixels, 10, 5, 2), [0, 0, 255, 255]);
+}
+
+#[test]
+fn stroke_rect_line_width_widens_the_border() {
+    let mut canvas = Canvas2D::new(10, 10);
+    canvas.set_stroke_style(Color {
+        r: 0,
+        g: 255,
+        b: 0,
+        a: 255,
+    });
+    canvas.set_line_width(4.0);
+    canvas.stroke_rect(3.0, 3.0, 4.0, 4.0);
+
+    let pixels = canvas.get_image_data();
+    // With a 4px-wide stroke centered on the edge at y=3, y=4 (two px
+    // inside the nominal edge) is still part of the stroke.
+    assert_eq!(pixel(&pixels, 10, 5, 4), [0, 255, 0, 255]);
+}
+
+#[test]
+fn line_width_and_stroke_style_getters_round_trip() {
+    let mut canvas = Canvas2D::new(10, 10);
+    assert_eq!(canvas.line_width(), 1.0);
+    canvas.set_line_width(5.0);
+    assert_eq!(canvas.line_width(), 5.0);
+
+    let color = Color {
+        r: 9,
+        g: 8,
+        b: 7,
+        a: 255,
+    };
+    canvas.set_stroke_style(color);
+    assert_eq!(canvas.stroke_style(), color);
+}
+
+#[test]
 fn put_image_data_clips_a_negative_origin() {
     let mut canvas = Canvas2D::new(4, 4);
     // A 4x4 solid-yellow region positioned so its top-left spills off the

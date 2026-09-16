@@ -169,6 +169,54 @@ fn get_image_data_returns_the_real_drawn_pixels() {
 }
 
 #[test]
+fn stroke_style_and_line_width_round_trip() {
+    let (d, _) = dom_with_canvas();
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { \
+               const ctx2d = document.querySelector('canvas').getContext('2d'); \
+               ctx2d.strokeStyle = '#123456'; \
+               ctx2d.lineWidth = 3; \
+               return `${ctx2d.strokeStyle},${ctx2d.lineWidth}`; \
+             })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "#123456,3");
+}
+
+#[test]
+fn stroke_rect_draws_a_visible_border_readable_via_get_image_data() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let body = d.create_element("body");
+    d.append_child(root, body);
+    let canvas = d.create_element("canvas");
+    d.set_attribute(canvas, "width", "4");
+    d.set_attribute(canvas, "height", "4");
+    d.append_child(body, canvas);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { \
+               const ctx2d = document.querySelector('canvas').getContext('2d'); \
+               ctx2d.strokeStyle = '#00ff00'; \
+               ctx2d.lineWidth = 2; \
+               ctx2d.strokeRect(1, 1, 2, 2); \
+               const img = ctx2d.getImageData(0, 0, 4, 4); \
+               return `${img.data[0]},${img.data[1]},${img.data[2]},${img.data[3]}`; \
+             })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "0,255,0,255");
+}
+
+#[test]
 fn put_image_data_writes_pixels_that_get_image_data_then_reads_back() {
     let mut d = dom::Dom::new();
     let root = d.root();

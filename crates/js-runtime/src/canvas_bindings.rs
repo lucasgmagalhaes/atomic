@@ -4,14 +4,17 @@
 //! `lineWidth`/`save`/`restore`/`translate`/`createLinearGradient` — see
 //! that module's own scope-cut doc, which this binding inherits
 //! unchanged) into JavaScript and into this worker's real page
-//! compositing.
+//! compositing. Also adds `drawImage(source, dx, dy)` - canvas-to-canvas
+//! only (see [`draw_image`]'s own doc), built entirely from
+//! `get_image_data`/`put_image_data` with no new `render::Canvas2D` API.
 //!
 //! `getContext(id)` only recognizes `"2d"` (any other value, including
 //! `"webgl"`, returns `null` - no WebGL/`OffscreenCanvas` context here).
 //! The returned `CanvasRenderingContext2D` is a real, minimal object with
 //! just the methods/properties `render::Canvas2D` itself implements - no
-//! paths, general strokes, text, images, radial/conic gradients or
-//! patterns, or `scale`/`rotate`/general transform matrix (see that
+//! paths, general strokes, text, `<img>`/`<video>`/`ImageBitmap` image
+//! sources, radial/conic gradients or patterns, or `scale`/`rotate`/
+//! general transform matrix (see that
 //! module's own doc for exactly what *is* real, including a 2-stop
 //! `createLinearGradient`). Real per-canvas persistence: the backing
 //! `render::Canvas2D`
@@ -458,6 +461,49 @@ unsafe extern "C" fn stroke_style_get(
     sys::JS_NewStringLen(ctx, s.as_ptr() as *const std::os::raw::c_char, s.len())
 }
 
+/// `ctx.drawImage(source, dx, dy)` — scoped to just this 3-arg form
+/// (real spec also has a `dw`/`dh` scaling overload and a 9-arg source-
+/// rectangle overload, neither wired here) and to a `<canvas>` element as
+/// `source` (real spec also accepts `HTMLImageElement`/`HTMLVideoElement`/
+/// `ImageBitmap`/`OffscreenCanvas` - none of those are wired here yet).
+/// The source canvas must already have an active 2D context (i.e.
+/// `getContext('2d')` was called on it at least once, registering it in
+/// `HostState::canvases` - see `get_context`'s own doc) or this silently
+/// does nothing, matching this crate's general "best-effort, no separate
+/// error path" convention. Implemented as a full-canvas
+/// `get_image_data`/`put_image_data` round trip - no new `render::Canvas2D`
+/// API needed, both primitives already exist.
+unsafe extern "C" fn draw_image(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let ptr = context2d_opaque(sys::JS_GetRuntime(ctx), this_val);
+    if ptr.is_null() || argc < 3 {
+        return sys::js_undefined();
+    }
+    let Some(source_node) = node_id(ctx, *argv) else {
+        return sys::js_undefined();
+    };
+    let dx = read_js_f32(*argv.add(1)) as i32;
+    let dy = read_js_f32(*argv.add(2)) as i32;
+
+    let state = crate::host_state::get(ctx);
+    if state.is_null() {
+        return sys::js_undefined();
+    }
+    let Some(source_backing) = (*state).canvases.get(&source_node).cloned() else {
+        return sys::js_undefined();
+    };
+    let (w, h, pixels) = {
+        let source = source_backing.borrow();
+        (source.width(), source.height(), source.get_image_data())
+    };
+    (*ptr).borrow_mut().put_image_data(dx, dy, w, h, &pixels);
+    sys::js_undefined()
+}
+
 unsafe extern "C" fn stroke_style_set(
     ctx: *mut sys::JSContext,
     this_val: sys::JSValue,
@@ -620,6 +666,7 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
         create_linear_gradient,
         4,
     );
+    define_method(ctx, proto, "drawImage", draw_image, 3);
     define_getter_setter(
         ctx,
         proto,

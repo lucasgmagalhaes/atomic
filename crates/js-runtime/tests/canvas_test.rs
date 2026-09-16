@@ -138,3 +138,64 @@ fn getting_a_2d_context_registers_it_as_an_active_canvas() {
     assert!(ctx.has_active_canvases());
     assert_eq!(ctx.canvas_snapshots().len(), 1);
 }
+
+#[test]
+fn get_image_data_returns_the_real_drawn_pixels() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let body = d.create_element("body");
+    d.append_child(root, body);
+    let canvas = d.create_element("canvas");
+    d.set_attribute(canvas, "width", "4");
+    d.set_attribute(canvas, "height", "4");
+    d.append_child(body, canvas);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { \
+               const c = document.querySelector('canvas'); \
+               const ctx2d = c.getContext('2d'); \
+               ctx2d.fillStyle = '#ff0000'; \
+               ctx2d.fillRect(0, 0, 4, 4); \
+               const img = ctx2d.getImageData(0, 0, 4, 4); \
+               return `${img.width},${img.height},${img.data.length},${img.data[0]},${img.data[1]},${img.data[2]},${img.data[3]}`; \
+             })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "4,4,64,255,0,0,255");
+}
+
+#[test]
+fn put_image_data_writes_pixels_that_get_image_data_then_reads_back() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let body = d.create_element("body");
+    d.append_child(root, body);
+    let canvas = d.create_element("canvas");
+    d.set_attribute(canvas, "width", "4");
+    d.set_attribute(canvas, "height", "4");
+    d.append_child(body, canvas);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { \
+               const c = document.querySelector('canvas'); \
+               const ctx2d = c.getContext('2d'); \
+               const data = new Uint8Array(4 * 4 * 4); \
+               for (let i = 0; i < data.length; i += 4) { \
+                 data[i] = 0; data[i + 1] = 255; data[i + 2] = 0; data[i + 3] = 255; \
+               } \
+               ctx2d.putImageData({ width: 4, height: 4, data }, 0, 0); \
+               const img = ctx2d.getImageData(0, 0, 4, 4); \
+               return `${img.data[0]},${img.data[1]},${img.data[2]},${img.data[3]}`; \
+             })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "0,255,0,255");
+}

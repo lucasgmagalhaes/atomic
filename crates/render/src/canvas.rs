@@ -6,14 +6,17 @@
 //!
 //! Scoped to solid-color/2-stop-linear-gradient rectangles:
 //! `fillStyle`/`fillRect`/`clearRect` plus `strokeStyle`/`lineWidth`/
-//! `strokeRect`, `save`/`restore`, `translate`, and a `fillStyle`
-//! gradient via `createLinearGradient` (see [`LinearGradient`]'s own doc
-//! for its exact scope cuts). No paths (`beginPath`/`lineTo`/`arc`/...) or
-//! general strokes - just the one rectangle-outline shortcut real
-//! Canvas2D also exposes directly. No text, no images/`drawImage`, no
-//! radial/conic gradients or patterns, no `scale`/`rotate`/general
-//! transform matrix (just plain translation), no compositing modes beyond
-//! `fillRect`'s source-over and `clearRect`'s hard replace-with-transparent.
+//! `strokeRect`, `save`/`restore`, `translate`, a `fillStyle` gradient via
+//! `createLinearGradient` (see [`LinearGradient`]'s own doc for its exact
+//! scope cuts), and a convex-only filled path
+//! (`beginPath`/`moveTo`/`lineTo`/`closePath`/`fill` - see [`Canvas2D::fill`]'s
+//! own doc for why only convex polygons render correctly). No stroking a
+//! path (only `strokeRect`'s rectangle-outline shortcut), no curves
+//! (`arc`/`bezierCurveTo`/`quadraticCurveTo`), no text, no drawImage
+//! sources beyond another `<canvas>`, no radial/conic gradients or
+//! patterns, no `scale`/`rotate`/general transform matrix (just plain
+//! translation), no compositing modes beyond `fillRect`'s source-over and
+//! `clearRect`'s hard replace-with-transparent.
 use bytemuck::{Pod, Zeroable};
 
 use layout_engine::Color;
@@ -140,6 +143,14 @@ pub struct LinearGradient {
     pub end: Color,
 }
 
+/// Pixel space (origin top-left, y-down) -> clip space (origin center,
+/// y-up), the same conversion [`rect_vertices_colors`] does inline for
+/// each rect corner - factored out for [`Canvas2D::fill`]'s path
+/// triangulation, which has no fixed 4-corner shape to special-case.
+fn point_to_ndc(x: f32, y: f32, vw: f32, vh: f32) -> [f32; 2] {
+    [(x / vw) * 2.0 - 1.0, 1.0 - (y / vh) * 2.0]
+}
+
 fn color_to_f32(c: Color) -> [f32; 4] {
     [
         c.r as f32 / 255.0,
@@ -184,6 +195,14 @@ pub struct Canvas2D {
     /// state (no clip region, general transform matrix, or compositing/
     /// font state exists here to save).
     state_stack: Vec<CanvasState>,
+    /// `beginPath`/`moveTo`/`lineTo`'s backing point list - not part of
+    /// `save`/`restore`'s state stack, matching real spec (the current
+    /// path is its own separate piece of state, untouched by save/
+    /// restore). `moveTo` and `lineTo` are functionally identical here -
+    /// both just append a point; real spec's subpath-boundary distinction
+    /// isn't modeled, since this crate only ever fills one polygon per
+    /// `beginPath`, not multiple subpaths.
+    path_points: Vec<(f32, f32)>,
 }
 
 #[derive(Clone, Copy)]
@@ -313,6 +332,7 @@ impl Canvas2D {
             translate_x: 0.0,
             translate_y: 0.0,
             state_stack: Vec::new(),
+            path_points: Vec::new(),
         };
         // The real spec starts a canvas fully transparent, not undefined.
         canvas.clear_rect(0.0, 0.0, width as f32, height as f32);
@@ -403,6 +423,61 @@ impl Canvas2D {
         self.translate_y += y;
     }
 
+    /// `ctx.beginPath()` — discards any points accumulated since the last
+    /// call.
+    pub fn begin_path(&mut self) {
+        self.path_points.clear();
+    }
+
+    /// `ctx.moveTo(x, y)` — see [`Self::path_points`]'s own doc for why
+    /// this behaves identically to [`Self::line_to`] in this crate.
+    pub fn move_to(&mut self, x: f32, y: f32) {
+        self.path_points.push((x, y));
+    }
+
+    /// `ctx.lineTo(x, y)`.
+    pub fn line_to(&mut self, x: f32, y: f32) {
+        self.path_points.push((x, y));
+    }
+
+    /// `ctx.closePath()` — a no-op: [`Self::fill`]'s fan triangulation
+    /// already treats `path_points` as an implicitly closed polygon (its
+    /// last point connects back to the first), so there's no separate
+    /// "closing segment" state to track.
+    pub fn close_path(&mut self) {}
+
+    /// `ctx.fill()` — fills the current path with the plain `fill_style`
+    /// color via fan triangulation from `path_points[0]` (`(p0, p[i],
+    /// p[i+1])` for each `i` in `1..len-1`). **Exact only for convex
+    /// polygons** - a concave path will paint the wrong region (some
+    /// fan triangles fall outside the intended shape), since this crate
+    /// has no general polygon triangulator (ear-clipping or similar). No
+    /// gradient fill for paths (unlike `fillRect` - a documented, narrower
+    /// cut to avoid duplicating the gradient-projection logic for
+    /// arbitrary triangle geometry). Curves (`arc`/`bezierCurveTo`/
+    /// `quadraticCurveTo`) aren't supported - only straight `lineTo`
+    /// segments. Does nothing on fewer than 3 points.
+    pub fn fill(&mut self) {
+        if self.path_points.len() < 3 {
+            return;
+        }
+        let (tx, ty) = (self.translate_x, self.translate_y);
+        let (vw, vh) = (self.width as f32, self.height as f32);
+        let color = color_to_f32(self.fill_style);
+        let p0 = self.path_points[0];
+        let mut vertices = Vec::with_capacity((self.path_points.len() - 2) * 3);
+        for pair in self.path_points[1..].windows(2) {
+            let (p1, p2) = (pair[0], pair[1]);
+            for p in [p0, p1, p2] {
+                vertices.push(Vertex {
+                    position: point_to_ndc(p.0 + tx, p.1 + ty, vw, vh),
+                    color,
+                });
+            }
+        }
+        self.submit_vertices(&vertices, false);
+    }
+
     pub fn width(&self) -> u32 {
         self.width
     }
@@ -425,7 +500,7 @@ impl Canvas2D {
             self.width as f32,
             self.height as f32,
         );
-        self.submit_vertices(vertices, replace);
+        self.submit_vertices(&vertices, replace);
     }
 
     /// Same as [`Self::draw_rect`] but with a [`LinearGradient`] fill
@@ -449,10 +524,14 @@ impl Canvas2D {
         let (tx, ty) = (x + self.translate_x, y + self.translate_y);
         let vertices =
             rect_vertices_colors(tx, ty, w, h, colors, self.width as f32, self.height as f32);
-        self.submit_vertices(vertices, false);
+        self.submit_vertices(&vertices, false);
     }
 
-    fn submit_vertices(&mut self, vertices: [Vertex; 6], replace: bool) {
+    /// Submits an arbitrary triangle-list vertex buffer (`vertices.len()`
+    /// must be a multiple of 3) - rects always pass exactly 6 (two
+    /// triangles), a filled path (see [`Self::fill`]) passes
+    /// `(point_count - 2) * 3` from its fan triangulation.
+    fn submit_vertices(&mut self, vertices: &[Vertex], replace: bool) {
         let view = self
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -462,7 +541,7 @@ impl Canvas2D {
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("canvas2d-rect-vertices"),
-                contents: bytemuck::cast_slice(&vertices),
+                contents: bytemuck::cast_slice(vertices),
                 usage: wgpu::BufferUsages::VERTEX,
             });
 
@@ -492,7 +571,7 @@ impl Canvas2D {
                 &self.fill_pipeline
             });
             pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-            pass.draw(0..6, 0..1);
+            pass.draw(0..vertices.len() as u32, 0..1);
         }
         self.queue.submit(std::iter::once(encoder.finish()));
     }

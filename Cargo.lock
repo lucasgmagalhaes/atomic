@@ -864,6 +864,7 @@ version = "0.1.0"
 dependencies = [
  "cef",
  "ipc",
+ "profile",
  "serde_json",
 ]
 

@@ -43,7 +43,11 @@ mod unsupported {
     /// succeeds.
     pub struct Sandbox;
 
-    pub fn confine(_child: &Child, _memory_limit_bytes: u64) -> Result<Sandbox, SandboxError> {
+    pub fn confine(
+        _child: &Child,
+        _memory_limit_bytes: u64,
+        _active_process_limit: u32,
+    ) -> Result<Sandbox, SandboxError> {
         Err(SandboxError::Unsupported)
     }
 }

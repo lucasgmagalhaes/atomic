@@ -32,20 +32,35 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-/// Locates the `profile-worker` binary that should already exist next to
-/// this executable (a real workspace build via `cargo build --workspace`
-/// puts every binary target in the same output directory). Also checks
-/// one directory up, since `cargo test` binaries run from
-/// `target/debug/deps/` while `profile-worker` itself lands in
-/// `target/debug/` - a real installed build only ever needs the first
-/// check; the second exists purely so this function is testable without
-/// a separate install step.
+/// Locates the `cef_profile_worker` binary that should already exist next
+/// to this executable (a real workspace build via `cargo build
+/// --workspace` puts every binary target in the same output directory —
+/// `crates/atomic` doesn't itself depend on `crates/cef`/`cef-shell`, so
+/// `cargo build -p atomic` alone will *not* produce this binary; build
+/// the workspace, not just this one package). Also checks one directory
+/// up, since `cargo test` binaries run from `target/debug/deps/` while
+/// `cef_profile_worker` itself lands in `target/debug/` - a real
+/// installed build only ever needs the first check; the second exists
+/// purely so this function is testable without a separate install step.
+///
+/// Switched from the old engine's `profile-worker` to CEF's
+/// `cef_profile_worker` (2026-09-16, `spec/ROADMAP.md` P1) — same
+/// `profile::Profile` API on this side, unchanged; see
+/// `crates/cef/README.md`'s own section on this binary for what's real
+/// (`NAVIGATE`/`RELOAD`/`PING`/`EVAL`/`CLICK`/`FILL`/`CONSOLE`, verified
+/// against real pages) versus not yet implemented (`CLICK_AT`/
+/// `MOUSE_MOVE`/`DRAG_START`/`DROP_AT`/`CONTEXT_MENU_AT`/`COMPOSITION_*`/
+/// `KEY`/`TAB`/`TAB_REVERSE`/`SCROLL`/`RESIZE`/`SET_FPS_CAP`/`PAUSE`/
+/// `RESUME` — each returns a real `ERROR not yet implemented` rather than
+/// silently no-opping, so a pane's scroll/tab/type-to-fill-by-typing/
+/// resize interactions will visibly fail until those land, not silently
+/// misbehave).
 pub fn worker_binary_path() -> Result<PathBuf, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let name = if cfg!(windows) {
-        "profile-worker.exe"
+        "cef_profile_worker.exe"
     } else {
-        "profile-worker"
+        "cef_profile_worker"
     };
     let dir = exe
         .parent()
@@ -58,7 +73,8 @@ pub fn worker_binary_path() -> Result<PathBuf, String> {
         }
     }
     Err(format!(
-        "profile-worker binary ({name}) not found next to {}",
+        "cef_profile_worker binary ({name}) not found next to {} - build the whole workspace \
+         (cargo build --workspace), not just the atomic package",
         exe.display()
     ))
 }

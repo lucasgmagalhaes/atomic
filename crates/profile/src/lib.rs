@@ -20,11 +20,41 @@ mod interaction;
 mod navigation;
 mod scripting;
 
-/// Total committed memory a single profile process may use before the OS
-/// kills it — see `security::sandbox`. 512 MiB comfortably covers a page's
-/// DOM/layout/render state at this engine's current scope; revisit once
-/// real pages (and their JS heaps) are actually being loaded.
-const PROFILE_MEMORY_LIMIT_BYTES: u64 = 512 * 1024 * 1024;
+/// Total committed memory a single profile process (and, on Windows, every
+/// child process Windows nests into its Job Object — `security::sandbox`'s
+/// `JOB_OBJECT_LIMIT_JOB_MEMORY` sums across the whole job, not per
+/// process) may use before the OS kills it.
+///
+/// Raised from the old engine's 512 MiB (2026-09-16, CEF pivot): a real
+/// CEF-backed worker (`crates/cef/src/bin/cef_profile_worker.rs`) isn't
+/// one process — it's a Chromium process *tree* (browser + GPU + network
+/// service + storage service + one renderer, minimum, even for a blank
+/// page), and 512 MiB for the combined tree is a real, reproducible
+/// crash: the GPU process's own disk-cache init alone can push the job
+/// over the limit, which surfaces as "GPU process isn't usable. Goodbye"
+/// followed by the whole browser process dying — not a graceful
+/// over-budget page, an outright unusable worker. 2 GiB is a real,
+/// tested-working budget for one CEF profile at idle with one loaded
+/// page, not a guess - see `spec/ROADMAP.md` P3's still-open per-profile
+/// idle-memory-measurement item for deriving a tighter, real number once
+/// there's a discard/reload strategy to fall back on (this limit isn't
+/// the same thing as this project's actual idle-footprint *target*, which
+/// P3 is about).
+const PROFILE_MEMORY_LIMIT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
+/// How many processes `security::sandbox::confine`'s Job Object allows
+/// for one profile. Raised from the old engine's `1` (2026-09-16, CEF
+/// pivot) for the exact same reason as `PROFILE_MEMORY_LIMIT_BYTES`
+/// above: `JOB_OBJECT_LIMIT_ACTIVE_PROCESS` isn't a soft per-subprocess
+/// cap, it's a hard "the job cannot exceed this many processes at all" -
+/// a real CEF worker's browser process becomes unusable the instant its
+/// first child (the GPU process) tries to start under the old limit of
+/// `1`, a real crash this fixes (see `git log` around 2026-09-16 for the
+/// exact symptom: an immediate broken pipe with no protocol error at
+/// all). `32` covers a real observed tree (browser + GPU + network
+/// service + storage service + a data-decoder utility process + one or
+/// two renderers) with real headroom, not tuned to the exact minimum.
+const PROFILE_ACTIVE_PROCESS_LIMIT: u32 = 32;
 
 #[derive(Debug)]
 pub enum SpawnError {
@@ -209,7 +239,11 @@ impl Profile {
             .spawn()
             .map_err(SpawnError::Io)?;
 
-        let sandbox = match security::sandbox::confine(&child, PROFILE_MEMORY_LIMIT_BYTES) {
+        let sandbox = match security::sandbox::confine(
+            &child,
+            PROFILE_MEMORY_LIMIT_BYTES,
+            PROFILE_ACTIVE_PROCESS_LIMIT,
+        ) {
             Ok(sandbox) => Some(sandbox),
             Err(e) if cfg!(windows) => {
                 let _ = child.kill();

@@ -497,6 +497,15 @@ fn handle_command(
     }
 }
 
+/// Matches `profile::bin::profile_worker::document_load::DEMO_HTML`'s
+/// structure (a `#counter` element in particular — several tests and
+/// `crates/atomic`'s own automation examples fill/click it) so a freshly
+/// spawned pane shows *something* real before the caller's first real
+/// `NAVIGATE`, same as the old engine's own default. A `data:` URL, not a
+/// second in-process HTML string this worker parses itself — CEF handles
+/// it as a genuine navigation like any other.
+const DEMO_URL: &str = "data:text/html,%3Cdiv%20id%3D%22container%22%3E%3Cp%3EAtomic%20profile%20worker%3C%2Fp%3E%3Cp%3ERendering%20real%20HTML%20via%20a%20real%20Chromium%2C%20not%20html5ever.%3C%2Fp%3E%3Cp%20id%3D%22counter%22%3Etick%200%3C%2Fp%3E%3C%2Fdiv%3E";
+
 fn bgra_to_rgba(bgra: &mut [u8]) {
     for px in bgra.chunks_exact_mut(4) {
         px.swap(0, 2);
@@ -557,9 +566,27 @@ fn main() -> std::process::ExitCode {
         return std::process::ExitCode::from(2);
     };
 
+    // The *real* bug behind both the "Cannot create profile at path" log
+    // and an eventual "GPU process isn't usable. Goodbye" fatal crash when
+    // more than one worker ran concurrently: `RequestContextSettings`'s
+    // `cache_path` (set below) only names a profile *within* a top-level
+    // CEF user-data directory - it's not itself the top-level directory.
+    // Leaving `Settings::cache_path`/`root_cache_path` unset here made
+    // every worker process default to the *same* shared
+    // `%LOCALAPPDATA%\CEF\User Data`, so their GPU disk caches collided
+    // (a real, reproducible lock-contention crash, not a cosmetic log
+    // line). Each worker is already its own OS process (this project's
+    // per-profile isolation unit - see spec/architecture/isolation-and-
+    // perf.md), so giving each one its own top-level `cache_path` here is
+    // both the fix and the correct isolation boundary; `RequestContext`
+    // then just uses the default profile under it instead of naming a
+    // second, redundant path.
+    let cache_dir = profile_cache_dir(&shmem_name);
     let settings = Settings {
         windowless_rendering_enabled: true as _,
         no_sandbox: true as _,
+        cache_path: CefString::from(cache_dir.to_string_lossy().as_ref()),
+        persist_session_cookies: 1,
         ..Default::default()
     };
     assert_eq!(
@@ -573,14 +600,7 @@ fn main() -> std::process::ExitCode {
         "cef::initialize failed"
     );
 
-    let cache_dir = profile_cache_dir(&shmem_name);
-    let context_settings = RequestContextSettings {
-        cache_path: CefString::from(cache_dir.to_string_lossy().as_ref()),
-        persist_session_cookies: 1,
-        ..Default::default()
-    };
-    let mut context: Option<RequestContext> =
-        request_context_create_context(Some(&context_settings), None);
+    let mut context: Option<RequestContext> = request_context_create_context(None, None);
 
     let captured = Rc::new(RefCell::new(None));
     let render_handler = RenderHandlerBuilder::build(WorkerRenderHandler {
@@ -608,7 +628,7 @@ fn main() -> std::process::ExitCode {
     let browser = browser_host_create_browser_sync(
         Some(&window_info),
         Some(&mut client),
-        Some(&"about:blank".into()),
+        Some(&DEMO_URL.into()),
         Some(&browser_settings),
         None,
         context.as_mut(),

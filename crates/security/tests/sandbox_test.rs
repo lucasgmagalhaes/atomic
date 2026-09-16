@@ -22,7 +22,7 @@ fn confine_assigns_the_real_limits_it_asked_for() {
     let mut child = spawn_long_running_process();
 
     let memory_limit = 256 * 1024 * 1024;
-    let sb = sandbox::confine(&child, memory_limit).expect("confine should succeed");
+    let sb = sandbox::confine(&child, memory_limit, 1).expect("confine should succeed");
 
     let (active_process_limit, job_memory_limit) =
         sandbox::query_limits(&sb).expect("query_limits should succeed");
@@ -39,7 +39,7 @@ fn dropping_the_sandbox_kills_the_confined_process() {
     let child = spawn_long_running_process();
     let pid = child.id();
 
-    let sb = sandbox::confine(&child, 256 * 1024 * 1024).expect("confine should succeed");
+    let sb = sandbox::confine(&child, 256 * 1024 * 1024, 1).expect("confine should succeed");
     // Deliberately not killing `child` ourselves - only the job's
     // kill-on-close should be what ends it.
     drop(sb);
@@ -74,6 +74,6 @@ fn confine_is_a_documented_no_op_off_windows() {
     let child = std::process::Command::new("true")
         .spawn()
         .expect("failed to spawn a trivial process");
-    let result = sandbox::confine(&child, 1024 * 1024);
+    let result = sandbox::confine(&child, 1024 * 1024, 1);
     assert!(result.is_err());
 }

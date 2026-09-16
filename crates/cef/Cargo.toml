@@ -13,3 +13,6 @@ edition = "2021"
 cef = { version = "152", default-features = false, features = ["build-util", "resources"] }
 serde_json = "1"
 ipc = { path = "../ipc" }
+
+[dev-dependencies]
+profile = { path = "../profile" }

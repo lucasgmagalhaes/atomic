@@ -55,11 +55,27 @@ impl Drop for Sandbox {
 }
 
 /// Assigns `child` to a fresh Job Object capped at `memory_limit_bytes` of
-/// total committed memory and `1` active process (a profile worker isn't
-/// expected to spawn grandchildren; if it ever needs to, this limit moves
-/// with it). Returns the [`Sandbox`] guard - drop it to tear down the
-/// confinement (and kill anything still running in it).
-pub fn confine(child: &Child, memory_limit_bytes: u64) -> Result<Sandbox, SandboxError> {
+/// total committed memory and `active_process_limit` active processes.
+/// Returns the [`Sandbox`] guard - drop it to tear down the confinement
+/// (and kill anything still running in it).
+///
+/// `active_process_limit` used to be hardcoded to `1` ("a profile worker
+/// isn't expected to spawn grandchildren") — true for the old single-
+/// process engine, a real, reproducible bug for a CEF-backed worker
+/// (2026-09-16 CEF pivot): CEF is multi-process by design (browser + GPU
+/// + network service + storage service + at least one renderer, even for
+/// a blank page — see `spec/architecture/cef-integration.md`), and
+/// Windows Job Objects enforce `JOB_OBJECT_LIMIT_ACTIVE_PROCESS` by
+/// refusing to let the job exceed it at all — the browser process itself
+/// becomes unusable the moment its second child tries to start, not a
+/// graceful "just that one subprocess fails." Now a caller-supplied
+/// parameter (not silently raised process-wide) so a genuinely
+/// single-process worker can still opt into the tighter `1`.
+pub fn confine(
+    child: &Child,
+    memory_limit_bytes: u64,
+    active_process_limit: u32,
+) -> Result<Sandbox, SandboxError> {
     let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
     if job.is_null() {
         return Err(SandboxError::CreateJobObject(
@@ -72,7 +88,7 @@ pub fn confine(child: &Child, memory_limit_bytes: u64) -> Result<Sandbox, Sandbo
     info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
         | JOB_OBJECT_LIMIT_ACTIVE_PROCESS
         | JOB_OBJECT_LIMIT_JOB_MEMORY;
-    info.BasicLimitInformation.ActiveProcessLimit = 1;
+    info.BasicLimitInformation.ActiveProcessLimit = active_process_limit;
     info.JobMemoryLimit = memory_limit_bytes as usize;
 
     let ok = unsafe {

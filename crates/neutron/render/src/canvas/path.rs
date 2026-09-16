@@ -7,6 +7,14 @@ use super::helpers::{color_to_f32, point_to_ndc};
 use super::pipeline::Vertex;
 use super::Canvas2D;
 
+/// Straight-line segment count [`Canvas2D::bezier_curve_to`]/
+/// [`Canvas2D::quadratic_curve_to`] sample a curve into. No natural
+/// "angle span" to scale against the way [`Canvas2D::arc`] does (a
+/// Bézier curve has no fixed center/radius), so this is a single fixed
+/// constant — smooth enough at this project's target UI scale, not
+/// adaptive to curve length like `arc`'s own segment count is.
+const CURVE_SEGMENTS: usize = 32;
+
 impl Canvas2D {
     /// `ctx.beginPath()` — discards any points accumulated since the last
     /// call.
@@ -69,6 +77,54 @@ impl Canvas2D {
         }
     }
 
+    /// `ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, x, y)` — appends a cubic
+    /// Bézier curve from the current point (`path_points.last()`) through
+    /// the two control points to `(x, y)`, sampled as a straight-line
+    /// polyline (fixed `CURVE_SEGMENTS` count) into `path_points`, same
+    /// "narrower than spec, clearly documented" convention as
+    /// [`Self::arc`]'s own polyline approximation. Unlike `arc`, a cubic
+    /// curve's shape is defined *relative to the current point* rather
+    /// than a center/radius, so (matching real spec's own requirement of
+    /// an existing subpath) this is a no-op when `path_points` is empty —
+    /// no implicit starting point exists to curve from.
+    pub fn bezier_curve_to(&mut self, cp1x: f32, cp1y: f32, cp2x: f32, cp2y: f32, x: f32, y: f32) {
+        let Some(&p0) = self.path_points.last() else {
+            return;
+        };
+        let p1 = (cp1x, cp1y);
+        let p2 = (cp2x, cp2y);
+        let p3 = (x, y);
+        for i in 1..=CURVE_SEGMENTS {
+            let t = i as f32 / CURVE_SEGMENTS as f32;
+            let mt = 1.0 - t;
+            let (a, b, c, d) = (mt * mt * mt, 3.0 * mt * mt * t, 3.0 * mt * t * t, t * t * t);
+            self.path_points.push((
+                a * p0.0 + b * p1.0 + c * p2.0 + d * p3.0,
+                a * p0.1 + b * p1.1 + c * p2.1 + d * p3.1,
+            ));
+        }
+    }
+
+    /// `ctx.quadraticCurveTo(cpx, cpy, x, y)` — same shape as
+    /// [`Self::bezier_curve_to`], one fewer control point. No-op when
+    /// `path_points` is empty, same reasoning.
+    pub fn quadratic_curve_to(&mut self, cpx: f32, cpy: f32, x: f32, y: f32) {
+        let Some(&p0) = self.path_points.last() else {
+            return;
+        };
+        let p1 = (cpx, cpy);
+        let p2 = (x, y);
+        for i in 1..=CURVE_SEGMENTS {
+            let t = i as f32 / CURVE_SEGMENTS as f32;
+            let mt = 1.0 - t;
+            let (a, b, c) = (mt * mt, 2.0 * mt * t, t * t);
+            self.path_points.push((
+                a * p0.0 + b * p1.0 + c * p2.0,
+                a * p0.1 + b * p1.1 + c * p2.1,
+            ));
+        }
+    }
+
     /// `ctx.closePath()` — a no-op: [`Self::fill`]'s fan triangulation
     /// already treats `path_points` as an implicitly closed polygon (its
     /// last point connects back to the first), so there's no separate
@@ -84,8 +140,10 @@ impl Canvas2D {
     /// gradient fill for paths (unlike `fillRect` - a documented, narrower
     /// cut to avoid duplicating the gradient-projection logic for
     /// arbitrary triangle geometry). Curves (`arc`/`bezierCurveTo`/
-    /// `quadraticCurveTo`) aren't supported - only straight `lineTo`
-    /// segments. Does nothing on fewer than 3 points.
+    /// `quadraticCurveTo`) are pre-sampled into straight `path_points`
+    /// segments by their own methods before ever reaching this fan
+    /// triangulation — no curve-aware fill logic lives here. Does nothing
+    /// on fewer than 3 points.
     pub fn fill(&mut self) {
         if self.path_points.len() < 3 {
             return;

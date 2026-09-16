@@ -78,6 +78,10 @@ impl Canvas2D {
     /// gradient (see `Canvas2D::set_fill_gradient`) if one is set, else
     /// the plain `fill_style` color.
     pub fn fill_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        if let Some(pattern) = self.fill_pattern.clone() {
+            self.draw_pattern_rect(x, y, w, h, &pattern);
+            return;
+        }
         match self.fill_gradient {
             Some(super::FillGradient::Linear(gradient)) => {
                 self.draw_gradient_rect(x, y, w, h, gradient)

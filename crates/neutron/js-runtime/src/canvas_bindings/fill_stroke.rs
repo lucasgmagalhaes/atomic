@@ -8,9 +8,12 @@ use quickjs_sys as sys;
 
 use layout_engine::Color;
 
+use render::Pattern;
+
 use super::context2d_opaque;
 use super::gradient::{resolve_gradient, GradientData, GRADIENT_CLASS_KIND};
 use super::helpers::{format_hex_color, parse_hex_color, read_js_f32, read_js_string};
+use super::pattern::pattern_opaque;
 
 pub(super) unsafe extern "C" fn fill_rect(
     ctx: *mut sys::JSContext,
@@ -97,11 +100,11 @@ pub(super) unsafe extern "C" fn fill_style_set(
     if ptr.is_null() {
         return sys::js_undefined();
     }
-    // A `CanvasGradient` (from `createLinearGradient`/`createRadialGradient`)
-    // takes priority over treating `val` as a hex string - real spec
-    // assigns whatever value's own type dictates (string vs
-    // `CanvasGradient` object), this crate just checks the one gradient
-    // class it actually has.
+    // A `CanvasGradient`/`CanvasPattern` (from `createLinearGradient`/
+    // `createRadialGradient`/`createConicGradient`/`createPattern`) takes
+    // priority over treating `val` as a hex string - real spec assigns
+    // whatever value's own type dictates (string vs object), this crate
+    // just checks the two object classes it actually has.
     if val.tag == sys::JS_TAG_OBJECT {
         let rt = sys::JS_GetRuntime(ctx);
         let class_id = crate::class_registry::class_id_for(rt, GRADIENT_CLASS_KIND);
@@ -110,6 +113,12 @@ pub(super) unsafe extern "C" fn fill_style_set(
             if let Some(gradient) = resolve_gradient(&(*gptr).borrow()) {
                 (*ptr).borrow_mut().set_fill_gradient(gradient);
             }
+            return sys::js_undefined();
+        }
+        let pptr = pattern_opaque(rt, val);
+        if !pptr.is_null() {
+            let pattern: Pattern = (*pptr).borrow().clone();
+            (*ptr).borrow_mut().set_fill_pattern(pattern);
             return sys::js_undefined();
         }
     }

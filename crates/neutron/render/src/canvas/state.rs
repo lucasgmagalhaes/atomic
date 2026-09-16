@@ -6,12 +6,17 @@
 use layout_engine::{Color, FontFamily};
 
 use super::gradients::FillGradient;
+use super::patterns::Pattern;
 use super::Canvas2D;
 
-#[derive(Clone, Copy)]
+/// Not `Copy` (unlike before `fill_pattern` existed) — [`Pattern`] owns a
+/// `Vec<u8>` of source pixels, so `save()` clones this field explicitly
+/// instead of relying on a blanket `Copy` derive.
+#[derive(Clone)]
 pub(super) struct CanvasState {
     pub(super) fill_style: Color,
     pub(super) fill_gradient: Option<FillGradient>,
+    pub(super) fill_pattern: Option<Pattern>,
     pub(super) stroke_style: Color,
     pub(super) line_width: f32,
     pub(super) font_size: f32,
@@ -23,6 +28,7 @@ impl Canvas2D {
     pub fn set_fill_style(&mut self, color: Color) {
         self.fill_style = color;
         self.fill_gradient = None;
+        self.fill_pattern = None;
     }
 
     /// `ctx.fillStyle`'s getter side — a JS binding (`js-runtime`'s
@@ -55,6 +61,7 @@ impl Canvas2D {
         self.state_stack.push(CanvasState {
             fill_style: self.fill_style,
             fill_gradient: self.fill_gradient,
+            fill_pattern: self.fill_pattern.clone(),
             stroke_style: self.stroke_style,
             line_width: self.line_width,
             font_size: self.font_size,
@@ -70,6 +77,7 @@ impl Canvas2D {
         if let Some(state) = self.state_stack.pop() {
             self.fill_style = state.fill_style;
             self.fill_gradient = state.fill_gradient;
+            self.fill_pattern = state.fill_pattern;
             self.stroke_style = state.stroke_style;
             self.line_width = state.line_width;
             self.font_size = state.font_size;

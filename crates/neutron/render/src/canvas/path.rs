@@ -148,7 +148,6 @@ impl Canvas2D {
         if self.path_points.len() < 3 {
             return;
         }
-        let (tx, ty) = (self.translate_x, self.translate_y);
         let (vw, vh) = (self.width as f32, self.height as f32);
         let color = color_to_f32(self.fill_style);
         let p0 = self.path_points[0];
@@ -156,8 +155,9 @@ impl Canvas2D {
         for pair in self.path_points[1..].windows(2) {
             let (p1, p2) = (pair[0], pair[1]);
             for p in [p0, p1, p2] {
+                let (px, py) = self.transform_point(p.0, p.1);
                 vertices.push(Vertex {
-                    position: point_to_ndc(p.0 + tx, p.1 + ty, vw, vh),
+                    position: point_to_ndc(px, py, vw, vh),
                     color,
                 });
             }

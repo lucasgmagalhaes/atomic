@@ -9,16 +9,13 @@ use super::pipeline::{rect_vertices, Vertex};
 use super::Canvas2D;
 
 impl Canvas2D {
-    /// Applies `translate_x`/`translate_y` to every rect this crate paints -
-    /// `fill_rect`/`clear_rect`/`stroke_rect` all funnel through here, so
-    /// this is the one place the translate offset needs to be added.
+    /// Applies the current transform matrix to every rect this crate
+    /// paints - `fill_rect`/`clear_rect`/`stroke_rect` all funnel through
+    /// here, so this is the one place each corner needs to be transformed.
     fn draw_rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color, replace: bool) {
-        let (x, y) = (x + self.translate_x, y + self.translate_y);
+        let corners = self.transformed_corners(x, y, w, h);
         let vertices = rect_vertices(
-            x,
-            y,
-            w,
-            h,
+            corners,
             color_to_f32(color),
             self.width as f32,
             self.height as f32,

@@ -108,10 +108,8 @@ impl Canvas2D {
         if layout.glyphs.is_empty() {
             return;
         }
-        let (tx, ty) = (
-            (x + self.translate_x).round() as i32,
-            (y + self.translate_y).round() as i32,
-        );
+        let (txf, tyf) = self.transform_point(x, y);
+        let (tx, ty) = (txf.round() as i32, tyf.round() as i32);
         let glyphs: Vec<ClippedGlyph> = layout
             .glyphs
             .iter()

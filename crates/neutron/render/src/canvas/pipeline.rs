@@ -33,16 +33,17 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 }
 "#;
 
+/// `corners` is `[tl, tr, bl, br]` in pixel space (already transform-
+/// matrix-applied by the caller - see `Canvas2D::transform_point`) -
+/// arbitrary quad, not necessarily axis-aligned once `scale`/`rotate` are
+/// in play.
 pub(super) fn rect_vertices(
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
+    corners: [(f32, f32); 4],
     color: [f32; 4],
     vw: f32,
     vh: f32,
 ) -> [Vertex; 6] {
-    rect_vertices_colors(x, y, w, h, [color, color, color, color], vw, vh)
+    rect_vertices_colors(corners, [color, color, color, color], vw, vh)
 }
 
 /// Like [`rect_vertices`] but with an independent color per corner
@@ -51,35 +52,28 @@ pub(super) fn rect_vertices(
 /// same zero-new-shader trick `render::gpu::shader::rect_to_vertices`
 /// already uses for CSS `linear-gradient` backgrounds.
 pub(super) fn rect_vertices_colors(
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
+    corners: [(f32, f32); 4],
     colors: [[f32; 4]; 4],
     vw: f32,
     vh: f32,
 ) -> [Vertex; 6] {
-    let to_ndc_x = |px: f32| (px / vw) * 2.0 - 1.0;
-    let to_ndc_y = |px: f32| 1.0 - (px / vh) * 2.0;
-    let x0 = to_ndc_x(x);
-    let x1 = to_ndc_x(x + w);
-    let y0 = to_ndc_y(y);
-    let y1 = to_ndc_y(y + h);
+    let to_ndc = |(px, py): (f32, f32)| [(px / vw) * 2.0 - 1.0, 1.0 - (py / vh) * 2.0];
+    let [tl_p, tr_p, bl_p, br_p] = corners;
     let [tl_c, tr_c, bl_c, br_c] = colors;
     let tl = Vertex {
-        position: [x0, y0],
+        position: to_ndc(tl_p),
         color: tl_c,
     };
     let tr = Vertex {
-        position: [x1, y0],
+        position: to_ndc(tr_p),
         color: tr_c,
     };
     let bl = Vertex {
-        position: [x0, y1],
+        position: to_ndc(bl_p),
         color: bl_c,
     };
     let br = Vertex {
-        position: [x1, y1],
+        position: to_ndc(br_p),
         color: br_c,
     };
     [tl, bl, tr, tr, bl, br]

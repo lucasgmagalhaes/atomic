@@ -87,10 +87,14 @@ impl Canvas2D {
     /// fill instead of a solid color - computes each corner's exact color
     /// by projecting it onto the gradient line (see `helpers::gradient_t`),
     /// then lets the GPU's own vertex-color interpolation fill in the
-    /// interior. Gradient coordinates are *not* offset by
-    /// `translate_x`/`translate_y` (see [`LinearGradient`]'s own doc on
-    /// this scope cut) - only the rect's own position is. `pub(super)`
-    /// since `shapes::fill_rect` dispatches to this.
+    /// interior. Gradient coordinates are *not* run through the current
+    /// transform matrix (see [`LinearGradient`]'s own doc on this scope
+    /// cut) - only the rect's own corners are, same documented cut as
+    /// before this crate had `scale`/`rotate`, just extended from
+    /// "not translated" to "not scaled/rotated either" - a rotated
+    /// gradient-filled rect keeps its gradient direction fixed in canvas
+    /// space, not rotated along with the rect. `pub(super)` since
+    /// `shapes::fill_rect` dispatches to this.
     pub(super) fn draw_gradient_rect(
         &mut self,
         x: f32,
@@ -109,19 +113,18 @@ impl Canvas2D {
             corner_color(x, y + h),     // bl
             corner_color(x + w, y + h), // br
         ];
-        let (tx, ty) = (x + self.translate_x, y + self.translate_y);
-        let vertices =
-            rect_vertices_colors(tx, ty, w, h, colors, self.width as f32, self.height as f32);
+        let corners = self.transformed_corners(x, y, w, h);
+        let vertices = rect_vertices_colors(corners, colors, self.width as f32, self.height as f32);
         self.submit_vertices(&vertices, false);
     }
 
     /// Same as [`Self::draw_gradient_rect`] but for a [`RadialGradient`] -
     /// see that type's own doc for why this needs a dedicated pipeline
     /// (`radial_pipeline`/[`RadialVertex`]) rather than the 4-corner-color
-    /// trick `draw_gradient_rect` uses. Gradient coordinates are *not*
-    /// offset by `translate_x`/`translate_y`, same documented cut as the
-    /// linear case. `pub(super)` since `shapes::fill_rect` dispatches to
-    /// this.
+    /// trick `draw_gradient_rect` uses. Gradient coordinates are *not* run
+    /// through the current transform matrix, same documented cut as the
+    /// linear case (`draw_gradient_rect`'s own doc). `pub(super)` since
+    /// `shapes::fill_rect` dispatches to this.
     pub(super) fn draw_radial_gradient_rect(
         &mut self,
         x: f32,
@@ -130,21 +133,19 @@ impl Canvas2D {
         h: f32,
         gradient: RadialGradient,
     ) {
-        let (tx, ty) = (x + self.translate_x, y + self.translate_y);
+        let corners = self.transformed_corners(x, y, w, h);
         let (vw, vh) = (self.width as f32, self.height as f32);
         let start = color_to_f32(gradient.start);
         let end = color_to_f32(gradient.end);
-        let corner = |px: f32, py: f32| RadialVertex {
+        let corner = |(px, py): (f32, f32)| RadialVertex {
             position: point_to_ndc(px, py, vw, vh),
             local_pos: [px - gradient.cx, py - gradient.cy],
             radius: gradient.radius.max(0.001),
             start,
             end,
         };
-        let tl = corner(tx, ty);
-        let tr = corner(tx + w, ty);
-        let bl = corner(tx, ty + h);
-        let br = corner(tx + w, ty + h);
+        let [tl_p, tr_p, bl_p, br_p] = corners;
+        let (tl, tr, bl, br) = (corner(tl_p), corner(tr_p), corner(bl_p), corner(br_p));
         let vertices = [tl, bl, tr, tr, bl, br];
         self.submit_radial_vertices(&vertices);
     }

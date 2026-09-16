@@ -36,11 +36,6 @@ pub(super) unsafe fn set_num(ctx: *mut sys::JSContext, obj: sys::JSValue, key: &
     sys::JS_SetPropertyStr(ctx, obj, name.as_ptr(), sys::js_float64(val));
 }
 
-unsafe fn set_bool(ctx: *mut sys::JSContext, obj: sys::JSValue, key: &str, val: bool) {
-    let name = CString::new(key).unwrap();
-    sys::JS_SetPropertyStr(ctx, obj, name.as_ptr(), sys::js_bool(val));
-}
-
 pub(super) unsafe fn get_prop(
     ctx: *mut sys::JSContext,
     obj: sys::JSValue,

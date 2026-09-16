@@ -1080,25 +1080,26 @@ impl Canvas2D {
         pixels
     }
 
-    /// `ctx.toDataURL()`/`ctx.toDataURL('image/png')` — real PNG encoding
-    /// (`image_decode::encode_png`) of the current canvas contents plus
-    /// base64, producing a genuine `data:image/png;base64,...` URL a page
-    /// could actually decode - not a stub/placeholder string. Scope cut:
-    /// **always PNG**, regardless of what MIME type a caller asks for -
-    /// this crate has no JPEG/WebP *encoder* (`image_decode`'s own `image`
-    /// crate dependency is decode-only for those two formats here), so an
-    /// `image/jpeg` request silently gets PNG bytes back instead (matching
-    /// this crate's general "best-effort, no separate error path"
-    /// convention) rather than a `image/png` MIME lie with truly different
-    /// bytes underneath. No `toBlob` (this crate's JS binding has no
-    /// `Blob`/callback machinery to hand results back asynchronously
-    /// through) — `toDataURL`'s synchronous string return is the one form
-    /// wired up.
-    pub fn to_data_url(&self) -> String {
+    /// Real PNG encoding (`image_decode::encode_png`) of the current
+    /// canvas contents - the shared byte-producing step [`Self::to_data_url`]
+    /// (base64-encoded) and the JS binding's `toBlob` (wrapped in a real
+    /// `Blob`) both build on. **Always PNG** regardless of what MIME type
+    /// a caller asks for - this crate has no JPEG/WebP *encoder*
+    /// (`image_decode`'s own `image` crate dependency is decode-only for
+    /// those two formats here) - matching this crate's general
+    /// "best-effort, no separate error path" convention rather than an
+    /// `image/jpeg` MIME lie with truly different bytes underneath.
+    pub fn to_png_bytes(&self) -> Vec<u8> {
         let pixels = self.get_image_data();
-        let png = image_decode::encode_png(self.width, self.height, &pixels).unwrap_or_default();
+        image_decode::encode_png(self.width, self.height, &pixels).unwrap_or_default()
+    }
+
+    /// `ctx.toDataURL()`/`ctx.toDataURL('image/png')` — [`Self::to_png_bytes`]
+    /// plus base64, producing a genuine `data:image/png;base64,...` URL a
+    /// page could actually decode - not a stub/placeholder string.
+    pub fn to_data_url(&self) -> String {
         use base64::Engine;
-        let encoded = base64::engine::general_purpose::STANDARD.encode(png);
+        let encoded = base64::engine::general_purpose::STANDARD.encode(self.to_png_bytes());
         format!("data:image/png;base64,{encoded}")
     }
 

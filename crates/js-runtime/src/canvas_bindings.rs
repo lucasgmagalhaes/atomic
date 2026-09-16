@@ -13,9 +13,10 @@
 //! plus real `ctx.font`, `fillText`/`strokeText`/`measureText` (no
 //! `maxWidth` wrapping, `strokeText` isn't a real outline stroke - see
 //! `render::Canvas2D::fill_text`/`stroke_text`/`set_font`'s own docs).
-//! Also adds `toDataURL()` on `HTMLCanvasElement` itself (see
-//! [`to_data_url`]'s own doc - real PNG encoding, requires an
-//! already-active 2D context).
+//! Also adds `toDataURL()`/`toBlob()` on `HTMLCanvasElement` itself (see
+//! [`to_data_url`]/[`to_blob`]'s own docs - real PNG encoding, requires
+//! an already-active 2D context; `toBlob`'s callback runs synchronously,
+//! not queued as a real spec-shaped async task).
 //!
 //! `getContext(id)` only recognizes `"2d"` (any other value, including
 //! `"webgl"`, returns `null` - no WebGL/`OffscreenCanvas` context here).
@@ -985,12 +986,76 @@ unsafe extern "C" fn to_data_url(
     sys::JS_NewStringLen(ctx, url.as_ptr() as *const std::os::raw::c_char, url.len())
 }
 
-/// Adds `getContext(id)`/`toDataURL()` to `HTMLCanvasElement.prototype` -
-/// called from `element_classes::classes::ensure_html_subclass`'s own
+/// Calls `callback(arg)` synchronously and frees both the call result and
+/// `arg` - the shared tail of [`to_blob`]'s every branch.
+unsafe fn call_with_arg(ctx: *mut sys::JSContext, callback: sys::JSValue, mut arg: sys::JSValue) {
+    let result = sys::JS_Call(ctx, callback, sys::js_undefined(), 1, &mut arg);
+    sys::JS_FreeValue(ctx, result);
+    sys::JS_FreeValue(ctx, arg);
+}
+
+/// `canvas.toBlob(callback, type, quality)` — a real spec method on
+/// `HTMLCanvasElement` itself. Real spec calls `callback` asynchronously
+/// (a task queued on the event loop); this crate has no task queue for
+/// that, so `callback` runs **synchronously** instead, right before
+/// `toBlob` itself returns - a documented timing deviation, not just a
+/// missing feature (a caller relying on `toBlob` returning before its
+/// callback fires would observe different ordering here). The `Blob` it
+/// receives is real (`crate::blob`'s own class - real byte storage,
+/// `size`/`type`/`slice`/`text`/`arrayBuffer`), wrapping real PNG bytes
+/// from `render::Canvas2D::to_png_bytes` (same bytes `toDataURL` itself
+/// base64-encodes - see that function's own doc for the "always PNG"
+/// scope cut, which applies here too; `type`/`quality` arguments are
+/// accepted but ignored). `callback(null)` when the canvas has no active
+/// 2D context, matching `toDataURL`'s own `""` case.
+unsafe extern "C" fn to_blob(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 1 {
+        return sys::js_undefined();
+    }
+    let callback = *argv;
+    let backing = node_id(ctx, this_val).and_then(|node| {
+        let state = crate::host_state::get(ctx);
+        if state.is_null() {
+            None
+        } else {
+            (*state).canvases.get(&node).cloned()
+        }
+    });
+    let Some(backing) = backing else {
+        call_with_arg(ctx, callback, sys::js_null());
+        return sys::js_undefined();
+    };
+
+    let bytes = backing.borrow().to_png_bytes();
+    let rt = sys::JS_GetRuntime(ctx);
+    let class_id = crate::class_registry::class_id_for(rt, crate::blob::BLOB_CLASS_KIND);
+    let blob_obj = sys::JS_NewObjectClass(ctx, class_id);
+    if sys::js_is_exception(&blob_obj) {
+        call_with_arg(ctx, callback, sys::js_null());
+        return sys::js_undefined();
+    }
+    let inner = crate::blob::BlobInner {
+        bytes,
+        mime: "image/png".to_string(),
+    };
+    sys::JS_SetOpaque(blob_obj, Box::into_raw(Box::new(inner)) as *mut c_void);
+    call_with_arg(ctx, callback, blob_obj);
+    sys::js_undefined()
+}
+
+/// Adds `getContext(id)`/`toDataURL()`/`toBlob()` to
+/// `HTMLCanvasElement.prototype` - called from
+/// `element_classes::classes::ensure_html_subclass`'s own
 /// `HTML_CANVAS_CLASS_KIND` branch, same wiring point every other
 /// element-specific method set (`define_form_properties`,
 /// `define_select_properties`, ...) already uses.
 pub(crate) unsafe fn define_canvas_properties(ctx: *mut sys::JSContext, proto: sys::JSValue) {
     define_method(ctx, proto, "getContext", get_context, 1);
     define_method(ctx, proto, "toDataURL", to_data_url, 0);
+    define_method(ctx, proto, "toBlob", to_blob, 1);
 }

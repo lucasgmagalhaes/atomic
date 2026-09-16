@@ -32,3 +32,35 @@ fn viewport_size_is_readable_by_the_host() {
     assert_eq!(ctx.viewport_width(), 800.0);
     assert_eq!(ctx.viewport_height(), 600.0);
 }
+
+#[test]
+fn visual_viewport_width_and_height_mirror_inner_width_and_height() {
+    let d = dom::Dom::new();
+    let rt = Runtime::new();
+    let mut ctx = Context::with_dom(&rt, d);
+    ctx.set_viewport_size(1024.0, 768.0);
+    let result = ctx
+        .eval(
+            "`${window.visualViewport.width},${window.visualViewport.height}`",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "1024,768");
+}
+
+#[test]
+fn visual_viewport_scale_is_always_one_and_offsets_are_always_zero() {
+    let d = dom::Dom::new();
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { \
+               const v = window.visualViewport; \
+               return `${v.scale},${v.offsetLeft},${v.offsetTop},${v.pageLeft},${v.pageTop}`; \
+             })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "1,0,0,0,0");
+}

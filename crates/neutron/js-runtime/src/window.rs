@@ -39,7 +39,11 @@
 //! reads of `host_state::HostState::viewport_width`/`viewport_height`, set
 //! by `Context::set_viewport_size` whenever a host lays a page out against
 //! a real size. No setter — real `window.innerWidth`/`innerHeight` are
-//! spec-read-only.
+//! spec-read-only. `window.visualViewport` reuses the same two backing
+//! fields for its own `width`/`height` (this engine models no pinch-zoom,
+//! so the visual and layout viewports are always identical in size) —
+//! see [`make_visual_viewport`]'s own doc for its scope cut (a plain
+//! object, not a real `EventTarget`).
 //!
 //! Also real `alert`/`confirm`/`prompt` (`spec/matrix/browser-apis.md`'s
 //! Device/UI row): each is a real, callable global that coerces its
@@ -176,6 +180,50 @@ unsafe extern "C" fn window_inner_height_get(
     sys::js_float64(height)
 }
 
+/// `window.visualViewport.scale` — always `1.0`. This engine has no
+/// pinch-zoom/mobile-viewport-meta-tag model, so there's no real
+/// browser-UI-vs-layout-viewport distinction to report; a plain `1.0`
+/// (never-zoomed) is the honest constant, not a placeholder standing in
+/// for something unimplemented.
+unsafe extern "C" fn visual_viewport_scale_get(
+    _ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+) -> sys::JSValue {
+    sys::js_float64(1.0)
+}
+
+/// `window.visualViewport.offsetLeft`/`.offsetTop`/`.pageLeft`/
+/// `.pageTop` — always `0.0`, same "no pinch-zoom/browser-chrome-overlap
+/// model" reasoning as [`visual_viewport_scale_get`]: with no zoom, the
+/// visual and layout viewports are always identical, so every offset
+/// between them is genuinely zero, not an unimplemented placeholder.
+unsafe extern "C" fn visual_viewport_zero_get(
+    _ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+) -> sys::JSValue {
+    sys::js_float64(0.0)
+}
+
+/// `window.visualViewport` — a plain object (not a real `EventTarget`;
+/// no `addEventListener('resize'/'scroll', ...)` — a page wanting to
+/// react to viewport size changes uses `window`'s own real `"resize"`
+/// event instead, see `crate::context::viewport::Context::fire_resize`).
+/// `width`/`height` reuse [`window_inner_width_get`]/
+/// [`window_inner_height_get`] directly (same `this_val`-ignoring shape,
+/// reading straight from `HostState`) since with no pinch-zoom modeled
+/// the visual viewport is always identical in size to the layout
+/// viewport `innerWidth`/`innerHeight` already report.
+unsafe fn make_visual_viewport(ctx: *mut sys::JSContext) -> sys::JSValue {
+    let obj = sys::JS_NewObject(ctx);
+    define_getter(ctx, obj, "width", window_inner_width_get as Getter);
+    define_getter(ctx, obj, "height", window_inner_height_get as Getter);
+    define_getter(ctx, obj, "scale", visual_viewport_scale_get as Getter);
+    for name in ["offsetLeft", "offsetTop", "pageLeft", "pageTop"] {
+        define_getter(ctx, obj, name, visual_viewport_zero_get as Getter);
+    }
+    obj
+}
+
 unsafe extern "C" fn window_scroll_to(
     ctx: *mut sys::JSContext,
     _this_val: sys::JSValue,
@@ -299,6 +347,11 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
         "innerHeight",
         window_inner_height_get as Getter,
     );
+    {
+        let visual_viewport = make_visual_viewport(ctx);
+        let name_c = CString::new("visualViewport").unwrap();
+        sys::JS_SetPropertyStr(ctx, global, name_c.as_ptr(), visual_viewport);
+    }
     for name in ["scroll", "scrollTo"] {
         define_method(ctx, global, name, window_scroll_to, 2);
     }

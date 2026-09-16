@@ -8,7 +8,6 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use automation::AutomationEngine;
-use neutron::js::Runtime;
 
 // `automation` doesn't declare a `profile-worker` bin itself, so cargo
 // never sets `CARGO_BIN_EXE_profile-worker` for this test binary (that env
@@ -44,8 +43,7 @@ fn spawn_demo_profile(shmem_name: &str) -> profile::Profile {
 
 #[test]
 fn every_and_on_fire_through_tick() {
-    let runtime = Runtime::new();
-    let engine = AutomationEngine::new(&runtime, HashMap::new());
+    let engine = AutomationEngine::new(HashMap::new());
 
     engine
         .run(
@@ -76,8 +74,7 @@ fn pane_goto_reaches_a_real_profile() {
     let mut panes = HashMap::new();
     panes.insert("acc1".to_string(), profile.clone());
 
-    let runtime = Runtime::new();
-    let engine = AutomationEngine::new(&runtime, panes);
+    let engine = AutomationEngine::new(panes);
 
     let result = engine.run(r#"pane("acc1").goto("not-a-real-url")"#, "test.js");
     // The demo `profile-worker` has no real network path wired for this
@@ -96,8 +93,7 @@ fn pane_fill_and_click_reach_a_real_element_on_the_demo_page() {
     let mut panes = HashMap::new();
     panes.insert("acc1".to_string(), profile.clone());
 
-    let runtime = Runtime::new();
-    let engine = AutomationEngine::new(&runtime, panes);
+    let engine = AutomationEngine::new(panes);
 
     // The built-in demo page (see `profile-worker`'s `DEMO_HTML`) has a
     // real `#counter` element - fill sets its textContent for real, click
@@ -120,8 +116,7 @@ fn pane_fill_and_click_throw_on_an_unknown_id_or_selector() {
     let mut panes = HashMap::new();
     panes.insert("acc1".to_string(), profile.clone());
 
-    let runtime = Runtime::new();
-    let engine = AutomationEngine::new(&runtime, panes);
+    let engine = AutomationEngine::new(panes);
 
     assert!(engine
         .run(r##"pane("acc1").fill("#does-not-exist", "x")"##, "test.js")
@@ -139,8 +134,7 @@ fn pane_fill_and_click_throw_on_an_unknown_id_or_selector() {
 
 #[test]
 fn cron_fires_at_most_once_per_minute_and_rejects_bad_expressions() {
-    let runtime = Runtime::new();
-    let engine = AutomationEngine::new(&runtime, HashMap::new());
+    let engine = AutomationEngine::new(HashMap::new());
 
     engine
         .run(
@@ -170,8 +164,7 @@ fn cron_fires_at_most_once_per_minute_and_rejects_bad_expressions() {
 
 #[test]
 fn rebind_lets_the_same_engine_control_a_pane_added_after_construction() {
-    let runtime = Runtime::new();
-    let mut engine = AutomationEngine::new(&runtime, HashMap::new());
+    let mut engine = AutomationEngine::new(HashMap::new());
 
     // No panes yet - the engine's own JS state (globals it may have set)
     // must survive the rebind below, not just the pane map.
@@ -208,8 +201,7 @@ fn rebind_removes_access_to_a_pane_no_longer_present() {
     let mut panes = HashMap::new();
     panes.insert("acc1".to_string(), profile.clone());
 
-    let runtime = Runtime::new();
-    let mut engine = AutomationEngine::new(&runtime, panes);
+    let mut engine = AutomationEngine::new(panes);
     assert!(engine
         .run(r##"pane("acc1").fill("#counter", "x")"##, "test.js")
         .is_ok());
@@ -224,8 +216,7 @@ fn rebind_removes_access_to_a_pane_no_longer_present() {
 
 #[test]
 fn unknown_pane_name_throws() {
-    let runtime = Runtime::new();
-    let engine = AutomationEngine::new(&runtime, HashMap::new());
+    let engine = AutomationEngine::new(HashMap::new());
     let result = engine.run(r#"pane("nope").goto("https://example.com")"#, "test.js");
     assert!(result.is_err());
 }

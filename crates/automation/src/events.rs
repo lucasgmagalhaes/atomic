@@ -1,96 +1,75 @@
 //! `on(name, callback)` — the host-driven half of the mockup's automation
-//! surface (watchdog reconnect, claim-idle triggers, ...). Not a DOM event:
-//! `AutomationEngine`'s context has no `neutron::dom::Dom`, so there's nothing to
-//! collide with `js-runtime`'s own `dispatchEvent`. Registry keyed by
-//! `JSContext` pointer, same thread_local convention as `timers`/
-//! `fetch_async` in js-runtime — see that crate's `timers.rs` for why.
+//! surface (watchdog reconnect, claim-idle triggers, ...). Not a DOM event —
+//! `AutomationEngine`'s context has no DOM at all, so there's nothing to
+//! collide with a page's own `dispatchEvent`.
+//!
+//! State lives in a plain `Rc<EventState>` owned by `AutomationEngine`, same
+//! reasoning `cron.rs`'s own doc gives for dropping the pre-pivot
+//! thread-local-keyed-by-context-pointer registry.
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::ffi::CString;
-use std::os::raw::c_int;
+use std::rc::Rc;
 
-use neutron::quickjs_sys as sys;
+use rquickjs::{Ctx, Function, Persistent, Result as JsResult};
 
-thread_local! {
-    static LISTENERS: RefCell<HashMap<usize, HashMap<String, Vec<sys::JSValue>>>> =
-        RefCell::new(HashMap::new());
+#[derive(Default)]
+pub struct EventState {
+    listeners: RefCell<HashMap<String, Vec<Persistent<Function<'static>>>>>,
 }
 
-unsafe fn read_js_string(ctx: *mut sys::JSContext, val: sys::JSValue) -> Option<String> {
-    let mut len: usize = 0;
-    let ptr = sys::JS_ToCStringLen2(ctx, &mut len, val, false);
-    if ptr.is_null() {
-        return None;
-    }
-    let bytes = std::slice::from_raw_parts(ptr as *const u8, len);
-    let s = String::from_utf8_lossy(bytes).into_owned();
-    sys::JS_FreeCString(ctx, ptr);
-    Some(s)
-}
-
-unsafe extern "C" fn on(
-    ctx: *mut sys::JSContext,
-    _this_val: sys::JSValue,
-    argc: c_int,
-    argv: *mut sys::JSValue,
-) -> sys::JSValue {
-    if argc < 2 {
-        return sys::js_undefined();
-    }
-    let Some(name) = read_js_string(ctx, *argv) else {
-        return sys::js_undefined();
-    };
-    let callback = sys::JS_DupValue(ctx, *argv.add(1));
-    LISTENERS.with(|reg| {
-        reg.borrow_mut()
-            .entry(ctx as usize)
-            .or_default()
-            .entry(name)
-            .or_default()
-            .push(callback);
-    });
-    sys::js_undefined()
-}
-
-pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
-    let global = sys::JS_GetGlobalObject(ctx);
-    let name_c = CString::new("on").unwrap();
-    let f = sys::JS_NewCFunction2(ctx, on, name_c.as_ptr(), 2, sys::JS_CFUNC_GENERIC, 0);
-    sys::JS_SetPropertyStr(ctx, global, name_c.as_ptr(), f);
-    sys::JS_FreeValue(ctx, global);
-}
-
-/// Calls every listener registered for `name` on `ctx`, in registration
-/// order. Listeners aren't removed — there's no `off()` yet, matching this
-/// pass's "wiring, not full coverage" scope (see this crate's top-level
-/// doc).
-pub(crate) unsafe fn emit(ctx: *mut sys::JSContext, name: &str) {
-    let callbacks = LISTENERS.with(|reg| {
-        reg.borrow()
-            .get(&(ctx as usize))
-            .and_then(|m| m.get(name))
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
-            .map(|cb| sys::JS_DupValue(ctx, cb))
-            .collect::<Vec<_>>()
-    });
-    for callback in callbacks {
-        let result = sys::JS_Call(ctx, callback, sys::js_undefined(), 0, std::ptr::null_mut());
-        sys::JS_FreeValue(ctx, result);
-        sys::JS_FreeValue(ctx, callback);
-    }
-}
-
-/// Frees every still-registered listener for `ctx`. Must run before
-/// `JS_FreeContext(ctx)`.
-pub(crate) unsafe fn cleanup(ctx: *mut sys::JSContext) {
-    let Some(by_name) = LISTENERS.with(|reg| reg.borrow_mut().remove(&(ctx as usize))) else {
-        return;
-    };
-    for (_, callbacks) in by_name {
-        for callback in callbacks {
-            sys::JS_FreeValue(ctx, callback);
+impl EventState {
+    /// Same reasoning as `cron::CronState::clear` — must run while `ctx` is
+    /// still alive, before `AutomationEngine`'s `Context`/`Runtime` free.
+    pub fn clear(&self, ctx: &Ctx<'_>) {
+        for (_, callbacks) in self.listeners.borrow_mut().drain() {
+            for callback in callbacks {
+                if let Ok(f) = callback.restore(ctx) {
+                    drop(f);
+                }
+            }
         }
     }
+
+    /// Calls every listener registered for `name`, in registration order.
+    /// Listeners aren't removed — there's no `off()` yet, matching this
+    /// pass's "wiring, not full coverage" scope (see this crate's
+    /// top-level doc).
+    pub fn emit(&self, ctx: &Ctx<'_>, name: &str) {
+        let callbacks = self
+            .listeners
+            .borrow()
+            .get(name)
+            .cloned()
+            .unwrap_or_default();
+        for callback in callbacks {
+            if let Ok(f) = callback.restore(ctx) {
+                let _: JsResult<()> = f.call(());
+            }
+        }
+    }
+}
+
+/// Named `'js` for the same reason `cron::make_cron_fn` documents: `Ctx`
+/// and `Function` must share exactly one lifetime for `Persistent::save`.
+fn make_on_fn<'js>(ctx: &Ctx<'js>, state: Rc<EventState>) -> JsResult<Function<'js>> {
+    Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'js>, name: String, callback: Function<'js>| -> JsResult<()> {
+            let persisted = Persistent::save(&ctx, callback);
+            state
+                .listeners
+                .borrow_mut()
+                .entry(name)
+                .or_default()
+                .push(persisted);
+            Ok(())
+        },
+    )
+}
+
+/// Registers the `on(name, callback)` global, closing over `state`.
+pub(crate) fn register(ctx: &Ctx<'_>, state: Rc<EventState>) -> JsResult<()> {
+    let on_fn = make_on_fn(ctx, state)?;
+    ctx.globals().set("on", on_fn)?;
+    Ok(())
 }

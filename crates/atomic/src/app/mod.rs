@@ -89,7 +89,7 @@ pub(crate) struct AtomicApp {
     /// no cleanup needed before process exit" trade this workspace's
     /// native quickjs bindings already make for their own opaque pointers,
     /// just via a safe `Box::leak` instead of raw allocation.
-    automation_engine: automation::AutomationEngine<'static>,
+    automation_engine: automation::AutomationEngine,
     /// The active UI language - see `atomic::i18n`. Toggled via the EN/PT
     /// buttons in the toolbar, applied immediately (every string is looked
     /// up fresh each `update()` frame, so there's no restart/re-render step
@@ -158,13 +158,7 @@ impl Default for AtomicApp {
         let mut workspace = WorkspaceManager::new();
         let panes = vec![pane::spawn_pane(&mut workspace, "pane-1".to_string())];
 
-        // See `automation_engine`'s own doc for why this leak is
-        // deliberate: the runtime must outlive an app-lifetime engine,
-        // and `AtomicApp` isn't guaranteed a stable address of its own.
-        let automation_runtime: &'static neutron::js::Runtime =
-            Box::leak(Box::new(neutron::js::Runtime::new()));
-        let automation_engine =
-            automation::AutomationEngine::new(automation_runtime, std::collections::HashMap::new());
+        let automation_engine = automation::AutomationEngine::new(std::collections::HashMap::new());
 
         AtomicApp {
             panes,

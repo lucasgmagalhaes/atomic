@@ -57,8 +57,7 @@ pub fn run_script<'p>(
     panes: impl IntoIterator<Item = (&'p str, &'p BrowserView)>,
     script: &str,
 ) -> Result<String, String> {
-    let runtime = neutron::js::Runtime::new();
-    let engine = automation::AutomationEngine::new(&runtime, scoped_panes(workspace, panes));
+    let engine = automation::AutomationEngine::new(scoped_panes(workspace, panes));
     engine
         .run(script, "shell-script.js")
         .map_err(|e| e.to_string())

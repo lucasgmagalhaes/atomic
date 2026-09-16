@@ -3,16 +3,20 @@
 //! (`minute hour day month weekday`), `*` or one exact value per field —
 //! no ranges/lists/steps (`1-5`, `*/15`, `1,3,5`), no seconds field. `tick`
 //! must be called at least once a minute by the host for a due trigger to
-//! actually fire — same cooperative-pump deviation as js-runtime's
-//! `timers`/`fetch_async` (no real event loop yet, see this crate's
-//! `AutomationEngine::tick` doc).
+//! actually fire — same cooperative-pump deviation `AutomationEngine::tick`
+//! documents.
+//!
+//! State lives in a plain `Rc<CronState>` owned by `AutomationEngine`, not
+//! a thread-local registry keyed by a raw `JSContext` pointer (the
+//! pre-CEF-pivot version's approach, needed only because raw `quickjs-sys`
+//! gives no way to close a native function over Rust state directly) —
+//! `rquickjs::Function::new` closures can capture an `Rc` clone directly,
+//! so there's nothing to look up by context identity anymore.
 use std::cell::RefCell;
-use std::collections::HashMap;
-use std::ffi::CString;
-use std::os::raw::c_int;
+use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use neutron::quickjs_sys as sys;
+use rquickjs::{Ctx, Exception, Function, Persistent, Result as JsResult};
 
 #[derive(Debug, PartialEq)]
 pub struct CronError(pub String);
@@ -128,116 +132,88 @@ fn now_civil() -> Civil {
 }
 
 struct CronEntry {
-    // Returned to JS as the `cron()` call's id; not read Rust-side yet —
-    // there's no `clearCron(id)` in this pass, matching `on`'s own "no
-    // `off()` yet" scope note in `events.rs`.
-    #[allow(dead_code)]
-    id: u32,
     schedule: Schedule,
-    callback: sys::JSValue,
+    callback: Persistent<Function<'static>>,
     last_fired_minute: Option<i64>,
 }
 
 #[derive(Default)]
-struct CronState {
-    next_id: u32,
-    entries: Vec<CronEntry>,
+pub struct CronState {
+    entries: RefCell<Vec<CronEntry>>,
 }
 
-thread_local! {
-    static REGISTRIES: RefCell<HashMap<usize, CronState>> = RefCell::new(HashMap::new());
-}
-
-unsafe fn read_js_string(ctx: *mut sys::JSContext, val: sys::JSValue) -> Option<String> {
-    let mut len: usize = 0;
-    let ptr = sys::JS_ToCStringLen2(ctx, &mut len, val, false);
-    if ptr.is_null() {
-        return None;
-    }
-    let bytes = std::slice::from_raw_parts(ptr as *const u8, len);
-    let s = String::from_utf8_lossy(bytes).into_owned();
-    sys::JS_FreeCString(ctx, ptr);
-    Some(s)
-}
-
-unsafe extern "C" fn cron_fn(
-    ctx: *mut sys::JSContext,
-    _this_val: sys::JSValue,
-    argc: c_int,
-    argv: *mut sys::JSValue,
-) -> sys::JSValue {
-    if argc < 2 {
-        return sys::js_undefined();
-    }
-    let Some(expr) = read_js_string(ctx, *argv) else {
-        return sys::js_undefined();
-    };
-    let schedule = match Schedule::parse(&expr) {
-        Ok(s) => s,
-        Err(e) => {
-            let msg = e.to_string();
-            let js_msg =
-                sys::JS_NewStringLen(ctx, msg.as_ptr() as *const std::os::raw::c_char, msg.len());
-            return sys::JS_Throw(ctx, js_msg);
-        }
-    };
-    let callback = sys::JS_DupValue(ctx, *argv.add(1));
-    let id = REGISTRIES.with(|reg| {
-        let mut map = reg.borrow_mut();
-        let state = map.entry(ctx as usize).or_insert_with(CronState::default);
-        state.next_id += 1;
-        let id = state.next_id;
-        state.entries.push(CronEntry {
-            id,
-            schedule,
-            callback,
-            last_fired_minute: None,
-        });
-        id
-    });
-    sys::js_float64(id as f64)
-}
-
-pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
-    let global = sys::JS_GetGlobalObject(ctx);
-    let name_c = CString::new("cron").unwrap();
-    let f = sys::JS_NewCFunction2(ctx, cron_fn, name_c.as_ptr(), 2, sys::JS_CFUNC_GENERIC, 0);
-    sys::JS_SetPropertyStr(ctx, global, name_c.as_ptr(), f);
-    sys::JS_FreeValue(ctx, global);
-}
-
-/// Fires every registered `cron()` entry whose schedule matches the current
-/// minute and hasn't already fired this minute.
-pub(crate) unsafe fn pump(ctx: *mut sys::JSContext) {
-    let now = now_civil();
-    let due = REGISTRIES.with(|reg| {
-        let mut map = reg.borrow_mut();
-        let Some(state) = map.get_mut(&(ctx as usize)) else {
-            return Vec::new();
-        };
-        let mut due = Vec::new();
-        for entry in state.entries.iter_mut() {
-            if entry.last_fired_minute != Some(now.epoch_minute) && entry.schedule.matches(&now) {
-                entry.last_fired_minute = Some(now.epoch_minute);
-                due.push(sys::JS_DupValue(ctx, entry.callback));
+impl CronState {
+    /// Restores and immediately drops every persisted callback while `ctx`
+    /// is still alive — must run before the owning `Context`/`Runtime`
+    /// free, or quickjs's own shutdown asserts on a non-empty GC object
+    /// list (see `AutomationEngine`'s `Drop` impl, which calls this).
+    /// `Persistent::drop` alone cannot substitute for this: these entries
+    /// are also reachable from the live `cron` global closure itself, so
+    /// the last `Rc<CronState>` (and therefore this `Vec`) may not drop
+    /// until partway through the context's own teardown, too late for a
+    /// `JS_FreeValue`-equivalent call to be safe.
+    pub fn clear(&self, ctx: &Ctx<'_>) {
+        for entry in self.entries.borrow_mut().drain(..) {
+            if let Ok(f) = entry.callback.restore(ctx) {
+                drop(f);
             }
         }
-        due
-    });
-    for callback in due {
-        let result = sys::JS_Call(ctx, callback, sys::js_undefined(), 0, std::ptr::null_mut());
-        sys::JS_FreeValue(ctx, result);
-        sys::JS_FreeValue(ctx, callback);
+    }
+
+    /// Fires every registered entry whose schedule matches the current
+    /// minute and hasn't already fired this minute.
+    pub fn pump(&self, ctx: &Ctx<'_>) {
+        let now = now_civil();
+        let due: Vec<Persistent<Function<'static>>> = {
+            let mut entries = self.entries.borrow_mut();
+            entries
+                .iter_mut()
+                .filter_map(|entry| {
+                    if entry.last_fired_minute != Some(now.epoch_minute)
+                        && entry.schedule.matches(&now)
+                    {
+                        entry.last_fired_minute = Some(now.epoch_minute);
+                        Some(entry.callback.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        };
+        for callback in due {
+            if let Ok(f) = callback.restore(ctx) {
+                let _: JsResult<()> = f.call(());
+            }
+        }
     }
 }
 
-/// Frees every still-registered cron callback for `ctx`. Must run before
-/// `JS_FreeContext(ctx)`.
-pub(crate) unsafe fn cleanup(ctx: *mut sys::JSContext) {
-    let Some(state) = REGISTRIES.with(|reg| reg.borrow_mut().remove(&(ctx as usize))) else {
-        return;
-    };
-    for entry in state.entries {
-        sys::JS_FreeValue(ctx, entry.callback);
-    }
+/// Named `'js` (not `Ctx<'_>`/`Function<'_>` on the closure directly) so
+/// both parameters share exactly one lifetime — required for
+/// `Persistent::save(&ctx, callback)`, which needs `ctx` and `callback` at
+/// the same `'js`; a plain closure elides each parameter's lifetime
+/// independently, which `rquickjs`'s invariant `Ctx`/`Function` types then
+/// reject.
+fn make_cron_fn<'js>(ctx: &Ctx<'js>, state: Rc<CronState>) -> JsResult<Function<'js>> {
+    Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'js>, expr: String, callback: Function<'js>| -> JsResult<()> {
+            let schedule = Schedule::parse(&expr)
+                .map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
+            let persisted = Persistent::save(&ctx, callback);
+            state.entries.borrow_mut().push(CronEntry {
+                schedule,
+                callback: persisted,
+                last_fired_minute: None,
+            });
+            Ok(())
+        },
+    )
+}
+
+/// Registers the `cron(expression, callback)` global, closing over `state`.
+pub(crate) fn register(ctx: &Ctx<'_>, state: Rc<CronState>) -> JsResult<()> {
+    let cron_fn = make_cron_fn(ctx, state)?;
+    ctx.globals().set("cron", cron_fn)?;
+    Ok(())
 }

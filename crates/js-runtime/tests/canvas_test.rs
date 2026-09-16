@@ -217,6 +217,45 @@ fn stroke_rect_draws_a_visible_border_readable_via_get_image_data() {
 }
 
 #[test]
+fn save_and_restore_round_trip_fill_style() {
+    let (d, _) = dom_with_canvas();
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { \
+               const ctx2d = document.querySelector('canvas').getContext('2d'); \
+               ctx2d.fillStyle = '#ff0000'; \
+               ctx2d.save(); \
+               ctx2d.fillStyle = '#00ff00'; \
+               ctx2d.restore(); \
+               return ctx2d.fillStyle; \
+             })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "#ff0000");
+}
+
+#[test]
+fn restore_with_nothing_saved_does_not_throw() {
+    let (d, _) = dom_with_canvas();
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { \
+               const ctx2d = document.querySelector('canvas').getContext('2d'); \
+               ctx2d.restore(); \
+               return 'ok'; \
+             })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "ok");
+}
+
+#[test]
 fn put_image_data_writes_pixels_that_get_image_data_then_reads_back() {
     let mut d = dom::Dom::new();
     let root = d.root();

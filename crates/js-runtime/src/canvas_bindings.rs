@@ -1,9 +1,9 @@
 //! Real `HTMLCanvasElement.getContext('2d')` (`spec/matrix/browser-apis.md`'s
 //! Canvas2D gap): wires the already-existing, GPU-backed `render::Canvas2D`
 //! (`fillRect`/`clearRect`/`fillStyle`/`strokeRect`/`strokeStyle`/
-//! `lineWidth` — see that module's own scope-cut doc, which this binding
-//! inherits unchanged) into JavaScript and into this worker's real page
-//! compositing.
+//! `lineWidth`/`save`/`restore` — see that module's own scope-cut doc,
+//! which this binding inherits unchanged) into JavaScript and into this
+//! worker's real page compositing.
 //!
 //! `getContext(id)` only recognizes `"2d"` (any other value, including
 //! `"webgl"`, returns `null` - no WebGL/`OffscreenCanvas` context here).
@@ -155,6 +155,32 @@ unsafe extern "C" fn fill_rect(
             read_js_f32(*argv.add(3)),
         );
         (*ptr).borrow_mut().fill_rect(x, y, w, h);
+    }
+    sys::js_undefined()
+}
+
+unsafe extern "C" fn save(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let ptr = context2d_opaque(sys::JS_GetRuntime(ctx), this_val);
+    if !ptr.is_null() {
+        (*ptr).borrow_mut().save();
+    }
+    sys::js_undefined()
+}
+
+unsafe extern "C" fn restore(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let ptr = context2d_opaque(sys::JS_GetRuntime(ctx), this_val);
+    if !ptr.is_null() {
+        (*ptr).borrow_mut().restore();
     }
     sys::js_undefined()
 }
@@ -401,6 +427,8 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     define_method(ctx, proto, "fillRect", fill_rect, 4);
     define_method(ctx, proto, "clearRect", clear_rect, 4);
     define_method(ctx, proto, "strokeRect", stroke_rect, 4);
+    define_method(ctx, proto, "save", save, 0);
+    define_method(ctx, proto, "restore", restore, 0);
     define_method(ctx, proto, "getImageData", get_image_data, 4);
     define_method(ctx, proto, "putImageData", put_image_data, 3);
     define_getter_setter(

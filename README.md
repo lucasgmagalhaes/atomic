@@ -60,7 +60,7 @@ See the [ECC README](https://github.com/affaan-m/ECC) for the full agent/skill c
 
 ### impeccable
 
-A frontend design skill (`shape`/`audit`/`critique`/`polish`/`harden`/... — see [`.agents/skills/impeccable/SKILL.md`](.agents/skills/impeccable/SKILL.md) for the full verb list) for UI work on `apps/shell`'s `egui` interface and the mockup HTML prototype. It's vendored directly in this repo under `.agents/skills/impeccable/` (plus Codex agent definitions under `.codex/agents/`), so there's nothing to install — cloning the repo and opening it in Claude Code or Codex is enough; the skill is auto-discovered from the project directory. Invoke it with `/impeccable <verb> <target>` (e.g. `/impeccable audit apps/shell`).
+A frontend design skill (`shape`/`audit`/`critique`/`polish`/`harden`/... — see [`.agents/skills/impeccable/SKILL.md`](.agents/skills/impeccable/SKILL.md) for the full verb list) for UI work on `crates/atomic`'s `egui` interface and the mockup HTML prototype. It's vendored directly in this repo under `.agents/skills/impeccable/` (plus Codex agent definitions under `.codex/agents/`), so there's nothing to install — cloning the repo and opening it in Claude Code or Codex is enough; the skill is auto-discovered from the project directory. Invoke it with `/impeccable <verb> <target>` (e.g. `/impeccable audit crates/atomic`).
 
 ## Status
 

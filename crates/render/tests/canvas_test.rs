@@ -595,6 +595,37 @@ fn begin_path_discards_previously_accumulated_points() {
 }
 
 #[test]
+fn fill_text_paints_non_background_pixels() {
+    let mut canvas = Canvas2D::new(60, 30);
+    canvas.set_fill_style(Color {
+        r: 255,
+        g: 0,
+        b: 0,
+        a: 255,
+    });
+    canvas.fill_text("Hi", 5.0, 5.0);
+
+    let pixels = canvas.get_image_data();
+    let any_painted = pixels.chunks(4).any(|px| px[3] != 0);
+    assert!(any_painted, "expected fillText to paint at least one pixel");
+}
+
+#[test]
+fn fill_text_with_empty_string_does_nothing() {
+    let mut canvas = Canvas2D::new(20, 20);
+    canvas.set_fill_style(Color {
+        r: 255,
+        g: 0,
+        b: 0,
+        a: 255,
+    });
+    canvas.fill_text("", 5.0, 5.0);
+
+    let pixels = canvas.get_image_data();
+    assert!(pixels.chunks(4).all(|px| px[3] == 0));
+}
+
+#[test]
 fn put_image_data_clips_a_negative_origin() {
     let mut canvas = Canvas2D::new(4, 4);
     // A 4x4 solid-yellow region positioned so its top-left spills off the

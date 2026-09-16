@@ -475,6 +475,62 @@ fn fill_with_fewer_than_3_points_does_nothing() {
 }
 
 #[test]
+fn fill_text_paints_visible_pixels() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let body = d.create_element("body");
+    d.append_child(root, body);
+    let canvas = d.create_element("canvas");
+    d.set_attribute(canvas, "width", "60");
+    d.set_attribute(canvas, "height", "30");
+    d.append_child(body, canvas);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { \
+               const ctx2d = document.querySelector('canvas').getContext('2d'); \
+               ctx2d.fillStyle = '#ff0000'; \
+               ctx2d.fillText('Hi', 5, 5); \
+               const data = ctx2d.getImageData(0, 0, 60, 30).data; \
+               let painted = false; \
+               for (let i = 3; i < data.length; i += 4) { \
+                 if (data[i] !== 0) { painted = true; break; } \
+               } \
+               return painted; \
+             })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "true");
+}
+
+#[test]
+fn fill_text_with_empty_string_paints_nothing() {
+    let (d, _) = dom_with_canvas();
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { \
+               const ctx2d = document.querySelector('canvas').getContext('2d'); \
+               ctx2d.fillStyle = '#ff0000'; \
+               ctx2d.fillText('', 5, 5); \
+               const data = ctx2d.getImageData(0, 0, 300, 150).data; \
+               let painted = false; \
+               for (let i = 3; i < data.length; i += 4) { \
+                 if (data[i] !== 0) { painted = true; break; } \
+               } \
+               return painted; \
+             })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "false");
+}
+
+#[test]
 fn put_image_data_writes_pixels_that_get_image_data_then_reads_back() {
     let mut d = dom::Dom::new();
     let root = d.root();

@@ -4,7 +4,7 @@
 //! most recently focused (see `dispatch_click_at`'s doc), same convention
 //! `type_key` already uses.
 
-use js_runtime::Context;
+use neutron::js::Context;
 
 use super::helpers::js_string_literal;
 

@@ -1,6 +1,6 @@
 //! `on(name, callback)` — the host-driven half of the mockup's automation
 //! surface (watchdog reconnect, claim-idle triggers, ...). Not a DOM event:
-//! `AutomationEngine`'s context has no `dom::Dom`, so there's nothing to
+//! `AutomationEngine`'s context has no `neutron::dom::Dom`, so there's nothing to
 //! collide with `js-runtime`'s own `dispatchEvent`. Registry keyed by
 //! `JSContext` pointer, same thread_local convention as `timers`/
 //! `fetch_async` in js-runtime — see that crate's `timers.rs` for why.
@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::ffi::CString;
 use std::os::raw::c_int;
 
-use quickjs_sys as sys;
+use neutron::quickjs_sys as sys;
 
 thread_local! {
     static LISTENERS: RefCell<HashMap<usize, HashMap<String, Vec<sys::JSValue>>>> =

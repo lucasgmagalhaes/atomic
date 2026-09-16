@@ -1,0 +1,29 @@
+[package]
+name = "js-runtime"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+quickjs-sys = { path = "quickjs-sys" }
+dom = { path = "../dom" }
+html = { path = "../html" }
+css = { path = "../css" }
+platform-apis = { path = "../../platform-apis" }
+net = { path = "../../net" }
+storage = { path = "../../storage" }
+layout-engine = { path = "../layout-engine" }
+render = { path = "../render" }
+url = "2.5.8"
+urlencoding = "2.1"
+
+[dev-dependencies]
+criterion = "0.8"
+libc = "0.2"
+
+[[bench]]
+name = "hot_loop"
+harness = false
+
+[[bench]]
+name = "native_bench"
+harness = false

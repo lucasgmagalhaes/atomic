@@ -3,7 +3,7 @@
 //! publishes rendered frames over `ipc::FrameWriter` on a real per-frame
 //! loop, not just in response to `RELOAD` — a fixed ~60 Hz cadence driven
 //! by `std::time::Instant`, the same "vsync loop" role a real browser's
-//! per-tab process runs. Every tick pumps `js_runtime::Context`'s timers
+//! per-tab process runs. Every tick pumps `neutron::js::Context`'s timers
 //! (`setTimeout`/`setInterval`/`requestAnimationFrame` — see
 //! `js-runtime`'s `timers` module, which needed exactly this kind of
 //! caller to become more than a manually-pumped test fixture) and
@@ -41,7 +41,7 @@
 //! `<link>`s): each `<img src>` is resolved against the page's own URL,
 //! fetched via `fetch_with_cookies`, and decoded via `image_decode`. The
 //! decode/sizing/painting primitives themselves (`image_decode`,
-//! `layout_engine::apply_image_sizes`, `render::build_image_list`/
+//! `neutron::layout::apply_image_sizes`, `neutron::paint::build_image_list`/
 //! `composite_images`) already existed and were crate-tested — this
 //! worker just never called any of them, so a real navigated page's
 //! `<img>` rendered as an empty box regardless. `Page::render`/
@@ -53,7 +53,7 @@
 //! `collect_meta_csp_policies`, both consumed by `Page::load` before any
 //! page script runs): the document response's own CSP headers and every
 //! `<meta http-equiv="Content-Security-Policy">` tag in the parsed HTML
-//! are handed to `js_runtime::Context::add_csp_policy` as separate
+//! are handed to `neutron::js::Context::add_csp_policy` as separate
 //! policies, so a fetched page's own `fetchSync`/`fetch()`/XHR targets
 //! are gated by its server's policy — see `js-runtime`'s `csp` module for
 //! what a policy actually restricts in this engine.
@@ -85,9 +85,9 @@
 //!   `Node.prototype.dispatchEvent` JS binding) at the element with that
 //!   id; replies `CLICKED` or `ERROR <message>` (no such id, or only
 //!   `#id` selectors are supported at all — this engine has no general
-//!   CSS selector query beyond `dom::Dom::find_by_id`)
+//!   CSS selector query beyond `neutron::dom::Dom::find_by_id`)
 //! - `FILL <#id> <value>` -> sets that element's real `.value`
-//!   (`dom::Dom::value`/`set_value`, independent of children/text) if it's
+//!   (`neutron::dom::Dom::value`/`set_value`, independent of children/text) if it's
 //!   an `<input>`/`<textarea>`, `textContent` otherwise (this engine's
 //!   only settable string for any other element); replies
 //!   `FILLED`/`ERROR <message>`. `value` may not contain a newline (this
@@ -102,7 +102,7 @@
 //!   `RELOAD`/`NAVIGATE`, same as `focused_id`. No horizontal scroll.
 //!   The page's own script sees and can drive the same value now too
 //!   (`window.scrollY`/`pageYOffset`/`scroll`/`scrollTo`/`scrollBy` —
-//!   `js_runtime::window`, `ROADMAP.md` P3 item 22): [`commands::WorkerState::sync_scroll`]
+//!   `neutron::js::window`, `ROADMAP.md` P3 item 22): [`commands::WorkerState::sync_scroll`]
 //!   runs before every command's paint, reading back whatever the page's
 //!   own script last requested (`Context::scroll_y`) and re-clamping it
 //!   the same way this command already did, so a `SCROLL` from the shell
@@ -172,8 +172,8 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use js_runtime::Runtime;
-use render::GpuRenderer;
+use neutron::js::Runtime;
+use neutron::paint::GpuRenderer;
 
 use commands::WorkerState;
 use document_load::{load_source, PageSource};
@@ -193,7 +193,7 @@ fn main() {
     let height: u32 = args[3].parse().expect("height must be a positive integer");
     let proxy = parse_proxy_arg(args.get(4).map(String::as_str));
     let dns_server = parse_dns_arg(args.get(5).map(String::as_str));
-    // A missing/empty/unparseable value degrades to `render::GpuRenderer::
+    // A missing/empty/unparseable value degrades to `neutron::paint::GpuRenderer::
     // new`'s own default-adapter heuristic - same "refuse to be strict
     // about an optional trailing arg" stance as `dns_server`, not `proxy`'s
     // stricter one (there's no "adapter selection failed" state worth
@@ -260,12 +260,12 @@ fn main() {
         renderer,
         writer,
         // Real "which id does the next KEY affect" state - a thin cache of
-        // `dom::Dom`'s own real `active_element()` (see `dispatch_click_at`'s
+        // `neutron::dom::Dom`'s own real `active_element()` (see `dispatch_click_at`'s
         // doc), kept as a `String` id here since `KEY`'s handler goes through
         // `id`-selector `eval()` scripts like every other command in this
         // protocol. Reset on `RELOAD`/`NAVIGATE` since a fresh `Page` means a
         // fresh DOM the old id might not even exist in anymore (a fresh
-        // `dom::Dom` starts with no focus of its own either).
+        // `neutron::dom::Dom` starts with no focus of its own either).
         focused_id: None,
         // Real dblclick-window state - see `WorkerState::last_click`'s own
         // doc. Starts empty; nothing to reset on `RELOAD`/`NAVIGATE` beyond

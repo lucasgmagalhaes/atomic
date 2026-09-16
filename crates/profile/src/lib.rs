@@ -127,10 +127,10 @@ impl Profile {
     }
 
     /// Same as [`spawn`](Self::spawn), plus opening a specific GPU adapter
-    /// (see `render::list_adapters`'s own doc for how a caller enumerates
-    /// real ones) instead of `render::GpuRenderer::new`'s default-adapter
+    /// (see `neutron::paint::list_adapters`'s own doc for how a caller enumerates
+    /// real ones) instead of `neutron::paint::GpuRenderer::new`'s default-adapter
     /// heuristic — the mockup's "Settings > Performance > GPU" knob.
-    /// `index` is into `render::list_adapters()`'s own order; an
+    /// `index` is into `neutron::paint::list_adapters()`'s own order; an
     /// out-of-range index is the worker process's problem to report (it
     /// panics on that, same as `GpuRenderer::new_with_adapter` itself
     /// does), not this crate's.

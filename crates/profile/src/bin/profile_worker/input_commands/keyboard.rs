@@ -1,6 +1,6 @@
 //! `type_key` — split out from `input_commands.rs`.
 
-use js_runtime::Context;
+use neutron::js::Context;
 
 use super::helpers::js_string_literal;
 
@@ -17,7 +17,7 @@ const CANCELED_SENTINEL: &str = "__ATOMIC_COPY_CUT_CANCELED__";
 /// most recently focused (see `dispatch_click_at`'s doc) - `"Backspace"`
 /// removes the field's real last character, anything else is appended
 /// verbatim as typed text. Writes the element's real `.value`
-/// (`dom::Dom::value`/`set_value`) now, not `textContent` — a real
+/// (`neutron::dom::Dom::value`/`set_value`) now, not `textContent` — a real
 /// `"keydown"` event still dispatches first via the existing
 /// `dispatchEvent` binding, so a page's own `keydown` listener genuinely
 /// runs, same as a real browser firing the event before applying the

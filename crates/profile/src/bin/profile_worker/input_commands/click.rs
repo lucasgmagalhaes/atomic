@@ -2,7 +2,7 @@
 
 use std::time::{Duration, Instant};
 
-use js_runtime::Context;
+use neutron::js::Context;
 
 use crate::page::Page;
 
@@ -18,7 +18,7 @@ const DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(500);
 /// already-real `Node.prototype.dispatchEvent` JS binding - if the page's
 /// own script attached a `"click"` listener via `addEventListener`, it
 /// actually runs. `Err` covers both "no such id" and the listener itself
-/// throwing - `js_runtime::Context::eval`'s own placeholder exception
+/// throwing - `neutron::js::Context::eval`'s own placeholder exception
 /// message (see its doc comment) can't currently distinguish the two, so
 /// this reports the more actionable one.
 pub(crate) fn dispatch_click(ctx: &Context, selector: &str) -> Result<(), String> {
@@ -37,7 +37,7 @@ pub(crate) fn dispatch_click(ctx: &Context, selector: &str) -> Result<(), String
 /// via the nearest id-addressable ancestor (see `nearest_id_ancestor`'s
 /// own doc for the real limitation that implies), and — real focus model,
 /// via `focus_element`/`blur_element` (JS `.focus()`/`.blur()`, not
-/// `dom::Dom::focus`/`clear_focus` called directly, so real `"focus"`/
+/// `neutron::dom::Dom::focus`/`clear_focus` called directly, so real `"focus"`/
 /// `"blur"`/`"change"` events dispatch too) — focuses the hit node itself
 /// if it's a real `<input>`/`<textarea>` with its own `id` (so `KEY` can
 /// type into it, and `document.activeElement` sees it too), or clears
@@ -86,7 +86,7 @@ pub(crate) fn dispatch_click_at(
 
     // Re-borrow fresh rather than reusing the pre-dispatch `dom_ref` - the
     // click listener that just ran (real JS, via `dispatch_click` above)
-    // could have mutated the DOM, and this engine's arena (`dom::Dom`'s
+    // could have mutated the DOM, and this engine's arena (`neutron::dom::Dom`'s
     // internal `Vec<Slot>`) isn't guaranteed not to reallocate on a node
     // creation in between.
     let (focusable, focus_id, already_focused, previously_focused_id) = {

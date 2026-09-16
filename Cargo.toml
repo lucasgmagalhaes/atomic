@@ -1,11 +1,15 @@
 [workspace]
 resolver = "2"
 members = [
-    "apps/shell",
-    "crates/net", "crates/html", "crates/css", "crates/layout-engine",
-    "crates/atoms", "crates/dom", "crates/js-runtime", "crates/js-runtime/quickjs-sys",
-    "crates/render", "crates/webgl", "crates/storage", "crates/workers",
+    "crates/atomic",
+    "crates/net", "crates/storage",
     "crates/platform-apis", "crates/profile", "crates/ipc", "crates/security",
-    "crates/automation", "crates/import", "crates/image_decode",
+    "crates/automation", "crates/import",
+    "crates/neutron",
+    "crates/neutron/html", "crates/neutron/css", "crates/neutron/layout-engine",
+    "crates/neutron/atoms", "crates/neutron/dom", "crates/neutron/js-runtime",
+    "crates/neutron/js-runtime/quickjs-sys",
+    "crates/neutron/render", "crates/neutron/webgl", "crates/neutron/workers",
+    "crates/neutron/image_decode",
     "xtask",
 ]

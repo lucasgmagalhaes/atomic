@@ -1,6 +1,6 @@
 //! `load_scripts` — split out from `page_source.rs`.
 
-use dom::{Dom, NodeData, NodeId};
+use neutron::dom::{Dom, NodeData, NodeId};
 
 use crate::network::ResourceCache;
 

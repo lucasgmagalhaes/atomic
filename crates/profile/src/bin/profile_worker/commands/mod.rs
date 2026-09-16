@@ -13,8 +13,8 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use js_runtime::Runtime;
-use render::GpuRenderer;
+use neutron::js::Runtime;
+use neutron::paint::GpuRenderer;
 
 use super::document_load::PageSource;
 use super::page;
@@ -86,7 +86,7 @@ impl<'rt> WorkerState<'rt> {
     }
 
     /// Checks for and performs a pending `<a href>` click-navigation
-    /// request (see `js_runtime::Context::take_pending_navigation`'s own
+    /// request (see `neutron::js::Context::take_pending_navigation`'s own
     /// doc) — called after any command that could dispatch a real click
     /// (`CLICK`/`CLICK_AT`/`EVAL`). This *is* a real navigation, same
     /// `fire_before_unload` gate, `load_source`, and focus/scroll reset

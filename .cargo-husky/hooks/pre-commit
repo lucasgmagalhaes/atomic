@@ -1,12 +1,15 @@
 #!/bin/sh
 # Custom user-hooks script (see xtask/Cargo.toml's cargo-husky features) so
 # Rust formatting and the non-Rust chrome-bundle formatting (CSS/HTML/JS
-# under apps/shell/chrome/) are both enforced from one script, rather than
+# under crates/atomic/chrome/) are both enforced from one script, rather than
 # cargo-husky's fixed run-cargo-fmt hook covering Rust alone.
 set -e
 
 echo "pre-commit: cargo fmt --all -- --check"
 cargo fmt --all -- --check
+
+echo "pre-commit: check-neutron-boundary"
+cargo run -p xtask -- check-neutron-boundary
 
 if command -v dprint >/dev/null 2>&1; then
     echo "pre-commit: dprint check"

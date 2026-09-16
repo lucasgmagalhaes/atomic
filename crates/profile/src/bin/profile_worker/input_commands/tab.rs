@@ -1,6 +1,6 @@
 //! `TabOutcome`/`tab_focus` — split out from `input_commands.rs`.
 
-use js_runtime::Context;
+use neutron::js::Context;
 
 use crate::page::Page;
 
@@ -13,7 +13,7 @@ use super::helpers::js_string_literal;
 /// "focus starts on the document" default) — this is what lets a page's
 /// own `keydown` listener call `preventDefault()` and actually suppress
 /// the engine's default Tab-focus-movement, the same way
-/// `js_runtime::dom_bindings::forms::run_default_click_action` already
+/// `neutron::js::dom_bindings::forms::run_default_click_action` already
 /// respects `preventDefault()` on `"click"`. Returns `true` when the
 /// default action was prevented.
 fn dispatch_tab_keydown(
@@ -55,7 +55,7 @@ pub(crate) enum TabOutcome {
 /// movement — dispatches a real `"keydown"` first (see
 /// `dispatch_tab_keydown`); if the page prevented it, no focus change
 /// happens and this returns `Ok(TabOutcome::DefaultPrevented)`. Otherwise
-/// computes the next target via `dom::Dom::next_focus_target`'s own
+/// computes the next target via `neutron::dom::Dom::next_focus_target`'s own
 /// cycling rule, then blurs whatever was focused before and focuses the
 /// new target through the real JS `.blur()`/`.focus()` bindings
 /// (`blur_element`/`focus_element`, same as `dispatch_click_at`), so real

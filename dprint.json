@@ -1,5 +1,5 @@
 {
-  // Formats the workspace's only non-Rust source: apps/shell's chrome
+  // Formats the workspace's only non-Rust source: crates/atomic's chrome
   // bundles (HTML/CSS/JS). Rust itself is formatted by `cargo fmt`
   // (rustfmt.toml), not dprint.
   //
@@ -24,6 +24,6 @@
     "npm:dprint-plugin-malva@0.16.0",
     "npm:dprint-plugin-markup@0.27.3"
   ],
-  "includes": ["apps/shell/chrome/**/*.{html,css,js}"],
+  "includes": ["crates/atomic/chrome/**/*.{html,css,js}"],
   "excludes": ["target/**", "graphify-out/**"]
 }

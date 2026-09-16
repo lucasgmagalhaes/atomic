@@ -12,7 +12,7 @@ use std::ffi::CString;
 use std::os::raw::c_int;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use quickjs_sys as sys;
+use neutron::quickjs_sys as sys;
 
 #[derive(Debug, PartialEq)]
 pub struct CronError(pub String);

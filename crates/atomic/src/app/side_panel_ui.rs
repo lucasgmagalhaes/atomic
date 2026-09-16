@@ -3,11 +3,11 @@
 use super::AtomicApp;
 
 impl AtomicApp {
-    pub(super) fn draw_downloads_history_panel(&mut self, ctx: &egui::Context) {
-        egui::SidePanel::right("downloads_history")
+    pub(super) fn draw_downloads_history_panel(&mut self, ui: &mut egui::Ui) {
+        egui::Panel::right("downloads_history")
             .resizable(true)
-            .default_width(260.0)
-            .show(ctx, |ui| {
+            .default_size(260.0)
+            .show(ui, |ui| {
                 let visible = self.active_workspace_pane_indices();
                 if visible.is_empty() {
                     ui.label("No panes in this workspace.");
@@ -35,7 +35,7 @@ impl AtomicApp {
                 ui.separator();
                 ui.label("Downloads");
                 egui::ScrollArea::vertical()
-                    .id_source("downloads_list")
+                    .id_salt("downloads_list")
                     .max_height(160.0)
                     .show(ui, |ui| {
                         let pane = &self.panes[self.selected];
@@ -64,7 +64,7 @@ impl AtomicApp {
                 ui.separator();
                 ui.label("History");
                 egui::ScrollArea::vertical()
-                    .id_source("history_list")
+                    .id_salt("history_list")
                     .show(ui, |ui| {
                         let pane = &self.panes[self.selected];
                         if pane.history.is_empty() {

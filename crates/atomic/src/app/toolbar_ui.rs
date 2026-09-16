@@ -6,8 +6,8 @@ use atomic::i18n::{self, Locale};
 use super::AtomicApp;
 
 impl AtomicApp {
-    pub(super) fn draw_toolbar(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
+    pub(super) fn draw_toolbar(&mut self, ui: &mut egui::Ui) {
+        egui::Panel::top("toolbar").show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Workspace:");
                 let active_index = self.workspace.active_index();
@@ -30,7 +30,7 @@ impl AtomicApp {
                 ui.label(i18n::t(i18n::PANES_LABEL, self.locale));
                 for count in [1, 2, 4, 6] {
                     let allowed = count <= self.performance.max_panes;
-                    if ui.add_enabled(allowed, egui::SelectableLabel::new(visible.len() == count, count.to_string())).clicked() {
+                    if ui.add_enabled(allowed, egui::Button::selectable(visible.len() == count, count.to_string())).clicked() {
                         self.set_pane_count(count);
                     }
                 }

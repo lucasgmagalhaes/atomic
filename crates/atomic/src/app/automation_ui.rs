@@ -6,8 +6,8 @@ use atomic::i18n;
 use super::AtomicApp;
 
 impl AtomicApp {
-    pub(super) fn draw_automation_panel(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::bottom("automation").show(ctx, |ui| {
+    pub(super) fn draw_automation_panel(&mut self, ui: &mut egui::Ui) {
+        egui::Panel::bottom("automation").show(ui, |ui| {
             let pane_ids = self
                 .panes
                 .iter()

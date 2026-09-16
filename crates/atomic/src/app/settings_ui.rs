@@ -136,7 +136,7 @@ impl AtomicApp {
                 }
             }
             if !self.imported_bookmarks.is_empty() {
-                egui::ScrollArea::vertical().id_source("imported_bookmarks_list").max_height(120.0).show(ui, |ui| {
+                egui::ScrollArea::vertical().id_salt("imported_bookmarks_list").max_height(120.0).show(ui, |ui| {
                     for bookmark in &self.imported_bookmarks {
                         ui.label(format!("{} — {} ({})", bookmark.name, bookmark.url, bookmark.folder));
                     }

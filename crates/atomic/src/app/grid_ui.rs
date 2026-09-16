@@ -8,8 +8,8 @@ use super::resource_overlay::draw_resource_overlay;
 use super::{AtomicApp, PANE_HEIGHT, PANE_WIDTH};
 
 impl AtomicApp {
-    pub(super) fn draw_pane_grid(&mut self, ctx: &egui::Context) {
-        egui::CentralPanel::default().show(ctx, |ui| {
+    pub(super) fn draw_pane_grid(&mut self, ui: &mut egui::Ui) {
+        egui::CentralPanel::default().show(ui, |ui| {
             let available = ui.available_rect_before_wrap();
             let container = tiling::Rect { x: available.min.x, y: available.min.y, width: available.width(), height: available.height() };
             // Only the active workspace's panes - see
@@ -30,7 +30,11 @@ impl AtomicApp {
             for (slot, cell) in cells.into_iter().enumerate() {
                 let index = visible[slot];
                 let cell_rect = egui::Rect::from_min_size(egui::pos2(cell.x, cell.y), egui::vec2(cell.width, cell.height));
-                let mut cell_ui = ui.child_ui(cell_rect, egui::Layout::top_down(egui::Align::Center), None);
+                let mut cell_ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(cell_rect)
+                        .layout(egui::Layout::top_down(egui::Align::Center)),
+                );
 
                 let response = cell_ui.allocate_response(cell_rect.size(), egui::Sense::click());
                 if response.clicked() {
@@ -68,13 +72,13 @@ impl AtomicApp {
                     // `profile::Profile::scroll_by`, matching a real
                     // browser's "scroll whatever's under the cursor" rule
                     // (not whatever has focus - hover, not `has_focus()`,
-                    // is the gate here). `raw_scroll_delta.y` is egui's own
+                    // is the gate here). `smooth_scroll_delta.y` is egui's own
                     // "content moves down" convention (already normalized
                     // out of points/lines/pages by egui itself); this
                     // worker's `SCROLL <dy>` protocol uses the opposite
                     // sign (`dy` is how far the *viewport* moves down
                     // through the document), hence the negation.
-                    let raw_scroll = cell_ui.input(|i| i.raw_scroll_delta);
+                    let raw_scroll = cell_ui.input(|i| i.smooth_scroll_delta);
                     if raw_scroll.y != 0.0 {
                         let _ = self.panes[index].browser.scroll_by(-raw_scroll.y as f64);
                     }
@@ -137,15 +141,15 @@ impl AtomicApp {
                 response.context_menu(|ui| {
                     if ui.button("Reload").clicked() {
                         reload_clicked = true;
-                        ui.close_menu();
+                        ui.close();
                     }
                     if ui.button("Duplicate profile").clicked() {
                         duplicate_clicked = true;
-                        ui.close_menu();
+                        ui.close();
                     }
                     if ui.button("Run auto login (shared script)").clicked() {
                         run_here_clicked = true;
-                        ui.close_menu();
+                        ui.close();
                     }
                     // Web Audio exists now (neutron::js::web_audio -
                     // real OfflineAudioContext synthesis/mixing), but
@@ -159,13 +163,13 @@ impl AtomicApp {
                         for (workspace_index, workspace) in workspaces.iter().enumerate() {
                             if ui.button(&workspace.name).clicked() {
                                 move_to = Some(workspace_index);
-                                ui.close_menu();
+                                ui.close();
                             }
                         }
                         ui.separator();
                         if ui.button("New workspace...").clicked() {
                             move_to_new = true;
-                            ui.close_menu();
+                            ui.close();
                         }
                     });
                     // Real inspector doesn't exist in any phase of this
@@ -175,7 +179,7 @@ impl AtomicApp {
                     ui.separator();
                     if ui.button("Close pane").clicked() {
                         close_clicked = true;
-                        ui.close_menu();
+                        ui.close();
                     }
                 });
 
@@ -207,7 +211,7 @@ impl AtomicApp {
                 }
 
                 let pane = &mut self.panes[index];
-                if let Some(texture) = pane.browser.poll_texture(ctx) {
+                if let Some(texture) = pane.browser.poll_texture(cell_ui.ctx()) {
                     let image_size = texture.size_vec2();
                     let scale = (cell_rect.width() / image_size.x).min(cell_rect.height() / image_size.y).min(1.0);
                     cell_ui.put(cell_rect, egui::Image::new((texture.id(), image_size * scale)));
@@ -221,7 +225,7 @@ impl AtomicApp {
                 draw_resource_overlay(&cell_ui, cell_rect, &pane.monitor);
 
                 let border_color = if index == self.selected { egui::Color32::LIGHT_BLUE } else { egui::Color32::DARK_GRAY };
-                cell_ui.painter().rect_stroke(cell_rect, 0.0, egui::Stroke::new(2.0_f32, border_color));
+                cell_ui.painter().rect_stroke(cell_rect, 0.0, egui::Stroke::new(2.0_f32, border_color), egui::StrokeKind::Outside);
             }
         });
     }

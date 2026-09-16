@@ -12,7 +12,7 @@ use super::AtomicApp;
 const CHROME_HEIGHT: u32 = 40;
 
 impl AtomicApp {
-    pub(super) fn draw_chrome_toolbar_spike(&mut self, ctx: &egui::Context) {
+    pub(super) fn draw_chrome_toolbar_spike(&mut self, ui: &mut egui::Ui) {
         let workspaces: Vec<(String, bool)> = {
             let active = self.workspace.active_index();
             self.workspace
@@ -25,7 +25,7 @@ impl AtomicApp {
         self.chrome_toolbar
             .sync_toolbar_state(&workspaces, self.locale == atomic::i18n::Locale::En);
 
-        egui::TopBottomPanel::top("chrome_toolbar_spike").show(ctx, |ui| {
+        egui::Panel::top("chrome_toolbar_spike").show(ui, |ui| {
             let width = ui.available_width().max(1.0) as u32;
             let pixels = self
                 .chrome_toolbar
@@ -35,7 +35,7 @@ impl AtomicApp {
                 &pixels,
             );
             let texture = self.chrome_texture.get_or_insert_with(|| {
-                ctx.load_texture(
+                ui.ctx().load_texture(
                     "chrome-toolbar",
                     image.clone(),
                     egui::TextureOptions::LINEAR,

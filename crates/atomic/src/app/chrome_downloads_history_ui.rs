@@ -9,7 +9,7 @@ const CHROME_WIDTH: u32 = 260;
 const CHROME_HEIGHT: u32 = 400;
 
 impl AtomicApp {
-    pub(super) fn draw_chrome_downloads_history_spike(&mut self, ctx: &egui::Context) {
+    pub(super) fn draw_chrome_downloads_history_spike(&mut self, ui: &mut egui::Ui) {
         let visible = self.active_workspace_pane_indices();
         if visible.is_empty() {
             return;
@@ -39,10 +39,10 @@ impl AtomicApp {
         self.chrome_downloads_history
             .sync_downloads_history(&downloads, &history);
 
-        egui::SidePanel::right("chrome_downloads_history_spike")
+        egui::Panel::right("chrome_downloads_history_spike")
             .resizable(true)
-            .default_width(CHROME_WIDTH as f32)
-            .show(ctx, |ui| {
+            .default_size(CHROME_WIDTH as f32)
+            .show(ui, |ui| {
                 let width = ui.available_width().max(1.0) as u32;
                 let pixels =
                     self.chrome_downloads_history
@@ -52,7 +52,7 @@ impl AtomicApp {
                     &pixels,
                 );
                 let texture = self.chrome_downloads_texture.get_or_insert_with(|| {
-                    ctx.load_texture(
+                    ui.ctx().load_texture(
                         "chrome-downloads-history",
                         image.clone(),
                         egui::TextureOptions::LINEAR,

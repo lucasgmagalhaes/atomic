@@ -83,7 +83,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Configure compiler cache
-        uses: mozilla-actions/sccache-action@v0.0.9
+        uses: mozilla-actions/sccache-action@v0.0.11
 
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
@@ -117,7 +117,7 @@ jobs:
         uses: taiki-e/install-action@nextest
 
       - name: Configure compiler cache
-        uses: mozilla-actions/sccache-action@v0.0.9
+        uses: mozilla-actions/sccache-action@v0.0.11
 
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
@@ -160,7 +160,7 @@ jobs:
         uses: taiki-e/install-action@nextest
 
       - name: Configure compiler cache
-        uses: mozilla-actions/sccache-action@v0.0.9
+        uses: mozilla-actions/sccache-action@v0.0.11
 
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
@@ -222,7 +222,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Configure compiler cache
-        uses: mozilla-actions/sccache-action@v0.0.9
+        uses: mozilla-actions/sccache-action@v0.0.11
 
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
@@ -268,7 +268,7 @@ jobs:
           components: llvm-tools-preview
 
       - name: Configure compiler cache
-        uses: mozilla-actions/sccache-action@v0.0.9
+        uses: mozilla-actions/sccache-action@v0.0.11
 
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2

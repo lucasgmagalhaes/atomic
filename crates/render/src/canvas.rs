@@ -4,11 +4,12 @@
 //! texture that accumulates draws across calls, same as a real `<canvas>`
 //! backing bitmap. Starts fully transparent, like the real spec.
 //!
-//! Scoped to solid-color/2-stop-linear-gradient rectangles:
+//! Scoped to solid-color/2-stop-gradient (linear or radial) rectangles:
 //! `fillStyle`/`fillRect`/`clearRect` plus `strokeStyle`/`lineWidth`/
 //! `strokeRect`, `save`/`restore`, `translate`, a `fillStyle` gradient via
-//! `createLinearGradient` (see [`LinearGradient`]'s own doc for its exact
-//! scope cuts), and a convex-only filled path
+//! `createLinearGradient`/`createRadialGradient` (see
+//! [`LinearGradient`]/[`RadialGradient`]'s own docs for their exact scope
+//! cuts), and a convex-only filled path
 //! (`beginPath`/`moveTo`/`lineTo`/`closePath`/`fill` - see [`Canvas2D::fill`]'s
 //! own doc for why only convex polygons render correctly), a real `ctx.font`
 //! (see [`Canvas2D::set_font`]'s own doc for its parser scope cut), and
@@ -17,7 +18,7 @@
 //! wrapping, `strokeText` isn't a real outline stroke). No stroking a
 //! path (only `strokeRect`'s rectangle-outline shortcut), no curves
 //! (`arc`/`bezierCurveTo`/`quadraticCurveTo`), no drawImage sources
-//! beyond another `<canvas>`, no radial/conic gradients or patterns, no
+//! beyond another `<canvas>`, no conic gradients or patterns, no
 //! `scale`/`rotate`/general transform matrix (just plain translation), no
 //! compositing modes beyond `fillRect`'s source-over and
 //! `clearRect`'s hard replace-with-transparent. `to_data_url` is real PNG
@@ -165,6 +166,88 @@ fn point_to_ndc(x: f32, y: f32, vw: f32, vh: f32) -> [f32; 2] {
     [(x / vw) * 2.0 - 1.0, 1.0 - (y / vh) * 2.0]
 }
 
+/// `ctx.createRadialGradient(x0, y0, r0, x1, y1, r1)` — scoped to a single
+/// circle: only the *outer* circle (`x1`, `y1`, `r1`) is used, matching
+/// [`LinearGradient`]'s own "2 effective stops" cut in spirit - real
+/// spec's two-circle cone-gradient shape (a genuinely different visual
+/// when the inner/outer circles don't share a center) isn't modeled, only
+/// the common "expanding circle from a center point" case. Unlike
+/// [`LinearGradient`] (which reuses the existing solid-color pipeline's
+/// 4-corner-interpolation trick - exact only because a linear function is
+/// exactly barycentric-interpolable), a radial gradient's `t =
+/// distance/radius` is **not** affine in screen position, so that same
+/// trick would only be exact at the rect's own corners and visibly wrong
+/// (a diamond-shaped blend, not a circle) everywhere else. Instead this
+/// gets its own tiny GPU pipeline ([`RADIAL_SHADER_SRC`]): `local_pos`
+/// (position relative to the gradient center) is itself an affine
+/// function of screen position, so it interpolates exactly across the
+/// rect, and the nonlinear `length(local_pos) / radius` clamp-and-lerp
+/// happens per-fragment in `fs_main` - a real, exact circular gradient,
+/// not an approximation, same standard as the linear case.
+#[derive(Clone, Copy)]
+pub struct RadialGradient {
+    pub cx: f32,
+    pub cy: f32,
+    pub radius: f32,
+    pub start: Color,
+    pub end: Color,
+}
+
+/// `ctx.fillStyle = gradient`'s two real shapes - see [`LinearGradient`]
+/// and [`RadialGradient`]'s own docs for what's real vs cut in each.
+#[derive(Clone, Copy)]
+pub enum FillGradient {
+    Linear(LinearGradient),
+    Radial(RadialGradient),
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct RadialVertex {
+    position: [f32; 2],
+    /// This vertex's position relative to the gradient's own center, in
+    /// pixel units (not NDC) - see [`RadialGradient`]'s own doc on why
+    /// interpolating *this* (an affine function of position), rather than
+    /// a pre-computed per-vertex color, is what makes this exact.
+    local_pos: [f32; 2],
+    radius: f32,
+    start: [f32; 4],
+    end: [f32; 4],
+}
+
+const RADIAL_SHADER_SRC: &str = r#"
+struct VertexOutput {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) local_pos: vec2<f32>,
+    @location(1) radius: f32,
+    @location(2) start: vec4<f32>,
+    @location(3) end: vec4<f32>,
+};
+
+@vertex
+fn vs_main(
+    @location(0) position: vec2<f32>,
+    @location(1) local_pos: vec2<f32>,
+    @location(2) radius: f32,
+    @location(3) start: vec4<f32>,
+    @location(4) end: vec4<f32>,
+) -> VertexOutput {
+    var out: VertexOutput;
+    out.clip_position = vec4<f32>(position, 0.0, 1.0);
+    out.local_pos = local_pos;
+    out.radius = radius;
+    out.start = start;
+    out.end = end;
+    return out;
+}
+
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    let t = clamp(length(in.local_pos) / in.radius, 0.0, 1.0);
+    return mix(in.start, in.end, t);
+}
+"#;
+
 fn color_to_f32(c: Color) -> [f32; 4] {
     [
         c.r as f32 / 255.0,
@@ -185,6 +268,10 @@ pub struct Canvas2D {
     /// `clear_rect` needs (alpha-blending a transparent color onto an
     /// opaque pixel would leave it untouched, which is wrong for clear).
     clear_pipeline: wgpu::RenderPipeline,
+    /// Exact per-pixel circular gradient - see [`RadialGradient`]'s own
+    /// doc for why this needs a dedicated pipeline/shader rather than
+    /// reusing `fill_pipeline`'s 4-corner-color trick.
+    radial_pipeline: wgpu::RenderPipeline,
     width: u32,
     height: u32,
     fill_style: Color,
@@ -200,7 +287,7 @@ pub struct Canvas2D {
     /// only wires the one most common case). `set_fill_style` clears this
     /// back to `None`, matching real spec's "assigning `fillStyle` replaces
     /// whatever was there before, solid or gradient".
-    fill_gradient: Option<LinearGradient>,
+    fill_gradient: Option<FillGradient>,
     /// `ctx.translate(x, y)`'s accumulated offset - the one transform this
     /// crate supports (no scale/rotate/general matrix - see
     /// [`Self::translate`]'s own doc). Added to every `fillRect`/
@@ -226,7 +313,7 @@ pub struct Canvas2D {
 #[derive(Clone, Copy)]
 struct CanvasState {
     fill_style: Color,
-    fill_gradient: Option<LinearGradient>,
+    fill_gradient: Option<FillGradient>,
     stroke_style: Color,
     line_width: f32,
     font_size: f32,
@@ -310,6 +397,66 @@ impl Canvas2D {
         let fill_pipeline = make_pipeline(wgpu::BlendState::ALPHA_BLENDING, "canvas2d-fill");
         let clear_pipeline = make_pipeline(wgpu::BlendState::REPLACE, "canvas2d-clear");
 
+        let radial_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("canvas2d-radial-gradient"),
+            source: wgpu::ShaderSource::Wgsl(RADIAL_SHADER_SRC.into()),
+        });
+        let radial_vertex_layout = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<RadialVertex>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &[
+                wgpu::VertexAttribute {
+                    offset: 0,
+                    shader_location: 0,
+                    format: wgpu::VertexFormat::Float32x2,
+                },
+                wgpu::VertexAttribute {
+                    offset: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
+                    shader_location: 1,
+                    format: wgpu::VertexFormat::Float32x2,
+                },
+                wgpu::VertexAttribute {
+                    offset: std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress,
+                    shader_location: 2,
+                    format: wgpu::VertexFormat::Float32,
+                },
+                wgpu::VertexAttribute {
+                    offset: std::mem::size_of::<[f32; 5]>() as wgpu::BufferAddress,
+                    shader_location: 3,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+                wgpu::VertexAttribute {
+                    offset: std::mem::size_of::<[f32; 9]>() as wgpu::BufferAddress,
+                    shader_location: 4,
+                    format: wgpu::VertexFormat::Float32x4,
+                },
+            ],
+        };
+        let radial_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("canvas2d-radial-gradient"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &radial_shader,
+                entry_point: "vs_main",
+                buffers: &[radial_vertex_layout],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &radial_shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        });
+
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("canvas2d-backing"),
             size: wgpu::Extent3d {
@@ -333,6 +480,7 @@ impl Canvas2D {
             texture,
             fill_pipeline,
             clear_pipeline,
+            radial_pipeline,
             width,
             height,
             fill_style: Color {
@@ -372,19 +520,20 @@ impl Canvas2D {
         self.fill_style
     }
 
-    /// `ctx.fillStyle = gradient` — sets a [`LinearGradient`] as the fill
-    /// paint for subsequent `fill_rect` calls, without touching the plain
-    /// `fill_style` color underneath (so a later `set_fill_style` still has
-    /// something sane to fall back to, and `fill_style()`'s own getter
-    /// keeps returning that last solid color - see its own doc for why
-    /// this crate doesn't round-trip the actual gradient object back out).
-    pub fn set_fill_gradient(&mut self, gradient: LinearGradient) {
+    /// `ctx.fillStyle = gradient` — sets a [`FillGradient`] (linear or
+    /// radial) as the fill paint for subsequent `fill_rect` calls, without
+    /// touching the plain `fill_style` color underneath (so a later
+    /// `set_fill_style` still has something sane to fall back to, and
+    /// `fill_style()`'s own getter keeps returning that last solid color -
+    /// see its own doc for why this crate doesn't round-trip the actual
+    /// gradient object back out).
+    pub fn set_fill_gradient(&mut self, gradient: FillGradient) {
         self.fill_gradient = Some(gradient);
     }
 
     /// `Some` when the current fill paint is a gradient, not a plain
     /// `fill_style` color.
-    pub fn fill_gradient(&self) -> Option<LinearGradient> {
+    pub fn fill_gradient(&self) -> Option<FillGradient> {
         self.fill_gradient
     }
 
@@ -707,6 +856,39 @@ impl Canvas2D {
         self.submit_vertices(&vertices, false);
     }
 
+    /// Same as [`Self::draw_gradient_rect`] but for a [`RadialGradient`] -
+    /// see that type's own doc for why this needs a dedicated pipeline
+    /// (`radial_pipeline`/[`RadialVertex`]) rather than the 4-corner-color
+    /// trick `draw_gradient_rect` uses. Gradient coordinates are *not*
+    /// offset by `translate_x`/`translate_y`, same documented cut as the
+    /// linear case.
+    fn draw_radial_gradient_rect(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        gradient: RadialGradient,
+    ) {
+        let (tx, ty) = (x + self.translate_x, y + self.translate_y);
+        let (vw, vh) = (self.width as f32, self.height as f32);
+        let start = color_to_f32(gradient.start);
+        let end = color_to_f32(gradient.end);
+        let corner = |px: f32, py: f32| RadialVertex {
+            position: point_to_ndc(px, py, vw, vh),
+            local_pos: [px - gradient.cx, py - gradient.cy],
+            radius: gradient.radius.max(0.001),
+            start,
+            end,
+        };
+        let tl = corner(tx, ty);
+        let tr = corner(tx + w, ty);
+        let bl = corner(tx, ty + h);
+        let br = corner(tx + w, ty + h);
+        let vertices = [tl, bl, tr, tr, bl, br];
+        self.submit_radial_vertices(&vertices);
+    }
+
     /// Submits an arbitrary triangle-list vertex buffer (`vertices.len()`
     /// must be a multiple of 3) - rects always pass exactly 6 (two
     /// triangles), a filled path (see [`Self::fill`]) passes
@@ -756,12 +938,59 @@ impl Canvas2D {
         self.queue.submit(std::iter::once(encoder.finish()));
     }
 
+    /// Same as [`Self::submit_vertices`] but for a [`RadialGradient`]
+    /// fill (`radial_pipeline`/[`RadialVertex`] instead of
+    /// `fill_pipeline`/[`Vertex`]) - always alpha-blended source-over,
+    /// never the `clear_pipeline` replace mode (no `clearRect` equivalent
+    /// needs a gradient).
+    fn submit_radial_vertices(&mut self, vertices: &[RadialVertex]) {
+        let view = self
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        use wgpu::util::DeviceExt;
+        let vertex_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("canvas2d-radial-vertices"),
+                contents: bytemuck::cast_slice(vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("canvas2d-radial-draw"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&self.radial_pipeline);
+            pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+            pass.draw(0..vertices.len() as u32, 0..1);
+        }
+        self.queue.submit(std::iter::once(encoder.finish()));
+    }
+
     /// `ctx.fillRect(x, y, w, h)` using the current `fillStyle` - a
     /// gradient (see [`Self::set_fill_gradient`]) if one is set, else the
     /// plain `fill_style` color.
     pub fn fill_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
         match self.fill_gradient {
-            Some(gradient) => self.draw_gradient_rect(x, y, w, h, gradient),
+            Some(FillGradient::Linear(gradient)) => self.draw_gradient_rect(x, y, w, h, gradient),
+            Some(FillGradient::Radial(gradient)) => {
+                self.draw_radial_gradient_rect(x, y, w, h, gradient)
+            }
             None => self.draw_rect(x, y, w, h, self.fill_style, false),
         }
     }

@@ -631,6 +631,40 @@ fn stroke_text_paints_strokestyle_not_fillstyle() {
 }
 
 #[test]
+fn radial_gradient_fill_paints_a_real_circular_blend() {
+    let mut d = dom::Dom::new();
+    let root = d.root();
+    let body = d.create_element("body");
+    d.append_child(root, body);
+    let canvas = d.create_element("canvas");
+    d.set_attribute(canvas, "width", "400");
+    d.set_attribute(canvas, "height", "400");
+    d.append_child(body, canvas);
+
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { \
+               const ctx2d = document.querySelector('canvas').getContext('2d'); \
+               const g = ctx2d.createRadialGradient(200, 200, 0, 200, 200, 200); \
+               g.addColorStop(0, '#ff0000'); \
+               g.addColorStop(1, '#0000ff'); \
+               ctx2d.fillStyle = g; \
+               ctx2d.fillRect(0, 0, 400, 400); \
+               const img = ctx2d.getImageData(0, 0, 400, 400); \
+               const centerIdx = (200 * 400 + 200) * 4; \
+               const cornerIdx = 0; \
+               return `${img.data[centerIdx] > 250},${img.data[centerIdx + 2] < 15},` + \
+                      `${img.data[cornerIdx + 2] > 200},${img.data[cornerIdx] < 30}`; \
+             })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "true,true,true,true");
+}
+
+#[test]
 fn put_image_data_writes_pixels_that_get_image_data_then_reads_back() {
     let mut d = dom::Dom::new();
     let root = d.root();

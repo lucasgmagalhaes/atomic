@@ -10,9 +10,11 @@
 //! `createLinearGradient` (see [`LinearGradient`]'s own doc for its exact
 //! scope cuts), and a convex-only filled path
 //! (`beginPath`/`moveTo`/`lineTo`/`closePath`/`fill` - see [`Canvas2D::fill`]'s
-//! own doc for why only convex polygons render correctly) and one-line
-//! `fillText` (see [`Canvas2D::fill_text`]'s own doc for its scope cuts:
-//! fixed font/size, no `ctx.font`, no wrapping/metrics). No stroking a
+//! own doc for why only convex polygons render correctly), a real `ctx.font`
+//! (see [`Canvas2D::set_font`]'s own doc for its parser scope cut), and
+//! one-line `fillText`/`strokeText`/`measureText` (see
+//! [`Canvas2D::fill_text`]/[`Canvas2D::stroke_text`]'s own docs - no
+//! wrapping, `strokeText` isn't a real outline stroke). No stroking a
 //! path (only `strokeRect`'s rectangle-outline shortcut), no curves
 //! (`arc`/`bezierCurveTo`/`quadraticCurveTo`), no drawImage sources
 //! beyond another `<canvas>`, no radial/conic gradients or patterns, no
@@ -28,9 +30,9 @@ use layout_engine::{Color, FontFamily, GenericFontFamily};
 
 use crate::display_list::ClippedGlyph;
 
-/// `ctx.font`'s stand-in until that property is wired up - every
-/// `fillText` call uses this fixed size and a generic sans-serif family,
-/// see [`Canvas2D::fill_text`]'s own doc.
+/// `ctx.font`'s default size (real spec's own default is `10px` - larger
+/// here for legibility, not a spec match) until [`Canvas2D::set_font`]
+/// changes it.
 const DEFAULT_FONT_SIZE: f32 = 16.0;
 
 #[repr(C)]
@@ -188,6 +190,10 @@ pub struct Canvas2D {
     fill_style: Color,
     stroke_style: Color,
     line_width: f32,
+    /// `ctx.font`'s backing - see [`Self::set_font`]'s own doc for the
+    /// parser's scope cut.
+    font_size: f32,
+    font_family: FontFamily,
     /// `ctx.fillStyle = gradient`'s backing, when set - overrides
     /// `fill_style` for `fill_rect` only (`clearRect`/`strokeRect` stay
     /// solid-color; real spec lets any of them use a gradient, this crate
@@ -203,9 +209,9 @@ pub struct Canvas2D {
     translate_y: f32,
     /// `ctx.save()`/`ctx.restore()`'s backing stack - scoped to just the
     /// drawing-state fields this crate actually has (`fillStyle`/
-    /// `strokeStyle`/`lineWidth`/translate offset), not real spec's full
-    /// state (no clip region, general transform matrix, or compositing/
-    /// font state exists here to save).
+    /// `strokeStyle`/`lineWidth`/`font`/translate offset), not real spec's
+    /// full state (no clip region or general transform matrix exists here
+    /// to save).
     state_stack: Vec<CanvasState>,
     /// `beginPath`/`moveTo`/`lineTo`'s backing point list - not part of
     /// `save`/`restore`'s state stack, matching real spec (the current
@@ -223,6 +229,8 @@ struct CanvasState {
     fill_gradient: Option<LinearGradient>,
     stroke_style: Color,
     line_width: f32,
+    font_size: f32,
+    font_family: FontFamily,
     translate_x: f32,
     translate_y: f32,
 }
@@ -340,6 +348,8 @@ impl Canvas2D {
                 a: 255,
             },
             line_width: 1.0,
+            font_size: DEFAULT_FONT_SIZE,
+            font_family: FontFamily::generic(GenericFontFamily::SansSerif),
             fill_gradient: None,
             translate_x: 0.0,
             translate_y: 0.0,
@@ -404,6 +414,8 @@ impl Canvas2D {
             fill_gradient: self.fill_gradient,
             stroke_style: self.stroke_style,
             line_width: self.line_width,
+            font_size: self.font_size,
+            font_family: self.font_family,
             translate_x: self.translate_x,
             translate_y: self.translate_y,
         });
@@ -418,6 +430,8 @@ impl Canvas2D {
             self.fill_gradient = state.fill_gradient;
             self.stroke_style = state.stroke_style;
             self.line_width = state.line_width;
+            self.font_size = state.font_size;
+            self.font_family = state.font_family;
             self.translate_x = state.translate_x;
             self.translate_y = state.translate_y;
         }
@@ -490,38 +504,97 @@ impl Canvas2D {
         self.submit_vertices(&vertices, false);
     }
 
-    /// `ctx.fillText(text, x, y)` — real shaping/rasterization via
-    /// `layout_engine::layout_text` (`cosmic-text`+`swash`, the same real
-    /// pipeline page text uses) and `render::text::composite_glyphs` (the
-    /// same CPU alpha-blend compositor page text uses), not a stub. Built
-    /// as a full-canvas `get_image_data`/`composite_glyphs`/
-    /// `put_image_data` round trip - correctness over throughput, same
-    /// tradeoff `render::text`'s own module doc already makes, and no new
-    /// GPU pipeline needed.
-    ///
-    /// Scope cuts: no `ctx.font` yet - every call uses a fixed
-    /// [`DEFAULT_FONT_SIZE`] and a generic sans-serif family (real spec's
-    /// own default is `"10px sans-serif"`; this crate's fixed size is
-    /// larger for legibility, not a spec match). No text wrapping (`x`, `y`
-    /// only - the `maxWidth` 4th argument isn't accepted, matching
-    /// `layout_text`'s own `max_width: None` = single unbounded line). `y`
-    /// behaves like real spec's `textBaseline = "top"` (measured from the
-    /// text's own top, not the default `"alphabetic"` baseline) - this
-    /// reuses `layout_text`'s glyphs exactly as `layout_engine`'s own
-    /// page-text pipeline positions them (box-top-relative), with no
-    /// separate baseline-offset math added on top. No `strokeText`,
-    /// `measureText`, or gradient fill (`fillStyle`'s plain color only).
-    pub fn fill_text(&mut self, text: &str, x: f32, y: f32) {
+    /// `ctx.font = "<size>px <family>"` — scoped to exactly that shape:
+    /// a pixel size (`px` unit required) followed by one generic family
+    /// keyword (`sans-serif`/`serif`/`monospace`/`cursive`/`fantasy`) or a
+    /// named-plus-generic pair (`"Arial, sans-serif"`, matching
+    /// `layout_engine::FontFamily::named`'s own one-name-plus-fallback
+    /// shape). No weight/style/line-height/multi-family-list (real spec's
+    /// full font shorthand) - an unparseable string is silently ignored,
+    /// leaving the previous font in place, same "best-effort, no separate
+    /// error path" convention this crate's other setters already take.
+    pub fn set_font(&mut self, css_font: &str) {
+        let mut parts = css_font.trim().splitn(2, char::is_whitespace);
+        let Some(size_token) = parts.next() else {
+            return;
+        };
+        let Some(px_str) = size_token.strip_suffix("px") else {
+            return;
+        };
+        let Ok(size) = px_str.parse::<f32>() else {
+            return;
+        };
+        if size <= 0.0 {
+            return;
+        }
+        let family_str = parts.next().unwrap_or("sans-serif").trim();
+        let (name, generic_str) = match family_str.split_once(',') {
+            Some((name, generic)) => (Some(name.trim()), generic.trim()),
+            None => (None, family_str),
+        };
+        let generic = match generic_str {
+            "serif" => GenericFontFamily::Serif,
+            "monospace" => GenericFontFamily::Monospace,
+            "cursive" => GenericFontFamily::Cursive,
+            "fantasy" => GenericFontFamily::Fantasy,
+            _ => GenericFontFamily::SansSerif,
+        };
+        self.font_size = size;
+        self.font_family = match name {
+            Some(name) if !name.is_empty() => FontFamily::named(name, generic),
+            _ => FontFamily::generic(generic),
+        };
+    }
+
+    /// `ctx.font`'s getter side - formats the current size/family back
+    /// into the same `"<size>px <family>"` shape [`Self::set_font`]
+    /// parses, not necessarily byte-identical to whatever string a caller
+    /// originally set (e.g. `"16.0px sans-serif"` normalizes to
+    /// `"16px sans-serif"`), same "canonical re-format, not verbatim
+    /// echo" convention `fill_style()`'s own hex getter already takes.
+    pub fn font(&self) -> String {
+        let generic = match self.font_family.generic {
+            GenericFontFamily::Serif => "serif",
+            GenericFontFamily::SansSerif => "sans-serif",
+            GenericFontFamily::Monospace => "monospace",
+            GenericFontFamily::Cursive => "cursive",
+            GenericFontFamily::Fantasy => "fantasy",
+        };
+        match self.font_family.name() {
+            Some(name) => format!("{}px {}, {}", self.font_size, name, generic),
+            None => format!("{}px {}", self.font_size, generic),
+        }
+    }
+
+    /// `ctx.measureText(text).width` — real shaped width via the same
+    /// `layout_engine::layout_text` `fillText` itself uses, at the
+    /// current `font`. Only `width` (a real `TextMetrics` has a dozen
+    /// more fields - ascent/descent/bounding-box variants - none of which
+    /// this crate tracks).
+    pub fn measure_text(&self, text: &str) -> f32 {
+        if text.is_empty() {
+            return 0.0;
+        }
+        layout_engine::layout_text(
+            text,
+            self.font_size,
+            None,
+            self.fill_style,
+            self.font_family,
+        )
+        .width
+    }
+
+    /// Shared by [`Self::fill_text`]/[`Self::stroke_text`] - shapes `text`
+    /// at the current `font` and composites it in `color`, via the same
+    /// `get_image_data`/`composite_glyphs`/`put_image_data` round trip
+    /// either way (see [`Self::fill_text`]'s own doc for why).
+    fn draw_text(&mut self, text: &str, x: f32, y: f32, color: Color) {
         if text.is_empty() {
             return;
         }
-        let layout = layout_engine::layout_text(
-            text,
-            DEFAULT_FONT_SIZE,
-            None,
-            self.fill_style,
-            FontFamily::generic(GenericFontFamily::SansSerif),
-        );
+        let layout =
+            layout_engine::layout_text(text, self.font_size, None, color, self.font_family);
         if layout.glyphs.is_empty() {
             return;
         }
@@ -549,6 +622,40 @@ impl Canvas2D {
         let mut pixels = self.get_image_data();
         crate::text::composite_glyphs(&mut pixels, self.width, self.height, &glyphs);
         self.put_image_data(0, 0, self.width, self.height, &pixels);
+    }
+
+    /// `ctx.fillText(text, x, y)` — real shaping/rasterization via
+    /// `layout_engine::layout_text` (`cosmic-text`+`swash`, the same real
+    /// pipeline page text uses) and `render::text::composite_glyphs` (the
+    /// same CPU alpha-blend compositor page text uses), not a stub. Uses
+    /// the current `font`/`fillStyle` (see [`Self::set_font`]).
+    ///
+    /// Scope cuts: no text wrapping (`x`, `y` only - the `maxWidth` 4th
+    /// argument isn't accepted, matching `layout_text`'s own
+    /// `max_width: None` = single unbounded line). `y` behaves like real
+    /// spec's `textBaseline = "top"` (measured from the text's own top,
+    /// not the default `"alphabetic"` baseline) - this reuses
+    /// `layout_text`'s glyphs exactly as `layout_engine`'s own page-text
+    /// pipeline positions them (box-top-relative), with no separate
+    /// baseline-offset math added on top. No gradient fill (`fillStyle`'s
+    /// plain color only).
+    pub fn fill_text(&mut self, text: &str, x: f32, y: f32) {
+        let color = self.fill_style;
+        self.draw_text(text, x, y, color);
+    }
+
+    /// `ctx.strokeText(text, x, y)` — **not a real outline stroke**: this
+    /// crate has no glyph-outline/path data to stroke, only alpha-coverage
+    /// bitmaps from `layout_engine::rasterize_glyph`, which can be filled
+    /// but not traced as a path. Scoped instead to painting the same
+    /// glyphs solid in `strokeStyle`'s color - visually close for normal
+    /// text sizes (a filled glyph vs. a thin-outlined one), but genuinely
+    /// different from spec at any lineWidth/size where the distinction
+    /// would be visible. Otherwise identical scope cuts to
+    /// [`Self::fill_text`].
+    pub fn stroke_text(&mut self, text: &str, x: f32, y: f32) {
+        let color = self.stroke_style;
+        self.draw_text(text, x, y, color);
     }
 
     pub fn width(&self) -> u32 {

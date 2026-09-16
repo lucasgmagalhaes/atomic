@@ -6,7 +6,9 @@
 //! unchanged) into JavaScript and into this worker's real page
 //! compositing. Also adds `drawImage(source, dx, dy)` - canvas-to-canvas
 //! only (see [`draw_image`]'s own doc), built entirely from
-//! `get_image_data`/`put_image_data` with no new `render::Canvas2D` API.
+//! `get_image_data`/`put_image_data` with no new `render::Canvas2D` API -
+//! and `beginPath`/`moveTo`/`lineTo`/`closePath`/`fill` (convex polygons
+//! only, no stroke, no curves - see `render::Canvas2D::fill`'s own doc).
 //!
 //! `getContext(id)` only recognizes `"2d"` (any other value, including
 //! `"webgl"`, returns `null` - no WebGL/`OffscreenCanvas` context here).
@@ -190,6 +192,73 @@ unsafe extern "C" fn context2d_finalizer(rt: *mut sys::JSRuntime, val: sys::JSVa
     if !ptr.is_null() {
         drop(Box::from_raw(ptr));
     }
+}
+
+unsafe extern "C" fn begin_path(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let ptr = context2d_opaque(sys::JS_GetRuntime(ctx), this_val);
+    if !ptr.is_null() {
+        (*ptr).borrow_mut().begin_path();
+    }
+    sys::js_undefined()
+}
+
+unsafe extern "C" fn move_to(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let ptr = context2d_opaque(sys::JS_GetRuntime(ctx), this_val);
+    if !ptr.is_null() && argc >= 2 {
+        let (x, y) = (read_js_f32(*argv), read_js_f32(*argv.add(1)));
+        (*ptr).borrow_mut().move_to(x, y);
+    }
+    sys::js_undefined()
+}
+
+unsafe extern "C" fn line_to(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let ptr = context2d_opaque(sys::JS_GetRuntime(ctx), this_val);
+    if !ptr.is_null() && argc >= 2 {
+        let (x, y) = (read_js_f32(*argv), read_js_f32(*argv.add(1)));
+        (*ptr).borrow_mut().line_to(x, y);
+    }
+    sys::js_undefined()
+}
+
+unsafe extern "C" fn close_path(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let ptr = context2d_opaque(sys::JS_GetRuntime(ctx), this_val);
+    if !ptr.is_null() {
+        (*ptr).borrow_mut().close_path();
+    }
+    sys::js_undefined()
+}
+
+unsafe extern "C" fn fill(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let ptr = context2d_opaque(sys::JS_GetRuntime(ctx), this_val);
+    if !ptr.is_null() {
+        (*ptr).borrow_mut().fill();
+    }
+    sys::js_undefined()
 }
 
 unsafe extern "C" fn fill_rect(
@@ -667,6 +736,11 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
         4,
     );
     define_method(ctx, proto, "drawImage", draw_image, 3);
+    define_method(ctx, proto, "beginPath", begin_path, 0);
+    define_method(ctx, proto, "moveTo", move_to, 2);
+    define_method(ctx, proto, "lineTo", line_to, 2);
+    define_method(ctx, proto, "closePath", close_path, 0);
+    define_method(ctx, proto, "fill", fill, 0);
     define_getter_setter(
         ctx,
         proto,

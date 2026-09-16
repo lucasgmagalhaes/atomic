@@ -62,6 +62,53 @@ pub(super) unsafe extern "C" fn arc(
     sys::js_undefined()
 }
 
+/// `ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, x, y)` - see
+/// `render::Canvas2D::bezier_curve_to`'s own doc: a straight-line
+/// polyline approximation, no-op when the path has no current point.
+pub(super) unsafe extern "C" fn bezier_curve_to(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let ptr = context2d_opaque(sys::JS_GetRuntime(ctx), this_val);
+    if !ptr.is_null() && argc >= 6 {
+        let (cp1x, cp1y, cp2x, cp2y, x, y) = (
+            read_js_f32(*argv),
+            read_js_f32(*argv.add(1)),
+            read_js_f32(*argv.add(2)),
+            read_js_f32(*argv.add(3)),
+            read_js_f32(*argv.add(4)),
+            read_js_f32(*argv.add(5)),
+        );
+        (*ptr)
+            .borrow_mut()
+            .bezier_curve_to(cp1x, cp1y, cp2x, cp2y, x, y);
+    }
+    sys::js_undefined()
+}
+
+/// `ctx.quadraticCurveTo(cpx, cpy, x, y)` - see
+/// `render::Canvas2D::quadratic_curve_to`'s own doc.
+pub(super) unsafe extern "C" fn quadratic_curve_to(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let ptr = context2d_opaque(sys::JS_GetRuntime(ctx), this_val);
+    if !ptr.is_null() && argc >= 4 {
+        let (cpx, cpy, x, y) = (
+            read_js_f32(*argv),
+            read_js_f32(*argv.add(1)),
+            read_js_f32(*argv.add(2)),
+            read_js_f32(*argv.add(3)),
+        );
+        (*ptr).borrow_mut().quadratic_curve_to(cpx, cpy, x, y);
+    }
+    sys::js_undefined()
+}
+
 pub(super) unsafe extern "C" fn line_to(
     ctx: *mut sys::JSContext,
     this_val: sys::JSValue,

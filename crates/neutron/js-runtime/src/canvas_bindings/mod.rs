@@ -157,6 +157,8 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     define_method(ctx, proto, "moveTo", path::move_to, 2);
     define_method(ctx, proto, "lineTo", path::line_to, 2);
     define_method(ctx, proto, "arc", path::arc, 5);
+    define_method(ctx, proto, "bezierCurveTo", path::bezier_curve_to, 6);
+    define_method(ctx, proto, "quadraticCurveTo", path::quadratic_curve_to, 4);
     define_method(ctx, proto, "closePath", path::close_path, 0);
     define_method(ctx, proto, "fill", path::fill, 0);
     define_method(ctx, proto, "fillText", text::fill_text, 3);

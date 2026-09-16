@@ -1,6 +1,6 @@
 //! `dispatch_context_menu_at` — split out from `input_commands.rs`.
 
-use js_runtime::Context;
+use neutron::js::Context;
 
 use crate::page::Page;
 

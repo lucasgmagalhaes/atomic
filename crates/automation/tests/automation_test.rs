@@ -8,7 +8,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use automation::AutomationEngine;
-use js_runtime::Runtime;
+use neutron::js::Runtime;
 
 // `automation` doesn't declare a `profile-worker` bin itself, so cargo
 // never sets `CARGO_BIN_EXE_profile-worker` for this test binary (that env

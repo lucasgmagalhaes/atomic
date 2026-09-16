@@ -5,18 +5,18 @@
 
 use std::collections::HashMap;
 
-use dom::NodeId;
-use js_runtime::Rect as LayoutMeasurementRect;
-use layout_engine::{Color, Display, LayoutBox, Length, Position};
+use neutron::dom::NodeId;
+use neutron::js::Rect as LayoutMeasurementRect;
+use neutron::layout::{Color, Display, LayoutBox, Length, Position};
 
 /// Flattens a laid-out `LayoutBox` tree into a `NodeId -> Rect` map for
 /// `Context::set_layout_rects` — the real backing data for
-/// `getBoundingClientRect`/`offsetWidth`/etc (see `js_runtime::
+/// `getBoundingClientRect`/`offsetWidth`/etc (see `neutron::js::
 /// layout_measurement`). `LayoutBox::dimensions` is already absolute
 /// (viewport-relative, unscrolled) document space, the same space
 /// `render`'s own `build_display_list` paints from — no coordinate
 /// conversion needed, just a straight copy per box. A synthetic inline-run
-/// box (`LayoutBox::inline_spans`, see `layout_engine::tree`'s module doc)
+/// box (`LayoutBox::inline_spans`, see `neutron::layout::tree`'s module doc)
 /// still has a real `node` id (its first source child's) and dimensions,
 /// so it's included like any other box, not skipped.
 pub(crate) fn collect_layout_rects(tree: &LayoutBox) -> HashMap<NodeId, LayoutMeasurementRect> {
@@ -45,7 +45,7 @@ pub(crate) fn collect_layout_rects(tree: &LayoutBox) -> HashMap<NodeId, LayoutMe
 /// box's own value is the bounding extent of its *children*, relative to
 /// its own origin (`max(child.x + child.width)`/`max(child.y +
 /// child.height)` across all children) — a box with no children reads
-/// `(0.0, 0.0)` here (`js_runtime::layout_measurement`'s own
+/// `(0.0, 0.0)` here (`neutron::js::layout_measurement`'s own
 /// `scroll_extent_for` floors this against `clientWidth`/`clientHeight`,
 /// so a childless box's real `scrollWidth`/`scrollHeight` still comes out
 /// correct without this walk needing to know the box's own size).
@@ -69,7 +69,7 @@ pub(crate) fn collect_scroll_extents(tree: &LayoutBox) -> HashMap<NodeId, (f64, 
     out
 }
 
-/// Formats one `layout_engine::Length` the way real CSS would serialize a
+/// Formats one `neutron::layout::Length` the way real CSS would serialize a
 /// resolved value: `px` for a resolved pixel length, `auto` for `Auto`, and
 /// a plain percent string for `Percent` (real `getComputedStyle` resolves
 /// percentages to pixels too, but this crate's `ComputedStyle` doesn't
@@ -96,7 +96,7 @@ fn format_color(color: Color) -> String {
 
 /// Flattens a laid-out `LayoutBox` tree's per-box `ComputedStyle` into a
 /// `NodeId -> { property: value }` map for `Context::set_computed_styles`
-/// — the real backing data for `getComputedStyle` (see `js_runtime::
+/// — the real backing data for `getComputedStyle` (see `neutron::js::
 /// computed_style`). Only the small, unambiguous-to-serialize property
 /// subset below is included; `layout-engine`'s own `ComputedStyle` has
 /// several more fields (`flex_grow`, `box_shadow`, ...) not attempted here

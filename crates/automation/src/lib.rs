@@ -1,7 +1,7 @@
 //! User automation scripts: the `pane`/`every`/`on`/cron surface the mockup
 //! shows (login automático, claim idle, watchdog reconexão) that no crate
 //! owns yet — see `CLAUDE.md`'s spec-gap table, line 255/260. Scripts are
-//! plain JS run in their own `js_runtime::Context` (real quickjs, same
+//! plain JS run in their own `neutron::js::Context` (real quickjs, same
 //! engine every page uses), not a new language — the mockup's own sample
 //! scripts are already JS (`pane.goto`, `pane.fill`, `pane.click`,
 //! `every()`, `on()`).
@@ -11,7 +11,7 @@
 //! `CLICK`/`FILL` commands in `profile-worker`'s stdin protocol — see that
 //! binary's own doc comment). Two real scope cuts carried through from
 //! there, not this crate's own: only `#id` selectors are supported (this
-//! engine has no CSS selector query beyond `dom::Dom::find_by_id`), and
+//! engine has no CSS selector query beyond `neutron::dom::Dom::find_by_id`), and
 //! `fill` sets `textContent` rather than a real `HTMLInputElement.value`
 //! (this engine has no such property at all). `every()` is a plain alias
 //! for the already-real `setInterval` (js-runtime's `timers` module)
@@ -34,7 +34,7 @@ mod pane;
 
 pub use cron::CronError;
 
-use js_runtime::{Context, EvalError, Runtime};
+use neutron::js::{Context, EvalError, Runtime};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -128,7 +128,7 @@ impl<'rt> AutomationEngine<'rt> {
     /// One cooperative tick: pumps due timers/`requestAnimationFrame`
     /// (`every` included, since it's just `setInterval`) and due cron
     /// triggers. Same "no real event loop yet, the host must call this"
-    /// deviation `js_runtime::Context::run_pending_timers` already
+    /// deviation `neutron::js::Context::run_pending_timers` already
     /// documents — a real per-schedule engine belongs with `profile`/`ipc`'s
     /// eventual per-tab event loop, not invented ahead of it here.
     pub fn tick(&self) {
@@ -139,7 +139,7 @@ impl<'rt> AutomationEngine<'rt> {
     /// Fires every `on(name, ...)` listener registered for `name` — the
     /// host's hook for events a script can't observe on its own (e.g. a
     /// watchdog noticing a pane went unresponsive). Not a DOM event: this
-    /// context has no `dom::Dom` (see `Context::new` vs `Context::with_dom`
+    /// context has no `neutron::dom::Dom` (see `Context::new` vs `Context::with_dom`
     /// in `js-runtime`), so there's no `dispatchEvent` overlap to conflict
     /// with.
     pub fn emit(&self, name: &str) {

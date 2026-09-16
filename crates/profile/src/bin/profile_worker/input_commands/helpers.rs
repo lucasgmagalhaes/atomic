@@ -1,10 +1,10 @@
 //! Shared small helpers for the input-command handlers, split out from
 //! `input_commands.rs`.
 
-use dom::{Dom, NodeId};
+use neutron::dom::{Dom, NodeId};
 
 /// Only `#id` selectors are supported for `CLICK`/`FILL` — this engine has
-/// no CSS selector query beyond `dom::Dom::find_by_id` (no `css`-backed
+/// no CSS selector query beyond `neutron::dom::Dom::find_by_id` (no `css`-backed
 /// `querySelector`, no class/attribute/descendant matching against a live
 /// `Dom`). Rejects any other form up front rather than silently matching
 /// nothing.
@@ -41,14 +41,14 @@ pub(super) fn js_string_literal(s: &str) -> String {
 }
 
 /// `true` if `node` is a real `<input>`/`<textarea>` — the only tags this
-/// engine gives an independent `.value` (see `dom::Dom::value`'s own doc
+/// engine gives an independent `.value` (see `neutron::dom::Dom::value`'s own doc
 /// on why that's exposed generically on `Node` rather than a typed
 /// `HTMLInputElement`/`HTMLTextAreaElement` subclass).
 pub(super) fn is_input_like(dom: &Dom, node: NodeId) -> bool {
-    matches!(&dom.get(node).map(|n| &n.data), Some(dom::NodeData::Element { tag, .. }) if tag == "input" || tag == "textarea")
+    matches!(&dom.get(node).map(|n| &n.data), Some(neutron::dom::NodeData::Element { tag, .. }) if tag == "input" || tag == "textarea")
 }
 
-/// Walks from `node` up through real `dom::Dom` parent links (not a JS
+/// Walks from `node` up through real `neutron::dom::Dom` parent links (not a JS
 /// call — this runs before any JS-level dispatch happens) looking for the
 /// nearest ancestor (including `node` itself) that has a real `id`
 /// attribute. `CLICK_AT`'s real limitation, same as automation's existing

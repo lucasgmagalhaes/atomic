@@ -16,8 +16,84 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("bench-footprint") => bench_footprint(),
-        _ => println!("xtask stub (phase 1) — subcommands: bench-footprint"),
+        Some("check-neutron-boundary") => check_neutron_boundary(),
+        _ => {
+            println!("xtask stub (phase 1) — subcommands: bench-footprint, check-neutron-boundary")
+        }
     }
+}
+
+/// Enforces the `neutron` encapsulation boundary (see
+/// `spec/proposals/NEUTRON_ENCAPSULATION.md`): every crate outside
+/// `crates/neutron/` must depend on the `neutron` facade only, never
+/// path-dep directly into one of its sub-crates (`css`, `html`, `dom`,
+/// `atoms`, `layout-engine`, `render`, `webgl`, `image_decode`,
+/// `js-runtime`, `js-runtime/quickjs-sys`, `workers`). Wired into
+/// `.cargo-husky/hooks/pre-commit` alongside the fmt/dprint checks.
+fn check_neutron_boundary() {
+    let sub_crates = [
+        "css",
+        "html",
+        "dom",
+        "atoms",
+        "layout-engine",
+        "render",
+        "webgl",
+        "image_decode",
+        "js-runtime",
+        "js-runtime/quickjs-sys",
+        "workers",
+    ];
+    let repo_root = std::env::current_dir().expect("current_dir");
+    let mut violations = Vec::new();
+    for entry in walk_cargo_tomls(&repo_root) {
+        if entry.starts_with(repo_root.join("crates").join("neutron")) {
+            continue;
+        }
+        if entry.starts_with(repo_root.join("target")) {
+            continue;
+        }
+        let text = std::fs::read_to_string(&entry).unwrap_or_default();
+        for line in text.lines() {
+            if !line.contains("path") || !line.contains('=') {
+                continue;
+            }
+            for sub in sub_crates {
+                let needle = format!("neutron/{sub}\"");
+                if line.contains(&needle) {
+                    violations.push(format!("{}: path dep into neutron/{sub}", entry.display()));
+                }
+            }
+        }
+    }
+    if violations.is_empty() {
+        println!("check-neutron-boundary: ok");
+    } else {
+        for v in &violations {
+            eprintln!("check-neutron-boundary: {v}");
+        }
+        std::process::exit(1);
+    }
+}
+
+fn walk_cargo_tomls(dir: &std::path::Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if name == "target" || name == ".git" || name == "graphify-out" {
+                continue;
+            }
+            out.extend(walk_cargo_tomls(&path));
+        } else if path.file_name().and_then(|n| n.to_str()) == Some("Cargo.toml") {
+            out.push(path);
+        }
+    }
+    out
 }
 
 /// Finds the built `profile-worker` binary next to this xtask binary's own

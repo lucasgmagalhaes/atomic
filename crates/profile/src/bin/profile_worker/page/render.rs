@@ -3,14 +3,14 @@
 
 use std::collections::HashSet;
 
-use css::parse_stylesheet;
-use dom::NodeId;
-use layout_engine::style::{BorderStyle, Color};
-use layout_engine::{
+use neutron::css::parse_stylesheet;
+use neutron::dom::NodeId;
+use neutron::layout::style::{BorderStyle, Color};
+use neutron::layout::{
     apply_image_sizes, build_box_tree_with_viewport, find_layer_roots, layout_block, LayoutBox,
     PositionedGlyph,
 };
-use render::{
+use neutron::paint::{
     build_display_list, build_glyph_list, build_image_list, composite_glyphs, composite_images,
     composite_layer_onto, ClipRect, ClippedGlyph, GpuRenderer, ImageQuad, Layer, LayerCacheKey,
     Rect,
@@ -52,7 +52,7 @@ impl<'rt> Page<'rt> {
     /// Builds and lays out this page's real box tree against `width`/
     /// `height` (the latter feeding `@media (min-height: ...)`/
     /// `(max-height: ...)` resolution, same role `width` already plays for
-    /// `(min-width: ...)` — see `css::MediaQuery::matches`) — shared by
+    /// `(min-width: ...)` — see `neutron::css::MediaQuery::matches`) — shared by
     /// `render` and `hit_test_at` so they always agree on exactly the same
     /// box positions/sizes (previously each rebuilt its own tree
     /// independently, which would have silently disagreed once `<img>`
@@ -69,13 +69,13 @@ impl<'rt> Page<'rt> {
         // mutation including attribute-only changes that don't affect layout.
         let layout_ver = dom.layout_version();
         // `:hover`/`:focus` change which CSS rules match without ever
-        // setting the LAYOUT dirty flag (see `dom::Dom::style_version`'s
+        // setting the LAYOUT dirty flag (see `neutron::dom::Dom::style_version`'s
         // own doc) - `layout_ver` alone can't see that, so this is a
         // separate, required cache key (see `LayoutCache::style_ver`'s
         // own doc for the real bug this closes).
         let style_ver = dom.style_version();
         // Real `document.adoptedStyleSheets` mutation support (see
-        // `js_runtime::cssom_stylesheet`): a script's `insertRule`/
+        // `neutron::js::cssom_stylesheet`): a script's `insertRule`/
         // `deleteRule` doesn't bump `dom.mutation_count()` (it touches a
         // `CSSStyleSheet`, not the DOM), so this cheap version key (no
         // rule text touched) still invalidates the cache below.
@@ -158,7 +158,7 @@ impl<'rt> Page<'rt> {
     /// clipping, not new for this), so a shifted rect above or below the
     /// viewport is simply not drawn - no separate clip step needed here.
     /// Real `overflow: hidden`/`auto`/`scroll` clipping (per-element, see
-    /// `layout_engine::Overflow`) rides along the same shift: an
+    /// `neutron::layout::Overflow`) rides along the same shift: an
     /// `ImageQuad`/`ClippedGlyph`'s own `clip` region is in the same
     /// absolute document space as everything else, so it needs the same
     /// `-offset`/`-scroll_top` shift applied as the quad/glyph it clips,
@@ -174,7 +174,7 @@ impl<'rt> Page<'rt> {
         // `LayoutCache` uses (a paint result can only differ if the layout
         // tree it was painted from could) plus `scroll_top`, the one
         // paint-affecting input layout doesn't need — see `PaintCache`'s
-        // own doc for why this key is used instead of `dom::DirtyFlags::PAINT`.
+        // own doc for why this key is used instead of `neutron::dom::DirtyFlags::PAINT`.
         let dom = self
             .ctx
             .dom()
@@ -182,7 +182,7 @@ impl<'rt> Page<'rt> {
         let layout_ver = dom.layout_version();
         let style_ver = dom.style_version();
         let adopted_version = self.ctx.adopted_stylesheet_version();
-        // Real CSS transitions (`layout_engine::transition`): an
+        // Real CSS transitions (`neutron::layout::transition`): an
         // in-flight transition repaints every real frame purely from
         // wall-clock time, with neither `layout_ver`/`style_ver`/
         // `adopted_version` (nor `scroll_top`) changing at all - so
@@ -190,7 +190,7 @@ impl<'rt> Page<'rt> {
         // running as of the *previous* frame has to force a cache bypass
         // this frame too, not just the one frame the underlying style
         // actually changed on.
-        // Real `<canvas>` compositing (`js_runtime::canvas_bindings`): a
+        // Real `<canvas>` compositing (`neutron::js::canvas_bindings`): a
         // canvas's drawn pixels can change from a script's draw call at
         // any point, with no dirty flag this worker can see cheaply (no
         // `layout_ver`/`style_ver` bump, same blind spot a running CSS
@@ -221,7 +221,7 @@ impl<'rt> Page<'rt> {
         self.transitions_active.set(!transitioning_nodes.is_empty());
         let canvas_images: std::collections::HashMap<
             NodeId,
-            std::rc::Rc<image_decode::DecodedImage>,
+            std::rc::Rc<neutron::image::DecodedImage>,
         > = self
             .ctx
             .canvas_snapshots()
@@ -229,7 +229,7 @@ impl<'rt> Page<'rt> {
             .map(|(node, (w, h, rgba))| {
                 (
                     node,
-                    std::rc::Rc::new(image_decode::DecodedImage {
+                    std::rc::Rc::new(neutron::image::DecodedImage {
                         width: w,
                         height: h,
                         rgba,
@@ -237,21 +237,21 @@ impl<'rt> Page<'rt> {
                 )
             })
             .collect();
-        layout_engine::apply_canvas_snapshots(dom, &mut tree, &canvas_images);
+        neutron::layout::apply_canvas_snapshots(dom, &mut tree, &canvas_images);
         self.ctx.set_layout_rects(collect_layout_rects(&tree));
         self.ctx.set_computed_styles(collect_computed_styles(&tree));
         self.ctx.set_scroll_extents(collect_scroll_extents(&tree));
         let offset = scroll_top as f32;
         let shift_clip =
             |clip: Option<ClipRect>, dy: f32| clip.map(|c| ClipRect { y: c.y - dy, ..c });
-        // Real `position: fixed` (`layout_engine::Position::Fixed`): a
+        // Real `position: fixed` (`neutron::layout::Position::Fixed`): a
         // primitive `render`'s own display-list builders tagged `fixed`
         // (see `Rect::fixed`'s own doc) skips this page-scroll shift
         // entirely, keeping it glued to the viewport while the rest of
         // the page scrolls underneath - no separate "fixed layer" needed,
         // since this is applied per-primitive at the exact point every
         // other primitive already gets shifted.
-        // Real `position: sticky` (`layout_engine::Position::Sticky`): see
+        // Real `position: sticky` (`neutron::layout::Position::Sticky`): see
         // `Rect::sticky`'s own doc for the exact formula this implements.
         // `extra_shift` is `0.0` whenever a tagged box hasn't crossed its
         // own `top` threshold yet (the normal page shift alone already
@@ -280,9 +280,9 @@ impl<'rt> Page<'rt> {
         };
 
         // Real compositing layers (`ROADMAP.md` item 28): boxes that
-        // establish a stacking context (`layout_engine::find_layer_roots`)
+        // establish a stacking context (`neutron::layout::find_layer_roots`)
         // paint into their own transparent canvas, cached independently -
-        // reused across frames unless Stage 2's `dom::StyleInvalidation`
+        // reused across frames unless Stage 2's `neutron::dom::StyleInvalidation`
         // queue names a target under that layer's own subtree (drained
         // once per recompute below, checked via `Dom::contains`). Without
         // this, every layer would share the same coarse whole-page key and
@@ -475,7 +475,7 @@ impl<'rt> Page<'rt> {
     /// `render` does (via `self.layout`, against `width`, the pane's own
     /// real frame width, so the caller's `(x, y)` must already be in that
     /// same on-screen pixel space) and walks it via
-    /// `layout_engine::hit_test`. `scroll_top` converts `y` from that
+    /// `neutron::layout::hit_test`. `scroll_top` converts `y` from that
     /// on-screen space back to the document's own absolute space (the
     /// inverse of the shift `render` applies when painting) before
     /// hit-testing, so a click against a scrolled page still lands on the
@@ -494,6 +494,6 @@ impl<'rt> Page<'rt> {
         scroll_top: f64,
     ) -> Option<NodeId> {
         let tree = self.layout(width, height)?;
-        layout_engine::hit_test(&tree, x, y + scroll_top)
+        neutron::layout::hit_test(&tree, x, y + scroll_top)
     }
 }

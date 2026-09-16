@@ -14,7 +14,7 @@ use std::cell::RefCell;
 use std::ffi::CString;
 use std::os::raw::{c_int, c_void};
 
-use quickjs_sys as sys;
+use neutron::quickjs_sys as sys;
 
 type Panes = std::collections::HashMap<String, std::rc::Rc<std::cell::RefCell<profile::Profile>>>;
 
@@ -44,7 +44,7 @@ thread_local! {
 // runtimes racing `JS_NewClassID` is genuine UB, and even with a lock
 // around just that call, one runtime's own class-id counter can end up
 // out of step with a different class kind it allocates concurrently).
-// `js_runtime::ensure_external_class`/`external_class_id` key by
+// `neutron::js::ensure_external_class`/`external_class_id` key by
 // `(runtime pointer, kind)` instead so this crate gets the same safety
 // without duplicating the bug.
 const PANE_CLASS_KIND: &str = "automation::Pane";
@@ -99,7 +99,7 @@ unsafe fn with_pane<R>(
 }
 
 unsafe extern "C" fn pane_finalizer(rt: *mut sys::JSRuntime, val: sys::JSValue) {
-    let class_id = js_runtime::external_class_id(rt, PANE_CLASS_KIND);
+    let class_id = neutron::js::external_class_id(rt, PANE_CLASS_KIND);
     let ptr = sys::JS_GetOpaque(val, class_id) as *mut String;
     if !ptr.is_null() {
         drop(Box::from_raw(ptr));
@@ -118,7 +118,7 @@ unsafe extern "C" fn pane_goto(
     let Some(url) = read_js_string(ctx, *argv) else {
         return throw(ctx, "pane.goto(url): url must be a string");
     };
-    let class_id = js_runtime::external_class_id(sys::JS_GetRuntime(ctx), PANE_CLASS_KIND);
+    let class_id = neutron::js::external_class_id(sys::JS_GetRuntime(ctx), PANE_CLASS_KIND);
     match with_pane(ctx, class_id, this_val, |profile| profile.navigate(&url)) {
         Ok(Ok(Ok(()))) => sys::js_undefined(),
         Ok(Ok(Err(message))) => throw(ctx, &format!("pane.goto failed: {message}")),
@@ -145,7 +145,7 @@ unsafe extern "C" fn pane_fill(
     let Some(value) = read_js_string(ctx, *argv.add(1)) else {
         return throw(ctx, "pane.fill(selector, value): value must be a string");
     };
-    let class_id = js_runtime::external_class_id(sys::JS_GetRuntime(ctx), PANE_CLASS_KIND);
+    let class_id = neutron::js::external_class_id(sys::JS_GetRuntime(ctx), PANE_CLASS_KIND);
     // Only `#id` selectors and a `textContent` assignment, not a real
     // `HTMLInputElement.value` — see `profile-worker`'s own doc on the
     // `FILL` command for why.
@@ -171,7 +171,7 @@ unsafe extern "C" fn pane_click(
     let Some(selector) = read_js_string(ctx, *argv) else {
         return throw(ctx, "pane.click(selector): selector must be a string");
     };
-    let class_id = js_runtime::external_class_id(sys::JS_GetRuntime(ctx), PANE_CLASS_KIND);
+    let class_id = neutron::js::external_class_id(sys::JS_GetRuntime(ctx), PANE_CLASS_KIND);
     match with_pane(ctx, class_id, this_val, |profile| profile.click(&selector)) {
         Ok(Ok(Ok(()))) => sys::js_undefined(),
         Ok(Ok(Err(message))) => throw(ctx, &format!("pane.click failed: {message}")),
@@ -194,7 +194,7 @@ unsafe fn ensure_pane_class(ctx: *mut sys::JSContext) -> sys::JSClassID {
         call: std::ptr::null_mut(),
         exotic: std::ptr::null_mut(),
     };
-    let class_id = js_runtime::ensure_external_class(rt, PANE_CLASS_KIND, &def);
+    let class_id = neutron::js::ensure_external_class(rt, PANE_CLASS_KIND, &def);
 
     let proto = sys::JS_NewObject(ctx);
     add_method(ctx, proto, "goto", pane_goto, 1);
@@ -230,7 +230,7 @@ unsafe extern "C" fn pane_constructor(
         return throw(ctx, "pane(name): name must be a string");
     };
 
-    let class_id = js_runtime::external_class_id(sys::JS_GetRuntime(ctx), PANE_CLASS_KIND);
+    let class_id = neutron::js::external_class_id(sys::JS_GetRuntime(ctx), PANE_CLASS_KIND);
     let obj = sys::JS_NewObjectClass(ctx, class_id);
     if sys::js_is_exception(&obj) {
         return obj;

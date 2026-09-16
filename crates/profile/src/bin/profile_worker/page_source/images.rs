@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use dom::{Dom, NodeData, NodeId};
-use image_decode::DecodedImage;
+use neutron::dom::{Dom, NodeData, NodeId};
+use neutron::image::DecodedImage;
 
 use crate::network::ResourceCache;
 
@@ -13,7 +13,7 @@ use super::url::resolve_url;
 /// Walks `node`'s subtree collecting every `<img src="...">`'s own
 /// `NodeId` and raw (not yet resolved) `src`, in document order. Feeds
 /// [`load_images`] — the real decode/sizing/painting primitives
-/// (`image_decode`, `layout_engine::apply_image_sizes`, `render`'s
+/// (`image_decode`, `neutron::layout::apply_image_sizes`, `render`'s
 /// `build_image_list`/`composite_images`) already existed and were tested
 /// at the crate level, but nothing in this worker ever called any of
 /// them: a real navigated page's `<img>` rendered as an empty box, same
@@ -42,7 +42,7 @@ fn collect_image_sources(dom: &Dom, node: NodeId, out: &mut Vec<(NodeId, String)
 /// resolved against `base_url` via [`resolve_url`], fetched through
 /// [`fetch_with_cookies`] (so a profile's proxy/DNS/cookie jar apply to
 /// images exactly like every other request this worker makes), decoded
-/// via `image_decode::decode`. An unresolvable URL, a failed fetch, or
+/// via `neutron::image::decode`. An unresolvable URL, a failed fetch, or
 /// undecodable bytes (an unsupported format, corrupt data, an HTML error
 /// page served with an `.jpg` extension) simply gets no entry — the same
 /// "best-effort, never fail the whole page load over one bad resource"
@@ -68,7 +68,7 @@ pub(crate) fn load_images(
         let Ok(response) = cache.fetch_cached(&url, storage_root, proxy, dns_server) else {
             continue;
         };
-        let Some(decoded) = image_decode::decode(&response.body) else {
+        let Some(decoded) = neutron::image::decode(&response.body) else {
             continue;
         };
         images.insert(node, Rc::new(decoded));

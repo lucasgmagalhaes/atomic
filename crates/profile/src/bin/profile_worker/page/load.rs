@@ -1,6 +1,6 @@
 //! `Page::load` — split out from `page.rs`.
 
-use js_runtime::{Context, Runtime};
+use neutron::js::{Context, Runtime};
 
 use crate::document_load::LoadedDocument;
 use crate::network::ResourceCache;
@@ -19,7 +19,7 @@ impl<'rt> Page<'rt> {
     /// `localStorage`/`document.cookie` itself - see the const's doc).
     /// `document.cookie`/`localStorage`/`sessionStorage`/`indexedDB` are
     /// wired to real per-`storage_host` storage under `storage_root` (via
-    /// `js_runtime::Context::with_storage`) whenever `storage_host` is
+    /// `neutron::js::Context::with_storage`) whenever `storage_host` is
     /// `Some` - `None` gets a plain `Context::with_dom` instead. A
     /// storage-open failure (rare - a permissions problem, a full disk)
     /// degrades to `with_dom` rather than failing the whole page load.
@@ -38,7 +38,7 @@ impl<'rt> Page<'rt> {
         dns_server: Option<std::net::SocketAddr>,
     ) -> Self {
         let html = &doc.html;
-        let (dom, html_el) = html::parse_to_html_element(html);
+        let (dom, html_el) = neutron::html::parse_to_html_element(html);
         // One cache for every resource this single load fetches (stylesheets,
         // their `@import`s, and images) - see `ResourceCache`'s own doc for
         // why it's scoped to just this call rather than living longer.
@@ -107,7 +107,9 @@ impl<'rt> Page<'rt> {
                     // fail (a rare I/O error opening the storage files) - it
                     // has to be re-parsed from `html` rather than reused,
                     // acceptable for a path this unlikely to hit in practice.
-                    Err(_) => Context::with_dom(runtime, html::parse_to_html_element(html).0),
+                    Err(_) => {
+                        Context::with_dom(runtime, neutron::html::parse_to_html_element(html).0)
+                    }
                 }
             }
             None => Context::with_dom(runtime, dom),
@@ -125,7 +127,7 @@ impl<'rt> Page<'rt> {
         // `csp_policies` above (for `load_scripts`'s own `script-src`
         // gating). Each is appended via `add_csp_policy` rather than
         // joined into one string - real CSP policies intersect rather
-        // than merge (see `js_runtime::csp`'s module docs).
+        // than merge (see `neutron::js::csp`'s module docs).
         for policy in &csp_policies {
             ctx.add_csp_policy(policy);
         }
@@ -164,7 +166,7 @@ impl<'rt> Page<'rt> {
             layout_cache: std::cell::RefCell::new(None),
             paint_cache: std::cell::RefCell::new(None),
             layers: std::cell::RefCell::new(std::collections::HashMap::new()),
-            transitions: std::cell::RefCell::new(layout_engine::TransitionStates::new()),
+            transitions: std::cell::RefCell::new(neutron::layout::TransitionStates::new()),
             transitions_active: std::cell::Cell::new(false),
         }
     }

@@ -1,0 +1,17 @@
+[package]
+name = "neutron"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+atoms = { path = "atoms" }
+dom = { path = "dom" }
+html = { path = "html" }
+css = { path = "css" }
+layout-engine = { path = "layout-engine" }
+render = { path = "render" }
+webgl = { path = "webgl" }
+image_decode = { path = "image_decode" }
+js-runtime = { path = "js-runtime" }
+workers = { path = "workers" }
+quickjs-sys = { path = "js-runtime/quickjs-sys" }

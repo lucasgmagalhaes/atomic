@@ -4,6 +4,5 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-quickjs-sys = { path = "../js-runtime/quickjs-sys" }
-js-runtime = { path = "../js-runtime" }
+neutron = { path = "../neutron" }
 profile = { path = "../profile" }

@@ -3,7 +3,7 @@
 //! built [`crate::page::Page`] — the top of `RELOAD`/`NAVIGATE`'s own call
 //! chain.
 
-use js_runtime::Runtime;
+use neutron::js::Runtime;
 
 use crate::network::fetch_with_cookies;
 use crate::page::Page;

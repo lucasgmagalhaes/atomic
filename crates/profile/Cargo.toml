@@ -5,17 +5,11 @@ edition = "2021"
 
 [dependencies]
 ipc = { path = "../ipc" }
-dom = { path = "../dom" }
-html = { path = "../html" }
-css = { path = "../css" }
-layout-engine = { path = "../layout-engine" }
-render = { path = "../render" }
-image_decode = { path = "../image_decode" }
 security = { path = "../security" }
-js-runtime = { path = "../js-runtime" }
 net = { path = "../net" }
 storage = { path = "../storage" }
 platform-apis = { path = "../platform-apis" }
+neutron = { path = "../neutron" }
 url = "2.5.8"
 
 [dev-dependencies]

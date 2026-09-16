@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 /// Fetches `url` with a `Cookie` header built from the jar at
 /// `storage_root/<host>/cookies.txt` (the same file
-/// `js_runtime::Context::with_storage` opens for `document.cookie` — see
+/// `neutron::js::Context::with_storage` opens for `document.cookie` — see
 /// that constructor's doc), then feeds every `Set-Cookie` response header
 /// back into that same jar before returning. Because this runs *before*
 /// `Page::load` opens its own `Context`, a `Set-Cookie` on the page's own

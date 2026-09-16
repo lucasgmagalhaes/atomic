@@ -1,0 +1,17 @@
+[package]
+name = "atomic"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+eframe = "0.28"
+egui = "0.36"
+profile = { path = "../../crates/profile" }
+automation = { path = "../../crates/automation" }
+platform-apis = { path = "../../crates/platform-apis" }
+net = { path = "../../crates/net" }
+url = "2.5.8"
+security = { path = "../../crates/security" }
+import = { path = "../../crates/import" }
+storage = { path = "../../crates/storage" }
+neutron = { path = "../../crates/neutron" }

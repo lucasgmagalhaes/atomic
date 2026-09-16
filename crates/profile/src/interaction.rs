@@ -26,7 +26,7 @@ impl Profile {
         }
     }
 
-    /// Sets the `#id` element's real `.value` (`dom::Dom::value`/
+    /// Sets the `#id` element's real `.value` (`neutron::dom::Dom::value`/
     /// `set_value`, independent of children/text) if it's an
     /// `<input>`/`<textarea>`, `textContent` otherwise — see
     /// `profile-worker`'s own doc on `FILL` for the exact rule. `value`
@@ -77,7 +77,7 @@ impl Profile {
 
     /// Real coordinate-driven hover: `x`/`y` are pixel coordinates in the
     /// profile's own frame, same space [`click_at`](Self::click_at) uses.
-    /// The worker hit-tests its current layout, updates `dom::Dom`'s real
+    /// The worker hit-tests its current layout, updates `neutron::dom::Dom`'s real
     /// `:hover` state, and — when the hovered element actually changes —
     /// dispatches a real bubbling `"mouseout"` on the previous
     /// id-addressable target before a real bubbling `"mouseover"` on the
@@ -233,7 +233,7 @@ impl Profile {
     /// Types `key` into whichever real `<input>`/`<textarea>` the most
     /// recent [`click_at`](Self::click_at) focused - `"Backspace"` is a
     /// real delete-last-character, anything else is appended as typed
-    /// text, into the element's real `.value` (`dom::Dom::value`/
+    /// text, into the element's real `.value` (`neutron::dom::Dom::value`/
     /// `set_value`). `Ok(Err(message))` if nothing is currently focused
     /// (never clicked an `<input>`/`<textarea>`, or the page reloaded
     /// since - see `profile-worker`'s `focused_id` reset on
@@ -254,7 +254,7 @@ impl Profile {
     }
 
     /// Real `Tab` (`reverse: false`) / `Shift+Tab` (`reverse: true`) focus
-    /// movement, per the real (scoped) tab order `dom::Dom::tab_order`
+    /// movement, per the real (scoped) tab order `neutron::dom::Dom::tab_order`
     /// computes worker-side (`<input>`/`<textarea>` plus any element with
     /// an explicit non-negative `tabindex`, positive-`tabindex` group
     /// first). Blurs whatever was focused before and focuses the next

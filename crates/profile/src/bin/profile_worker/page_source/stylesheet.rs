@@ -1,7 +1,7 @@
 //! `build_stylesheet` — split out from `page_source.rs`.
 
-use css::{parse_stylesheet, Stylesheet};
-use dom::{Dom, NodeData, NodeId};
+use neutron::css::{parse_stylesheet, Stylesheet};
+use neutron::dom::{Dom, NodeData, NodeId};
 
 use crate::network::ResourceCache;
 
@@ -58,7 +58,7 @@ fn collect_css_sources(dom: &Dom, node: NodeId, out: &mut Vec<CssSource>) {
 /// would get if this crate parsed that attribute, which it doesn't yet),
 /// then appends its own rules — imported rules land first, same relative
 /// order a real `@import` (which must precede other rules) produces. Real
-/// `@font-face` rules (`css::FontFaceRule`) ride along the same way, from
+/// `@font-face` rules (`neutron::css::FontFaceRule`) ride along the same way, from
 /// both `css_text` itself and anything it `@import`s - `sheet.font_faces`
 /// is what `page_source::load_font_faces` (called once, after
 /// `build_stylesheet` returns) actually fetches and registers.
@@ -88,7 +88,7 @@ fn merge_stylesheet_text(
             // `Page::layout`'s own call into `build_box_tree_with_viewport`
             // in `page.rs`; this function isn't threaded a real height
             // either today.
-            .map(|m| m.matches(viewport_width, layout_engine::DEFAULT_VIEWPORT_HEIGHT))
+            .map(|m| m.matches(viewport_width, neutron::layout::DEFAULT_VIEWPORT_HEIGHT))
             .unwrap_or(true);
         if !should_fetch {
             continue;

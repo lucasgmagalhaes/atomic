@@ -11,11 +11,11 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use css::Stylesheet;
-use dom::NodeId;
-use image_decode::DecodedImage;
-use js_runtime::Context;
-use layout_engine::LayoutBox;
+use neutron::css::Stylesheet;
+use neutron::dom::NodeId;
+use neutron::image::DecodedImage;
+use neutron::js::Context;
+use neutron::layout::LayoutBox;
 
 mod load;
 mod render;
@@ -85,7 +85,7 @@ pub(crate) struct Page<'rt> {
     /// shape) — every `LayoutBox` embeds its own resolved `ComputedStyle`,
     /// so reusing the cached tree *is* reusing cached computed styles,
     /// not a separate structure. `getComputedStyle`
-    /// (`js_runtime::computed_style`) reads from whatever `render()` last
+    /// (`neutron::js::computed_style`) reads from whatever `render()` last
     /// pushed via `collect_computed_styles`, which comes straight from
     /// this cache.
     layout_cache: RefCell<Option<LayoutCache>>,
@@ -94,26 +94,26 @@ pub(crate) struct Page<'rt> {
     /// `render()` reuses `pixels.clone()` on a cache hit instead of
     /// re-walking the display list and re-running the GPU/CPU compositing
     /// passes — see `PaintCache`'s own doc for why this reuses
-    /// `LayoutCache`'s key rather than `dom::DirtyFlags::PAINT`.
+    /// `LayoutCache`'s key rather than `neutron::dom::DirtyFlags::PAINT`.
     paint_cache: RefCell<Option<PaintCache>>,
     /// Real per-compositing-layer paint cache (`ROADMAP.md` item 28),
     /// keyed by each layer root's own `NodeId` — unlike `paint_cache`
     /// (one whole-frame entry, invalidated by *any* page-wide change),
     /// each entry here survives across frames independently, reused
-    /// whenever `render()` finds no `dom::StyleInvalidation` whose target
+    /// whenever `render()` finds no `neutron::dom::StyleInvalidation` whose target
     /// falls under that layer's own subtree (see `render.rs`'s own doc on
     /// `find_layer_roots`/`Dom::contains` wiring). Entries whose `NodeId`
     /// no longer resolves to a current layer root are pruned each
     /// recompute so this can't grow unboundedly across navigations.
     layers: RefCell<HashMap<NodeId, LayerCacheEntry>>,
-    /// Real CSS transitions (`layout_engine::transition`) - cross-frame
+    /// Real CSS transitions (`neutron::layout::transition`) - cross-frame
     /// per-`NodeId` animation state for `opacity`/`transform`, owned here
     /// (not inside `LayoutCache`/`PaintCache`) because it has to survive a
     /// cache *hit* too: a transition keeps running every real frame even
     /// when nothing else about the page changed. See `render.rs`'s own
     /// doc on `Page::render` for how its return value bypasses both caches
     /// while a transition is still in flight.
-    transitions: RefCell<layout_engine::TransitionStates>,
+    transitions: RefCell<neutron::layout::TransitionStates>,
     /// Whether any node had an in-flight transition as of the *previous*
     /// `render()` call - checked before `render()`'s own `paint_cache`
     /// lookup so a transition still animating this frame isn't served a
@@ -123,23 +123,23 @@ pub(crate) struct Page<'rt> {
     transitions_active: std::cell::Cell<bool>,
 }
 
-/// One [`render::Layer`]'s cached pixels plus the `scroll_top` they were
-/// painted at — `render::LayerCacheKey` itself has no `scroll_top` field
+/// One [`neutron::paint::Layer`]'s cached pixels plus the `scroll_top` they were
+/// painted at — `neutron::paint::LayerCacheKey` itself has no `scroll_top` field
 /// (a layer's own painted pixels embed the scroll shift, same as the
 /// whole-frame `PaintCache` already accounts for), so this wrapper keeps
-/// it alongside the layer without touching `render::Layer`'s own,
+/// it alongside the layer without touching `neutron::paint::Layer`'s own,
 /// already-landed shape.
 struct LayerCacheEntry {
-    layer: ::render::Layer,
+    layer: ::neutron::paint::Layer,
     scroll_top: f64,
 }
 
 struct LayoutCache {
     width: u32,
     height: u32,
-    /// `dom::Dom::style_version()` at the time this tree was built — a
+    /// `neutron::dom::Dom::style_version()` at the time this tree was built — a
     /// `:hover`/`:focus` change (`Dom::set_hovered`/`focus`/`blur`) bumps
-    /// this without bumping `layout_version` (see `dom::Dom::style_version`'s
+    /// this without bumping `layout_version` (see `neutron::dom::Dom::style_version`'s
     /// own doc), so it must be a separate cache key: without it, a click
     /// that only focuses an element (nothing else layout-affecting) would
     /// keep returning the stale pre-focus tree — a real bug this field
@@ -158,7 +158,7 @@ struct LayoutCache {
 /// one paint-affecting input `LayoutCache` doesn't need (scrolling doesn't
 /// change layout, only which vertical slice of it is visible).
 ///
-/// Deliberately **not** keyed on `dom::DirtyFlags::PAINT`/`drain_dirty()`:
+/// Deliberately **not** keyed on `neutron::dom::DirtyFlags::PAINT`/`drain_dirty()`:
 /// `Dom::focus`/`hover::set_hovered` bump `style_version()` without ever
 /// setting `DirtyFlags::PAINT` (same gap `LayoutCache::style_ver`'s own doc
 /// already documents), so a `DirtyFlags`-only cache would silently freeze a

@@ -1,14 +1,14 @@
 //! `dispatch_mouse_move` — split out from `input_commands.rs`.
 
-use dom::{Dom, NodeId};
-use js_runtime::Context;
+use neutron::dom::{Dom, NodeId};
+use neutron::js::Context;
 
 use crate::page::Page;
 
 use super::helpers::js_string_literal;
 
 /// Real coordinate-driven hover: hit-tests `(x, y)` via `Page::hit_test_at`
-/// (same primitive `dispatch_click_at` already uses), updates `dom::Dom`'s
+/// (same primitive `dispatch_click_at` already uses), updates `neutron::dom::Dom`'s
 /// existing `:hover` state (`set_hovered`/`clear_hover` — real, already
 /// wired to bump `style_version`, just never called from any host input
 /// path before this), and — when the hovered element actually changes —

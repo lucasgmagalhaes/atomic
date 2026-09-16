@@ -1,7 +1,7 @@
 //! `collect_meta_csp_policies` — split out from `page_source.rs`.
 //!
 //! Also carries this worker's own `script-src` gating
-//! ([`is_script_allowed`]) — `js_runtime::csp`'s own module doc
+//! ([`is_script_allowed`]) — `neutron::js::csp`'s own module doc
 //! previously scoped CSP enforcement to `connect-src`/`default-src` only
 //! ("this engine's `fetch`-family surface is the only thing CSP can
 //! meaningfully restrict here, since there's no separate script-loading
@@ -15,13 +15,13 @@
 //! happen here instead of needing a hook inside `js-runtime` at all.
 //! Deliberately narrower than real spec's own `script-src`: gates only
 //! whether an *external* `<script src>` is fetched (mirrors
-//! `js_runtime::csp::is_connect_allowed`'s exact matching rules -
+//! `neutron::js::csp::is_connect_allowed`'s exact matching rules -
 //! `*`/`'none'`/`'self'`/explicit origin or host, falling back to
 //! `default-src`) - inline `<script>` content stays ungated, matching
-//! `js_runtime::csp`'s own documented "no nonce/hash, no execution-gating
+//! `neutron::js::csp`'s own documented "no nonce/hash, no execution-gating
 //! hook for inline content" scope cut.
 
-use dom::{Dom, NodeData, NodeId};
+use neutron::dom::{Dom, NodeData, NodeId};
 
 /// Walks `node`'s subtree in document order collecting every
 /// `<meta http-equiv="Content-Security-Policy" content="...">`'s policy
@@ -66,7 +66,7 @@ fn find_directive<'a>(policy: &'a str, name: &str) -> Option<Vec<&'a str>> {
 }
 
 /// Whether `script_url` may be fetched under a single `policy` — same
-/// matching rules `js_runtime::csp::is_connect_allowed` already
+/// matching rules `neutron::js::csp::is_connect_allowed` already
 /// documents for `connect-src` (`*`/`'none'`/`'self'`/explicit origin or
 /// bare host), applied to `script-src` (falling back to `default-src`).
 /// A policy with neither directive allows everything, matching real
@@ -107,7 +107,7 @@ fn is_script_allowed_by(policy: &str, script_url: &str, page_origin: Option<&str
 /// Whether `script_url` may be fetched under *every* delivered `policies`
 /// entry — real CSP's multiple-policy model (policies intersect, so one
 /// disallowing entry blocks regardless of the others), same convention
-/// `js_runtime::csp::is_request_blocked` already uses for `connect-src`.
+/// `neutron::js::csp::is_request_blocked` already uses for `connect-src`.
 /// No policies at all: never blocks.
 pub(crate) fn is_script_allowed(
     policies: &[String],

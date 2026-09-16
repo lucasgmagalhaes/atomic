@@ -10,7 +10,9 @@
 //! and `beginPath`/`moveTo`/`lineTo`/`closePath`/`fill` (convex polygons
 //! only, no stroke, no curves - see `render::Canvas2D::fill`'s own doc) -
 //! plus `fillText(text, x, y)` (fixed font/size, no `ctx.font`, no
-//! `maxWidth` - see `render::Canvas2D::fill_text`'s own doc).
+//! `maxWidth` - see `render::Canvas2D::fill_text`'s own doc). Also adds
+//! `toDataURL()` on `HTMLCanvasElement` itself (see [`to_data_url`]'s own
+//! doc - real PNG encoding, requires an already-active 2D context).
 //!
 //! `getContext(id)` only recognizes `"2d"` (any other value, including
 //! `"webgl"`, returns `null` - no WebGL/`OffscreenCanvas` context here).
@@ -839,11 +841,40 @@ unsafe extern "C" fn get_context(
     obj
 }
 
-/// Adds `getContext(id)` to `HTMLCanvasElement.prototype` - called from
-/// `element_classes::classes::ensure_html_subclass`'s own
+/// `canvas.toDataURL()` — a real spec method on `HTMLCanvasElement`
+/// itself (not `CanvasRenderingContext2D`). Requires `getContext('2d')` to
+/// have already been called on this element at least once (i.e. it's
+/// registered in `HostState::canvases`) - a canvas nothing has ever drawn
+/// through returns `""` rather than a data URL for an all-transparent
+/// image, a documented gap (real spec would still produce one). Ignores
+/// any `type`/`quality` arguments - see `render::Canvas2D::to_data_url`'s
+/// own doc for why the output is always PNG.
+unsafe extern "C" fn to_data_url(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    _argc: c_int,
+    _argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let Some(node) = node_id(ctx, this_val) else {
+        return sys::JS_NewStringLen(ctx, "".as_ptr() as *const std::os::raw::c_char, 0);
+    };
+    let state = crate::host_state::get(ctx);
+    if state.is_null() {
+        return sys::JS_NewStringLen(ctx, "".as_ptr() as *const std::os::raw::c_char, 0);
+    }
+    let Some(backing) = (*state).canvases.get(&node) else {
+        return sys::JS_NewStringLen(ctx, "".as_ptr() as *const std::os::raw::c_char, 0);
+    };
+    let url = backing.borrow().to_data_url();
+    sys::JS_NewStringLen(ctx, url.as_ptr() as *const std::os::raw::c_char, url.len())
+}
+
+/// Adds `getContext(id)`/`toDataURL()` to `HTMLCanvasElement.prototype` -
+/// called from `element_classes::classes::ensure_html_subclass`'s own
 /// `HTML_CANVAS_CLASS_KIND` branch, same wiring point every other
 /// element-specific method set (`define_form_properties`,
 /// `define_select_properties`, ...) already uses.
 pub(crate) unsafe fn define_canvas_properties(ctx: *mut sys::JSContext, proto: sys::JSValue) {
     define_method(ctx, proto, "getContext", get_context, 1);
+    define_method(ctx, proto, "toDataURL", to_data_url, 0);
 }

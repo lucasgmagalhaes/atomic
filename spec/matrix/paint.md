@@ -2,7 +2,7 @@
 
 ## 5. Paint, canvas and compositing
 
-**Done (77%)**
+**Done (81%)**
 
 - [x] GPU background/border rectangle pass.
 - [x] CPU glyph rasterization/compositing and decoded image compositing.
@@ -21,7 +21,8 @@
 **Needed**
 
 - [~] Correct paint-order stacking contexts done (2026-09-12) for the real trigger (`position != Static && z_index.is_some()`) — see `spec/ROADMAP.md` items 24-25. Retained compositing layers still `[ ]`.
-- [ ] Canvas API completion: paths, strokes, text, `drawImage`, transforms, text metrics, gradients, patterns, `toBlob`/`toDataURL`, OffscreenCanvas and WebGL/WebGPU policy.
+- [x] Canvas2D `toDataURL()` JS wiring (2026-09-16) — real PNG encoding via a new `image_decode::encode_png` (the reverse direction of that crate's existing `decode`, same `image` crate dependency) plus `base64`, producing a genuine `data:image/png;base64,...` URL a page could actually decode. On `HTMLCanvasElement` itself (real spec placement, not `CanvasRenderingContext2D`). Scope cuts: always PNG regardless of the requested MIME type (no JPEG/WebP *encoder* wired); requires `getContext('2d')` to have already been called on the element (returns `""` otherwise, real spec would still produce a blank-image data URL); no `toBlob` (no `Blob`/async-callback machinery in this crate's JS bindings). Tested at both levels: `render/tests/canvas_test.rs` (1 new test: base64-decode + `image_decode::decode` round trip confirms real, correct PNG bytes) and `js-runtime/tests/canvas_test.rs` (2 new tests: real data-URL prefix after drawing, empty string with no active context).
+- [ ] Canvas API completion remainder: general strokes/curves (`arc`/`bezierCurveTo`/`quadraticCurveTo`), `ctx.font`/text wrapping/`measureText`/`strokeText`, `<img>`/`<video>`/`ImageBitmap` `drawImage` sources, `scale`/`rotate`/general transform matrix, radial/conic gradients, patterns, `toBlob`, OffscreenCanvas and WebGL/WebGPU policy.
 - [ ] Invalidation regions, damage tracking, frame scheduling and vsync integration.
 - [ ] Selection/caret, focus rings, text decorations, SVG and printing/PDF output.
 

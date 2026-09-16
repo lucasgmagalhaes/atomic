@@ -10,6 +10,9 @@ layout-engine = { path = "../layout-engine" }
 wgpu = "0.20"
 bytemuck = { version = "1", features = ["derive"] }
 pollster = "1.0"
+base64 = "0.23.1"
 
 [dev-dependencies]
 css = { path = "../css" }
+image_decode = { path = "../image_decode" }
+base64 = "0.23.1"

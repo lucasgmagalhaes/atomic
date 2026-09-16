@@ -626,6 +626,31 @@ fn fill_text_with_empty_string_does_nothing() {
 }
 
 #[test]
+fn to_data_url_produces_a_real_decodable_png() {
+    let mut canvas = Canvas2D::new(4, 4);
+    canvas.set_fill_style(Color {
+        r: 255,
+        g: 0,
+        b: 0,
+        a: 255,
+    });
+    canvas.fill_rect(0.0, 0.0, 4.0, 4.0);
+
+    let url = canvas.to_data_url();
+    let prefix = "data:image/png;base64,";
+    assert!(url.starts_with(prefix), "unexpected url: {url}");
+
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&url[prefix.len()..])
+        .expect("valid base64");
+    let decoded = image_decode::decode(&bytes).expect("valid PNG");
+    assert_eq!(decoded.width, 4);
+    assert_eq!(decoded.height, 4);
+    assert_eq!(&decoded.rgba[0..4], &[255, 0, 0, 255]);
+}
+
+#[test]
 fn put_image_data_clips_a_negative_origin() {
     let mut canvas = Canvas2D::new(4, 4);
     // A 4x4 solid-yellow region positioned so its top-left spills off the

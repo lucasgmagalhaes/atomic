@@ -7,9 +7,22 @@ on:
     branches: [main]
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+
+# A new push to the same PR supersedes its previous build. Cancelling stale
+# runs avoids spending runners and compiler-cache bandwidth on obsolete code.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  # CI uses sccache rather than Cargo's machine-local incremental artifacts.
+  # This keeps cache keys portable across ephemeral runners and shrinks the
+  # target directories managed by rust-cache.
+  CARGO_INCREMENTAL: 0
   # crates/render's GpuRenderer/Canvas2D (and anything that spawns a real
   # profile-worker, which renders through them - profile/automation/shell's
   # own tests) need a real wgpu adapter to open. GitHub's ubuntu runners
@@ -20,9 +33,29 @@ env:
   WGPU_BACKEND: vulkan
 
 jobs:
-  build-and-test:
-    name: Build, test, and coverage
+  quality:
+    name: Format and lint
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Lint workspace
+        run: cargo clippy --workspace --all-targets
+
+  build:
+    name: Build workspace
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -48,23 +81,91 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: llvm-tools-preview
+
+      - name: Configure compiler cache
+        uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@v2
         with:
-          # cargo-llvm-cov keeps its instrumented build in a separate
-          # target dir (target/llvm-cov-target) from the plain `cargo
-          # build` below, so both get cached without clobbering each
-          # other.
           cache-all-crates: true
 
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-
       - name: Build workspace
+        env:
+          RUSTC_WRAPPER: sccache
+          SCCACHE_GHA_ENABLED: "true"
         run: cargo build --workspace --verbose
+
+      - name: Report compiler-cache statistics
+        if: always()
+        run: sccache --show-stats
+
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Configure compiler cache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: true
+
+      - name: Run unit tests
+        env:
+          RUSTC_WRAPPER: sccache
+          SCCACHE_GHA_ENABLED: "true"
+        run: make unit
+
+      - name: Report compiler-cache statistics
+        if: always()
+        run: sccache --show-stats
+
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libx11-dev libxcb-render0-dev libxcb-shm0-dev libxcb1-dev \
+            libgl1-mesa-dri libegl1-mesa-dev \
+            mesa-vulkan-drivers libvulkan1 vulkan-tools \
+            xvfb
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Configure compiler cache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: true
 
       # `xvfb-run` gives every test process a real (virtual, headless) X11
       # display - needed by anything that talks to a real OS display/
@@ -88,10 +189,108 @@ jobs:
       # that never resolves. Confirmed locally: it hangs under
       # mesa-vulkan-drivers + xvfb-run the same way. Every other
       # clipboard test (Promise shape, argument validation) still runs.
+      - name: Run integration tests
+        env:
+          RUSTC_WRAPPER: sccache
+          SCCACHE_GHA_ENABLED: "true"
+        run: xvfb-run -a make integration
+
+      - name: Report compiler-cache statistics
+        if: always()
+        run: sccache --show-stats
+
+  runtime:
+    name: JavaScript runtime tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libx11-dev libxcb-render0-dev libxcb-shm0-dev libxcb1-dev \
+            libgl1-mesa-dri libegl1-mesa-dev \
+            mesa-vulkan-drivers libvulkan1 vulkan-tools \
+            xvfb
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Configure compiler cache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: true
+
+      - name: Run JavaScript runtime tests
+        env:
+          RUSTC_WRAPPER: sccache
+          SCCACHE_GHA_ENABLED: "true"
+        run: xvfb-run -a make runtime
+
+      - name: Report compiler-cache statistics
+        if: always()
+        run: sccache --show-stats
+
+  coverage:
+    name: Coverage
+    # Coverage recompiles the workspace with LLVM instrumentation. Keep it on
+    # main and manual runs: PRs run the equivalent build, unit, runtime, and
+    # integration gates in parallel without a second full compilation.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libx11-dev libxcb-render0-dev libxcb-shm0-dev libxcb1-dev \
+            libgl1-mesa-dri libegl1-mesa-dev \
+            mesa-vulkan-drivers libvulkan1 vulkan-tools \
+            xvfb
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Configure compiler cache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          # cargo-llvm-cov keeps its instrumented build in a separate target
+          # directory, so retain both it and the normal Cargo artifacts.
+          cache-all-crates: true
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
       - name: Run tests with coverage
+        env:
+          RUSTC_WRAPPER: sccache
+          SCCACHE_GHA_ENABLED: "true"
         run: >
           xvfb-run -a cargo llvm-cov --workspace --lcov --output-path lcov.info
           -- --skip write_text_then_read_text_round_trips_through_the_real_os_clipboard
+
+      - name: Report compiler-cache statistics
+        if: always()
+        run: sccache --show-stats
 
       - name: Coverage summary
         run: cargo llvm-cov report --summary-only

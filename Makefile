@@ -15,6 +15,19 @@ else
   CARGO := cargo
 endif
 
+# Keep Cargo's default incremental artifacts for the edit/build loop. When
+# developers have sccache installed, use it transparently as an additional
+# compiler cache (especially useful after switching branches or cleaning).
+# The check is deliberately optional: a fresh clone works with just Rust.
+SCCACHE_PATH := $(shell command -v sccache 2>/dev/null)
+ifneq ($(strip $(SCCACHE_PATH)),)
+  RUSTC_WRAPPER ?= $(SCCACHE_PATH)
+  export RUSTC_WRAPPER
+  SCCACHE_STATUS := enabled ($(SCCACHE_PATH))
+else
+  SCCACHE_STATUS := not installed (Cargo incremental cache remains enabled)
+endif
+
 # Prefer nextest when available: unlike `cargo test`, it schedules individual
 # tests across binaries. Keep a Cargo fallback so a fresh checkout remains
 # usable before the optional developer tool is installed.
@@ -29,8 +42,8 @@ else
   PROFILE_TEST := $(CARGO) test -p profile -- --test-threads=1
 endif
 
-.PHONY: help build build-release test test-verbose unit integration workspace check run run-release \
-        fmt fmt-check lint clean update doc graphify auto-loop auto-stop
+.PHONY: help build build-release test test-verbose unit runtime integration workspace check run run-release \
+        fmt fmt-check lint cache-info cache-stats clean update doc graphify auto-loop auto-stop
 
 help:
 	@echo "Atomic - make targets:"
@@ -41,12 +54,15 @@ help:
 	@echo "  test           cargo test --workspace"
 	@echo "  test-verbose   cargo test --workspace -- --nocapture"
 	@echo "  unit           fast deterministic tests (uses $(TEST_RUNNER) when installed)"
+	@echo "  runtime        complete js-runtime suite; skips the Xvfb-unstable clipboard round-trip"
 	@echo "  integration    OS, network, GPU and profile-worker tests (uses $(TEST_RUNNER) when installed)"
 	@echo "  workspace      complete test gate (same coverage as test)"
 	@echo "  check          cargo check --workspace (fast type-check, no codegen)"
 	@echo "  fmt            cargo fmt --all"
 	@echo "  fmt-check      cargo fmt --all -- --check (CI-style, no writes)"
 	@echo "  lint           cargo clippy --workspace --all-targets"
+	@echo "  cache-info     show local test-runner and compiler-cache status"
+	@echo "  cache-stats    show sccache statistics when installed"
 	@echo "  update         cargo update (bump dependency lockfile)"
 	@echo "  doc            cargo doc --workspace --no-deps --open"
 	@echo "  graphify       refresh the local graphify knowledge graph"
@@ -78,7 +94,13 @@ test-verbose:
 # parallelizes these independent test binaries when available.
 unit:
 	$(TEST) --workspace --exclude shell --exclude automation --exclude js-runtime --exclude net --exclude platform-apis --exclude profile --exclude render --exclude security --exclude webgl
-	$(TEST) -p js-runtime --test blob_test --test computed_style_test --test console_test --test css_style_test --test cssom_stylesheet_test --test event_subclasses_test --test js_runtime_test --test layout_measurement_test --test navigation_test --test notifications_test --test permissions_policy_test --test script_limits_test --test timers_test --test trusted_types_test --test web_audio_test
+	$(TEST) -p js-runtime --test blob_test --test computed_style_test --test console_test --test css_style_test --test cssom_stylesheet_test --test event_subclasses_test --test layout_measurement_test --test navigation_test --test notifications_test --test permissions_policy_test --test script_limits_test --test timers_test --test trusted_types_test --test web_audio_test
+
+# Full browser-runtime coverage stays separate from the short unit loop. Use
+# Cargo directly because its test-name skip syntax is portable and the one
+# real clipboard round-trip is known to hang under a headless Xvfb display.
+runtime:
+	$(CARGO) test -p js-runtime --tests -- --skip write_text_then_read_text_round_trips_through_the_real_os_clipboard
 
 # Full-environment tests are deliberately separate: they exercise real OS
 # capabilities and process boundaries, and consequently cost far more than
@@ -103,6 +125,20 @@ fmt-check:
 
 lint:
 	$(CARGO) clippy --workspace --all-targets
+
+cache-info:
+	@echo "Test runner: $(TEST_RUNNER)"
+	@echo "Compiler cache: $(SCCACHE_STATUS)"
+	@if [ -z "$(SCCACHE_PATH)" ]; then \
+		echo "Tip: install sccache to reuse compiler outputs across clean builds and branch switches."; \
+	fi
+
+cache-stats:
+	@if [ -n "$(SCCACHE_PATH)" ]; then \
+		sccache --show-stats; \
+	else \
+		echo "sccache is not installed; Cargo incremental artifacts are still used in target/."; \
+	fi
 
 update:
 	$(CARGO) update

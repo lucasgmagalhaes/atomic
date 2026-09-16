@@ -62,6 +62,27 @@ unsafe fn define_readonly_bool(
     sys::JS_SetPropertyStr(ctx, obj, cname.as_ptr(), sys::js_bool(value));
 }
 
+/// Turns a host locale into the language tag exposed by `navigator`.
+/// `C` and `POSIX` are process locales rather than user languages, so they
+/// must not leak through as a one-character `navigator.language` value.
+fn language_from_locale(locale: &str) -> Option<String> {
+    let language = locale
+        .split('.')
+        .next()?
+        .split('@')
+        .next()?
+        .replace('_', "-");
+    (!matches!(language.as_str(), "C" | "POSIX") && language.len() >= 2).then_some(language)
+}
+
+fn system_language() -> String {
+    ["LANG", "LC_ALL", "LANGUAGE"]
+        .into_iter()
+        .filter_map(|name| std::env::var(name).ok())
+        .find_map(|locale| language_from_locale(&locale))
+        .unwrap_or_else(|| "en-US".to_string())
+}
+
 /// Registers the `navigator` global with standard read-only properties.
 /// If `clipboard::register` runs later, it adds `navigator.clipboard`.
 pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
@@ -92,15 +113,9 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     };
     define_readonly_string(ctx, navigator, "platform", platform);
 
-    // language — best-effort system locale
-    let language = std::env::var("LANG")
-        .or_else(|_| std::env::var("LC_ALL"))
-        .or_else(|_| std::env::var("LANGUAGE"))
-        .unwrap_or_else(|_| "en-US".to_string())
-        .split('.')
-        .next()
-        .unwrap_or("en-US")
-        .replace('_', "-");
+    // language — best-effort system locale, with a browser-safe fallback for
+    // process-only locales such as C.UTF-8.
+    let language = system_language();
     define_readonly_string(ctx, navigator, "language", &language);
     // languages — just the primary one
     let languages_arr = sys::JS_NewArray(ctx);

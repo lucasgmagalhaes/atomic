@@ -13,7 +13,12 @@ cargo run -p xtask -- check-neutron-boundary
 
 if command -v dprint >/dev/null 2>&1; then
     echo "pre-commit: dprint check"
-    dprint check
+    # --allow-no-files: the CEF pivot removed crates/atomic/chrome/ (the
+    # only non-Rust source dprint ever targeted), so the include glob can
+    # legitimately match zero files right now. Without this flag dprint
+    # exits non-zero on "no files found", which isn't a real format
+    # failure - see dprint.json's own comment for the glob this covers.
+    dprint check --allow-no-files
 else
     echo "pre-commit: warning - dprint not installed, skipping CSS/HTML/JS format check." >&2
     echo "pre-commit: install with 'cargo install dprint', then run 'dprint config add css markup typescript' once to populate dprint.json's plugin list (see dprint.json's own comment)." >&2

@@ -32,11 +32,7 @@
 mod add_profile_ui;
 mod automation_engine;
 mod automation_ui;
-mod chrome_add_profile_ui;
-mod chrome_downloads_history_ui;
 mod chrome_import_actions;
-mod chrome_settings_ui;
-mod chrome_toolbar_ui;
 mod grid_ui;
 mod pane;
 mod panes;
@@ -138,32 +134,6 @@ pub(crate) struct AtomicApp {
     /// a previous attempt's typed values don't linger into the next one.
     add_profile_form: Option<AddProfileForm>,
     add_profile_error: Option<String>,
-    /// Track B spike: the toolbar rendered by Atomic's own engine instead
-    /// of egui (see `crate::chrome_engine`) — additive next to the real
-    /// `draw_toolbar` for now, not a replacement, so nothing regresses
-    /// while the architecture proves itself. `chrome_gpu` is this chrome
-    /// surface's own GPU context, same "each render surface opens its own"
-    /// convention `profile-worker` already follows for pane content.
-    chrome_toolbar: crate::chrome_engine::ChromeEngine<'static>,
-    chrome_gpu: neutron::paint::GpuRenderer,
-    chrome_texture: Option<egui::TextureHandle>,
-    /// Second chrome surface, same reasoning as `chrome_toolbar` — its own
-    /// `Runtime`/`Context` (one per chrome surface, mirroring one
-    /// `profile-worker`-style page per tab), additive next to the real
-    /// `draw_downloads_history_panel` for now.
-    chrome_downloads_history: crate::chrome_engine::ChromeEngine<'static>,
-    chrome_downloads_texture: Option<egui::TextureHandle>,
-    /// Third chrome surface — the Add Profile modal, same reasoning as the
-    /// other two. `chrome_add_profile_was_open` tracks the closed->open
-    /// transition so form fields are prefilled/reset exactly once per open
-    /// (see `chrome_add_profile_ui`'s own doc).
-    chrome_add_profile: crate::chrome_engine::ChromeEngine<'static>,
-    chrome_add_profile_texture: Option<egui::TextureHandle>,
-    chrome_add_profile_was_open: bool,
-    /// Fourth chrome surface — the Settings window, same reasoning as the
-    /// other three.
-    chrome_settings: crate::chrome_engine::ChromeEngine<'static>,
-    chrome_settings_texture: Option<egui::TextureHandle>,
 }
 
 /// One in-progress "Add Profile" modal's form fields - see the mockup's
@@ -219,27 +189,6 @@ impl Default for AtomicApp {
             imported_bookmarks: Vec::new(),
             add_profile_form: None,
             add_profile_error: None,
-            // Same deliberate leak `automation_engine` above already
-            // documents: this runtime must outlive the chrome engine, and
-            // `AtomicApp` isn't guaranteed a stable address of its own.
-            chrome_toolbar: crate::chrome_engine::ChromeEngine::new_toolbar(Box::leak(Box::new(
-                neutron::js::Runtime::new(),
-            ))),
-            chrome_gpu: neutron::paint::GpuRenderer::new(),
-            chrome_texture: None,
-            chrome_downloads_history: crate::chrome_engine::ChromeEngine::new_downloads_history(
-                Box::leak(Box::new(neutron::js::Runtime::new())),
-            ),
-            chrome_downloads_texture: None,
-            chrome_add_profile: crate::chrome_engine::ChromeEngine::new_add_profile(Box::leak(
-                Box::new(neutron::js::Runtime::new()),
-            )),
-            chrome_add_profile_texture: None,
-            chrome_add_profile_was_open: false,
-            chrome_settings: crate::chrome_engine::ChromeEngine::new_settings(Box::leak(Box::new(
-                neutron::js::Runtime::new(),
-            ))),
-            chrome_settings_texture: None,
         }
     }
 }

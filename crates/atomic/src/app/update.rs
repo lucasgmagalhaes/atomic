@@ -16,14 +16,10 @@ impl eframe::App for AtomicApp {
         self.tick_automation_engine();
 
         self.draw_toolbar(ui);
-        self.draw_chrome_toolbar_spike(ui);
         self.draw_automation_panel(ui);
         self.draw_add_profile_modal(&ctx);
-        self.draw_chrome_add_profile_spike(&ctx);
         self.draw_settings_window(&ctx);
-        self.draw_chrome_settings_spike(&ctx);
         self.draw_downloads_history_panel(ui);
-        self.draw_chrome_downloads_history_spike(ui);
         self.draw_pane_grid(ui);
     }
 }

@@ -1,0 +1,13 @@
+[package]
+name = "cef-shell"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# default-features = false matches upstream tauri-apps/cef-rs's own
+# workspace Cargo.toml (its examples opt back into only what they need,
+# e.g. accelerated_osr) - the default "sandbox" feature crashed
+# (abort/exit code 3) on a bare CEF API call (`command_line_create()`)
+# made before `execute_process`/`initialize`, which upstream's own
+# examples call at the exact same point without issue once sandbox is off.
+cef = { version = "152", default-features = false, features = ["build-util", "resources"] }

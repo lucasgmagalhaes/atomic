@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/atomic",
+    "crates/cef",
     "crates/net", "crates/storage",
     "crates/platform-apis", "crates/profile", "crates/ipc", "crates/security",
     "crates/automation", "crates/import",

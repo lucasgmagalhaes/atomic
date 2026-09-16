@@ -47,13 +47,13 @@ use std::rc::Rc;
 /// `cef_profile_worker` (2026-09-16, `spec/ROADMAP.md` P1) — same
 /// `profile::Profile` API on this side, unchanged; see
 /// `crates/cef/README.md`'s own section on this binary for what's real
-/// (`NAVIGATE`/`RELOAD`/`PING`/`EVAL`/`CLICK`/`FILL`/`CONSOLE`, verified
-/// against real pages) versus not yet implemented (`CLICK_AT`/
-/// `MOUSE_MOVE`/`DRAG_START`/`DROP_AT`/`CONTEXT_MENU_AT`/`COMPOSITION_*`/
-/// `KEY`/`TAB`/`TAB_REVERSE`/`SCROLL`/`RESIZE`/`SET_FPS_CAP`/`PAUSE`/
+/// (`NAVIGATE`/`RELOAD`/`PING`/`EVAL`/`CLICK`/`FILL`/`CONSOLE`/`CLICK_AT`/
+/// `MOUSE_MOVE`/`SCROLL`/`KEY`, verified against real pages) versus not
+/// yet implemented (`DRAG_START`/`DROP_AT`/`CONTEXT_MENU_AT`/
+/// `COMPOSITION_*`/`TAB`/`TAB_REVERSE`/`RESIZE`/`SET_FPS_CAP`/`PAUSE`/
 /// `RESUME` — each returns a real `ERROR not yet implemented` rather than
-/// silently no-opping, so a pane's scroll/tab/type-to-fill-by-typing/
-/// resize interactions will visibly fail until those land, not silently
+/// silently no-opping, so a pane's drag-and-drop/tab-focus/resize
+/// interactions will visibly fail until those land, not silently
 /// misbehave).
 pub fn worker_binary_path() -> Result<PathBuf, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;

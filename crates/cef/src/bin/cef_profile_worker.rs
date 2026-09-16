@@ -16,16 +16,21 @@
 //! CEF's real DOM instead of a `#id`-only one — a real capability
 //! improvement (any CSS selector works now), not a regression.
 //! `CONSOLE` subscribes to CDP's `Runtime.consoleAPICalled` event.
+//! `CLICK_AT`/`MOUSE_MOVE`/`SCROLL`/`KEY` (Backspace or one printable
+//! character) are real coordinate/keyboard input injection via
+//! `CefBrowserHost::send_mouse_click_event`/`send_mouse_move_event`/
+//! `send_mouse_wheel_event`/`send_key_event` — genuine synthetic OS-level
+//! input events Blink's own input pipeline processes, not a DOM mutation
+//! standing in for one (see `spec/architecture/chrome-ui.md`'s "Input
+//! routing" section for why this was built: both content panes and the
+//! planned chrome UI need it).
 //!
-//! Scope cut, honest not silent: `CLICK_AT`/`MOUSE_MOVE`/`DRAG_START`/
-//! `DROP_AT`/`CONTEXT_MENU_AT`/`COMPOSITION_*`/`KEY`/`TAB`/`TAB_REVERSE`/
-//! `SCROLL`/`RESIZE`/`SET_FPS_CAP`/`PAUSE`/`RESUME` aren't implemented yet
-//! — each replies `ERROR not yet implemented in the CEF-backed worker`
-//! rather than silently no-opping or faking success. See
-//! `spec/ROADMAP.md` P1 for the plan to close these (mostly real
-//! `CefBrowserHost` input-injection APIs — `send_mouse_click_event`,
-//! `send_key_event`, `ime_commit_text`, etc. — already exist in the CEF
-//! API, just not wired here yet).
+//! Scope cut, honest not silent: `DRAG_START`/`DROP_AT`/
+//! `CONTEXT_MENU_AT`/`COMPOSITION_*`/`TAB`/`TAB_REVERSE`/`RESIZE`/
+//! `SET_FPS_CAP`/`PAUSE`/`RESUME` aren't implemented yet — each replies
+//! `ERROR not yet implemented in the CEF-backed worker` rather than
+//! silently no-opping or faking success. See `spec/ROADMAP.md` P1 for
+//! the plan to close these.
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
@@ -491,10 +496,109 @@ fn handle_command(
             };
             CommandOutcome::Immediate(reply)
         }
+        // Real coordinate input injection via CEF's own `CefBrowserHost`
+        // methods (`send_mouse_click_event`/`send_mouse_move_event`/
+        // `send_mouse_wheel_event`/`send_key_event`) - fire-and-forget,
+        // same as a real browser's own input pipeline: no CDP round trip,
+        // no reply to wait on beyond confirming the call was well-formed.
+        // Needed by both content panes and the chrome UI (see
+        // spec/architecture/chrome-ui.md's "Input routing" section) -
+        // built here first since this worker is already proven end to end.
+        "CLICK_AT" => match parse_xy(rest) {
+            Some((x, y)) => {
+                let event = MouseEvent { x, y, modifiers: 0 };
+                host.send_mouse_click_event(Some(&event), MouseButtonType::LEFT, 0, 1);
+                host.send_mouse_click_event(Some(&event), MouseButtonType::LEFT, 1, 1);
+                CommandOutcome::Immediate("OK".to_string())
+            }
+            None => {
+                CommandOutcome::Immediate("ERROR CLICK_AT requires two numbers: x y".to_string())
+            }
+        },
+        "MOUSE_MOVE" => match parse_xy(rest) {
+            Some((x, y)) => {
+                let event = MouseEvent { x, y, modifiers: 0 };
+                host.send_mouse_move_event(Some(&event), 0);
+                CommandOutcome::Immediate("OK".to_string())
+            }
+            None => {
+                CommandOutcome::Immediate("ERROR MOUSE_MOVE requires two numbers: x y".to_string())
+            }
+        },
+        "SCROLL" => match rest.trim().parse::<i32>() {
+            // Real wheel semantics: `delta_y` is the amount content moves,
+            // opposite sign from how far *down* the page scrolls - the old
+            // engine's own `SCROLL dy` convention (positive scrolls down,
+            // matching a mouse wheel) is preserved here by negating.
+            Ok(dy) => {
+                let event = MouseEvent {
+                    x: 0,
+                    y: 0,
+                    modifiers: 0,
+                };
+                host.send_mouse_wheel_event(Some(&event), 0, -dy);
+                CommandOutcome::Immediate("OK".to_string())
+            }
+            Err(_) => CommandOutcome::Immediate("ERROR SCROLL requires one number: dy".to_string()),
+        },
+        "KEY" => {
+            // Scope cut, honest: only "Backspace" and single printable
+            // characters, matching the old engine's own `KEY` contract
+            // (see crates/profile/src/interaction.rs's `type_key` doc) -
+            // full key-name support (arrows, Enter, modifiers) is real
+            // future work, not silently faked as "any string works".
+            if rest == "Backspace" {
+                send_key_press(host, 0x08, '\u{8}' as u16);
+                CommandOutcome::Immediate("OK".to_string())
+            } else if rest.chars().count() == 1 {
+                let ch = rest.chars().next().unwrap();
+                send_key_press(host, ch as i32, ch as u16);
+                CommandOutcome::Immediate("OK".to_string())
+            } else {
+                CommandOutcome::Immediate(
+                    "ERROR KEY only supports \"Backspace\" or one printable character".to_string(),
+                )
+            }
+        }
         _ => CommandOutcome::Immediate(
             "ERROR not yet implemented in the CEF-backed worker".to_string(),
         ),
     }
+}
+
+fn parse_xy(rest: &str) -> Option<(i32, i32)> {
+    let mut parts = rest.split_whitespace();
+    let x: i32 = parts.next()?.parse().ok()?;
+    let y: i32 = parts.next()?.parse().ok()?;
+    Some((x, y))
+}
+
+/// A real key press: `KEYDOWN` (or `RAWKEYDOWN`), then `CHAR` (delivers
+/// the actual character to a focused editable field - `KEYDOWN` alone
+/// does not), then `KEYUP` - matches the three-event sequence a real
+/// keyboard driver produces, not a single synthetic event standing in
+/// for all three.
+fn send_key_press(host: &BrowserHost, windows_key_code: i32, character: u16) {
+    let base = KeyEvent {
+        size: std::mem::size_of::<KeyEvent>(),
+        type_: KeyEventType::RAWKEYDOWN,
+        modifiers: 0,
+        windows_key_code,
+        native_key_code: 0,
+        is_system_key: 0,
+        character,
+        unmodified_character: character,
+        focus_on_editable_field: 0,
+    };
+    host.send_key_event(Some(&base));
+    host.send_key_event(Some(&KeyEvent {
+        type_: KeyEventType::CHAR,
+        ..base.clone()
+    }));
+    host.send_key_event(Some(&KeyEvent {
+        type_: KeyEventType::KEYUP,
+        ..base
+    }));
 }
 
 /// Matches `profile::bin::profile_worker::document_load::DEMO_HTML`'s

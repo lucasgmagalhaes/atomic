@@ -107,3 +107,54 @@ fn profile_fill_sets_a_real_input_value_via_a_real_css_selector() {
 
     profile.quit();
 }
+
+#[test]
+fn profile_click_at_and_type_key_drive_a_real_focused_input() {
+    let path = worker_binary_path();
+    let mut profile = profile::Profile::spawn(
+        &path.to_string_lossy(),
+        "atomic-cef-worker-test-4",
+        400,
+        300,
+    )
+    .expect("failed to spawn cef_profile_worker");
+
+    // A real autofocused input with a real `input` listener - proves
+    // click_at/type_key reach CEF's actual input pipeline
+    // (CefBrowserHost::send_mouse_click_event/send_key_event), not a
+    // simulated DOM mutation, and that Profile's existing client API
+    // (unchanged) drives it correctly against the CEF-backed worker.
+    let html = "data:text/html,%3Cinput%20id%3D%22box%22%20autofocus%3E%3Cdiv%20id%3D%22out%22%3E%3C%2Fdiv%3E%3Cscript%3Edocument.getElementById('box').addEventListener('input',e%3D%3E%7Bdocument.getElementById('out').textContent%3De.target.value%3B%7D)%3B%3C%2Fscript%3E";
+    profile
+        .navigate(html)
+        .expect("stdin/stdout protocol must not fail")
+        .expect("navigating to a data: URL must succeed");
+
+    profile
+        .click_at(50.0, 20.0)
+        .expect("stdin/stdout protocol must not fail")
+        .expect("click_at must succeed");
+    profile
+        .type_key("a")
+        .expect("stdin/stdout protocol must not fail")
+        .expect("type_key must succeed");
+    profile
+        .type_key("b")
+        .expect("stdin/stdout protocol must not fail")
+        .expect("type_key must succeed");
+    profile
+        .type_key("c")
+        .expect("stdin/stdout protocol must not fail")
+        .expect("type_key must succeed");
+
+    let value = profile
+        .evaluate("document.getElementById('out').textContent")
+        .expect("stdin/stdout protocol must not fail")
+        .expect("evaluating a trivial expression must not throw");
+    assert_eq!(
+        value, "abc",
+        "real click_at + real type_key presses must reach the real focused input"
+    );
+
+    profile.quit();
+}

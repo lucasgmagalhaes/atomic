@@ -10,6 +10,7 @@ The old engine's spec (JS runtime/DOM/CSS/layout/paint matrix, architecture play
 2. **[RULES.md](RULES.md)** — mandatory rules before touching CEF binding code or process/isolation logic.
 3. **[architecture/cef-integration.md](architecture/cef-integration.md)** — how the CEF binding layer is structured (multi-process model, IPC, the Rust↔C++ boundary).
 4. **[architecture/isolation-and-perf.md](architecture/isolation-and-perf.md)** — the actual differentiator: per-profile process/data isolation, startup budget, idle throttling.
+5. **[architecture/chrome-ui.md](architecture/chrome-ui.md)** — the app's own shell UI (toolbar/sidebar/settings/etc.), rendered by a dedicated CEF browser instead of `egui`, composited natively alongside per-profile panes.
 
 ## Directory map
 

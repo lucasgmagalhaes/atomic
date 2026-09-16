@@ -4,14 +4,16 @@
 //! texture that accumulates draws across calls, same as a real `<canvas>`
 //! backing bitmap. Starts fully transparent, like the real spec.
 //!
-//! Scoped to solid-color rectangles: `fillStyle`/`fillRect`/`clearRect`
-//! plus `strokeStyle`/`lineWidth`/`strokeRect`, `save`/`restore`, and
-//! `translate`. No paths (`beginPath`/`lineTo`/`arc`/...) or general
-//! strokes - just the one rectangle-outline shortcut real Canvas2D also
-//! exposes directly. No text, no images/`drawImage`, no
-//! gradients/patterns, no `scale`/`rotate`/general transform matrix (just
-//! plain translation), no compositing modes beyond `fillRect`'s
-//! source-over and `clearRect`'s hard replace-with-transparent.
+//! Scoped to solid-color/2-stop-linear-gradient rectangles:
+//! `fillStyle`/`fillRect`/`clearRect` plus `strokeStyle`/`lineWidth`/
+//! `strokeRect`, `save`/`restore`, `translate`, and a `fillStyle`
+//! gradient via `createLinearGradient` (see [`LinearGradient`]'s own doc
+//! for its exact scope cuts). No paths (`beginPath`/`lineTo`/`arc`/...) or
+//! general strokes - just the one rectangle-outline shortcut real
+//! Canvas2D also exposes directly. No text, no images/`drawImage`, no
+//! radial/conic gradients or patterns, no `scale`/`rotate`/general
+//! transform matrix (just plain translation), no compositing modes beyond
+//! `fillRect`'s source-over and `clearRect`'s hard replace-with-transparent.
 use bytemuck::{Pod, Zeroable};
 
 use layout_engine::Color;
@@ -44,29 +46,98 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 "#;
 
 fn rect_vertices(x: f32, y: f32, w: f32, h: f32, color: [f32; 4], vw: f32, vh: f32) -> [Vertex; 6] {
+    rect_vertices_colors(x, y, w, h, [color, color, color, color], vw, vh)
+}
+
+/// Like [`rect_vertices`] but with an independent color per corner
+/// (`[tl, tr, bl, br]`) - what a gradient fill needs. The GPU's own
+/// vertex-color interpolation across the two triangles does the rest, the
+/// same zero-new-shader trick `render::gpu::shader::rect_to_vertices`
+/// already uses for CSS `linear-gradient` backgrounds.
+fn rect_vertices_colors(
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    colors: [[f32; 4]; 4],
+    vw: f32,
+    vh: f32,
+) -> [Vertex; 6] {
     let to_ndc_x = |px: f32| (px / vw) * 2.0 - 1.0;
     let to_ndc_y = |px: f32| 1.0 - (px / vh) * 2.0;
     let x0 = to_ndc_x(x);
     let x1 = to_ndc_x(x + w);
     let y0 = to_ndc_y(y);
     let y1 = to_ndc_y(y + h);
+    let [tl_c, tr_c, bl_c, br_c] = colors;
     let tl = Vertex {
         position: [x0, y0],
-        color,
+        color: tl_c,
     };
     let tr = Vertex {
         position: [x1, y0],
-        color,
+        color: tr_c,
     };
     let bl = Vertex {
         position: [x0, y1],
-        color,
+        color: bl_c,
     };
     let br = Vertex {
         position: [x1, y1],
-        color,
+        color: br_c,
     };
     [tl, bl, tr, tr, bl, br]
+}
+
+/// `from`/`to` at blend position `t` (clamped to `[0, 1]`) - plain
+/// per-channel linear interpolation, straight (non-premultiplied) alpha,
+/// same shape as `render::gpu::shader`'s own private `lerp_color` (not
+/// reused directly - that one is private to its own module).
+fn lerp_color(from: Color, to: Color, t: f32) -> [f32; 4] {
+    let t = t.clamp(0.0, 1.0);
+    let mix = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t) / 255.0;
+    [
+        mix(from.r, to.r),
+        mix(from.g, to.g),
+        mix(from.b, to.b),
+        mix(from.a, to.a),
+    ]
+}
+
+/// `t` (clamped `[0, 1]`) of point `(px, py)` projected onto the gradient
+/// line `(x0, y0)`->`(x1, y1)` - the standard linear-gradient parametrization.
+/// A zero-length line (`x0==x1 && y0==y1`) always returns `0.0` (the whole
+/// fill becomes the gradient's start color) rather than dividing by zero.
+fn gradient_t(px: f32, py: f32, x0: f32, y0: f32, x1: f32, y1: f32) -> f32 {
+    let (dx, dy) = (x1 - x0, y1 - y0);
+    let len_sq = dx * dx + dy * dy;
+    if len_sq == 0.0 {
+        return 0.0;
+    }
+    (((px - x0) * dx + (py - y0) * dy) / len_sq).clamp(0.0, 1.0)
+}
+
+/// `ctx.createLinearGradient(x0, y0, x1, y1)` + two `addColorStop` calls -
+/// scoped to exactly two effective color stops (the start and end color),
+/// not spec's arbitrary N-stop list. A 3rd+ `addColorStop` call is
+/// accepted (real spec allows any offset) but only ever overwrites
+/// whichever of `start`/`end` its offset is closer to - no internal color
+/// stops, since exact multi-stop interpolation across a rect would need
+/// more than the 4-corner GPU-interpolation trick this reuses from
+/// `render::gpu::shader`'s own 2-stop `linear-gradient` background support
+/// (see that module's comment on why the 2-stop case specifically is
+/// exact, not an approximation). Coordinates are plain canvas pixel space,
+/// unaffected by `ctx.translate()` - a documented scope cut (translate
+/// only shifts where the *filled shape* lands, not where the gradient's
+/// own line sits).
+#[derive(Clone, Copy)]
+pub struct LinearGradient {
+    pub x0: f32,
+    pub y0: f32,
+    pub x1: f32,
+    pub y1: f32,
+    pub start: Color,
+    pub end: Color,
 }
 
 fn color_to_f32(c: Color) -> [f32; 4] {
@@ -94,6 +165,13 @@ pub struct Canvas2D {
     fill_style: Color,
     stroke_style: Color,
     line_width: f32,
+    /// `ctx.fillStyle = gradient`'s backing, when set - overrides
+    /// `fill_style` for `fill_rect` only (`clearRect`/`strokeRect` stay
+    /// solid-color; real spec lets any of them use a gradient, this crate
+    /// only wires the one most common case). `set_fill_style` clears this
+    /// back to `None`, matching real spec's "assigning `fillStyle` replaces
+    /// whatever was there before, solid or gradient".
+    fill_gradient: Option<LinearGradient>,
     /// `ctx.translate(x, y)`'s accumulated offset - the one transform this
     /// crate supports (no scale/rotate/general matrix - see
     /// [`Self::translate`]'s own doc). Added to every `fillRect`/
@@ -111,6 +189,7 @@ pub struct Canvas2D {
 #[derive(Clone, Copy)]
 struct CanvasState {
     fill_style: Color,
+    fill_gradient: Option<LinearGradient>,
     stroke_style: Color,
     line_width: f32,
     translate_x: f32,
@@ -230,6 +309,7 @@ impl Canvas2D {
                 a: 255,
             },
             line_width: 1.0,
+            fill_gradient: None,
             translate_x: 0.0,
             translate_y: 0.0,
             state_stack: Vec::new(),
@@ -241,12 +321,29 @@ impl Canvas2D {
 
     pub fn set_fill_style(&mut self, color: Color) {
         self.fill_style = color;
+        self.fill_gradient = None;
     }
 
     /// `ctx.fillStyle`'s getter side — a JS binding (`js-runtime`'s
     /// `canvas_bindings`) formats this back to a `#rrggbb` hex string.
     pub fn fill_style(&self) -> Color {
         self.fill_style
+    }
+
+    /// `ctx.fillStyle = gradient` — sets a [`LinearGradient`] as the fill
+    /// paint for subsequent `fill_rect` calls, without touching the plain
+    /// `fill_style` color underneath (so a later `set_fill_style` still has
+    /// something sane to fall back to, and `fill_style()`'s own getter
+    /// keeps returning that last solid color - see its own doc for why
+    /// this crate doesn't round-trip the actual gradient object back out).
+    pub fn set_fill_gradient(&mut self, gradient: LinearGradient) {
+        self.fill_gradient = Some(gradient);
+    }
+
+    /// `Some` when the current fill paint is a gradient, not a plain
+    /// `fill_style` color.
+    pub fn fill_gradient(&self) -> Option<LinearGradient> {
+        self.fill_gradient
     }
 
     pub fn set_stroke_style(&mut self, color: Color) {
@@ -272,6 +369,7 @@ impl Canvas2D {
     pub fn save(&mut self) {
         self.state_stack.push(CanvasState {
             fill_style: self.fill_style,
+            fill_gradient: self.fill_gradient,
             stroke_style: self.stroke_style,
             line_width: self.line_width,
             translate_x: self.translate_x,
@@ -285,6 +383,7 @@ impl Canvas2D {
     pub fn restore(&mut self) {
         if let Some(state) = self.state_stack.pop() {
             self.fill_style = state.fill_style;
+            self.fill_gradient = state.fill_gradient;
             self.stroke_style = state.stroke_style;
             self.line_width = state.line_width;
             self.translate_x = state.translate_x;
@@ -317,9 +416,6 @@ impl Canvas2D {
     /// this is the one place the translate offset needs to be added.
     fn draw_rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color, replace: bool) {
         let (x, y) = (x + self.translate_x, y + self.translate_y);
-        let view = self
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
         let vertices = rect_vertices(
             x,
             y,
@@ -329,6 +425,37 @@ impl Canvas2D {
             self.width as f32,
             self.height as f32,
         );
+        self.submit_vertices(vertices, replace);
+    }
+
+    /// Same as [`Self::draw_rect`] but with a [`LinearGradient`] fill
+    /// instead of a solid color - computes each corner's exact color by
+    /// projecting it onto the gradient line (see [`gradient_t`]), then lets
+    /// the GPU's own vertex-color interpolation fill in the interior.
+    /// Gradient coordinates are *not* offset by `translate_x`/`translate_y`
+    /// (see [`LinearGradient`]'s own doc on this scope cut) - only the
+    /// rect's own position is.
+    fn draw_gradient_rect(&mut self, x: f32, y: f32, w: f32, h: f32, gradient: LinearGradient) {
+        let corner_color = |px: f32, py: f32| {
+            let t = gradient_t(px, py, gradient.x0, gradient.y0, gradient.x1, gradient.y1);
+            lerp_color(gradient.start, gradient.end, t)
+        };
+        let colors = [
+            corner_color(x, y),         // tl
+            corner_color(x + w, y),     // tr
+            corner_color(x, y + h),     // bl
+            corner_color(x + w, y + h), // br
+        ];
+        let (tx, ty) = (x + self.translate_x, y + self.translate_y);
+        let vertices =
+            rect_vertices_colors(tx, ty, w, h, colors, self.width as f32, self.height as f32);
+        self.submit_vertices(vertices, false);
+    }
+
+    fn submit_vertices(&mut self, vertices: [Vertex; 6], replace: bool) {
+        let view = self
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
 
         use wgpu::util::DeviceExt;
         let vertex_buffer = self
@@ -370,9 +497,14 @@ impl Canvas2D {
         self.queue.submit(std::iter::once(encoder.finish()));
     }
 
-    /// `ctx.fillRect(x, y, w, h)` using the current `fillStyle`.
+    /// `ctx.fillRect(x, y, w, h)` using the current `fillStyle` - a
+    /// gradient (see [`Self::set_fill_gradient`]) if one is set, else the
+    /// plain `fill_style` color.
     pub fn fill_rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        self.draw_rect(x, y, w, h, self.fill_style, false);
+        match self.fill_gradient {
+            Some(gradient) => self.draw_gradient_rect(x, y, w, h, gradient),
+            None => self.draw_rect(x, y, w, h, self.fill_style, false),
+        }
     }
 
     /// `ctx.clearRect(x, y, w, h)` — always transparent, regardless of

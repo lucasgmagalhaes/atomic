@@ -1,5 +1,5 @@
 use layout_engine::Color;
-use render::Canvas2D;
+use render::{Canvas2D, LinearGradient};
 
 fn pixel(pixels: &[u8], width: u32, x: u32, y: u32) -> [u8; 4] {
     let idx = ((y * width + x) * 4) as usize;
@@ -367,6 +367,143 @@ fn restore_undoes_a_translate_made_since_the_matching_save() {
     // Translate was undone by restore, so the rect lands back at (0,0).
     assert_eq!(pixel(&pixels, 8, 0, 0), [0, 255, 0, 255]);
     assert_eq!(pixel(&pixels, 8, 3, 3), [0, 0, 0, 0]);
+}
+
+#[test]
+fn linear_gradient_is_mostly_start_color_near_the_gradient_line_start() {
+    // A wide canvas so the near-start pixel's own center is close enough to
+    // t=0 that its blend-with-end-color fraction is negligible - the exact
+    // corner vertex color (t=0) isn't what any *pixel* shows, since a pixel
+    // center sits half a pixel in from the rect's true edge.
+    let mut canvas = Canvas2D::new(200, 1);
+    canvas.set_fill_gradient(LinearGradient {
+        x0: 0.0,
+        y0: 0.0,
+        x1: 200.0,
+        y1: 0.0,
+        start: Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255,
+        },
+        end: Color {
+            r: 0,
+            g: 0,
+            b: 255,
+            a: 255,
+        },
+    });
+    canvas.fill_rect(0.0, 0.0, 200.0, 1.0);
+
+    let pixels = canvas.get_image_data();
+    let [r, g, b, a] = pixel(&pixels, 200, 0, 0);
+    assert!(r > 250, "expected near-start pixel mostly red, got r={r}");
+    assert_eq!(g, 0);
+    assert!(b < 10, "expected near-start pixel barely blue, got b={b}");
+    assert_eq!(a, 255);
+}
+
+#[test]
+fn linear_gradient_is_mostly_end_color_near_the_gradient_line_end() {
+    let mut canvas = Canvas2D::new(200, 1);
+    canvas.set_fill_gradient(LinearGradient {
+        x0: 0.0,
+        y0: 0.0,
+        x1: 200.0,
+        y1: 0.0,
+        start: Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255,
+        },
+        end: Color {
+            r: 0,
+            g: 0,
+            b: 255,
+            a: 255,
+        },
+    });
+    canvas.fill_rect(0.0, 0.0, 200.0, 1.0);
+
+    let pixels = canvas.get_image_data();
+    let [r, g, b, a] = pixel(&pixels, 200, 199, 0);
+    assert!(b > 250, "expected near-end pixel mostly blue, got b={b}");
+    assert_eq!(g, 0);
+    assert!(r < 10, "expected near-end pixel barely red, got r={r}");
+    assert_eq!(a, 255);
+}
+
+#[test]
+fn set_fill_style_after_a_gradient_reverts_to_solid_color() {
+    let mut canvas = Canvas2D::new(4, 4);
+    canvas.set_fill_gradient(LinearGradient {
+        x0: 0.0,
+        y0: 0.0,
+        x1: 4.0,
+        y1: 0.0,
+        start: Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255,
+        },
+        end: Color {
+            r: 0,
+            g: 0,
+            b: 255,
+            a: 255,
+        },
+    });
+    canvas.set_fill_style(Color {
+        r: 0,
+        g: 255,
+        b: 0,
+        a: 255,
+    });
+    assert!(canvas.fill_gradient().is_none());
+    canvas.fill_rect(0.0, 0.0, 4.0, 4.0);
+
+    let pixels = canvas.get_image_data();
+    assert_eq!(pixel(&pixels, 4, 0, 0), [0, 255, 0, 255]);
+    assert_eq!(pixel(&pixels, 4, 3, 3), [0, 255, 0, 255]);
+}
+
+#[test]
+fn restore_undoes_a_gradient_fill_style_set_since_the_matching_save() {
+    let mut canvas = Canvas2D::new(4, 4);
+    canvas.set_fill_style(Color {
+        r: 0,
+        g: 255,
+        b: 0,
+        a: 255,
+    });
+    canvas.save();
+    canvas.set_fill_gradient(LinearGradient {
+        x0: 0.0,
+        y0: 0.0,
+        x1: 4.0,
+        y1: 0.0,
+        start: Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255,
+        },
+        end: Color {
+            r: 0,
+            g: 0,
+            b: 255,
+            a: 255,
+        },
+    });
+    canvas.restore();
+    assert!(canvas.fill_gradient().is_none());
+    canvas.fill_rect(0.0, 0.0, 4.0, 4.0);
+
+    let pixels = canvas.get_image_data();
+    assert_eq!(pixel(&pixels, 4, 0, 0), [0, 255, 0, 255]);
 }
 
 #[test]

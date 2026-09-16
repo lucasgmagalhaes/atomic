@@ -1,16 +1,20 @@
 //! Real `HTMLCanvasElement.getContext('2d')` (`spec/matrix/browser-apis.md`'s
 //! Canvas2D gap): wires the already-existing, GPU-backed `render::Canvas2D`
 //! (`fillRect`/`clearRect`/`fillStyle`/`strokeRect`/`strokeStyle`/
-//! `lineWidth`/`save`/`restore`/`translate` — see that module's own
-//! scope-cut doc, which this binding inherits unchanged) into JavaScript
-//! and into this worker's real page compositing.
+//! `lineWidth`/`save`/`restore`/`translate`/`createLinearGradient` — see
+//! that module's own scope-cut doc, which this binding inherits
+//! unchanged) into JavaScript and into this worker's real page
+//! compositing.
 //!
 //! `getContext(id)` only recognizes `"2d"` (any other value, including
 //! `"webgl"`, returns `null` - no WebGL/`OffscreenCanvas` context here).
 //! The returned `CanvasRenderingContext2D` is a real, minimal object with
 //! just the methods/properties `render::Canvas2D` itself implements - no
-//! paths, general strokes, text, images, gradients, or transforms. Real
-//! per-canvas persistence: the backing `render::Canvas2D`
+//! paths, general strokes, text, images, radial/conic gradients or
+//! patterns, or `scale`/`rotate`/general transform matrix (see that
+//! module's own doc for exactly what *is* real, including a 2-stop
+//! `createLinearGradient`). Real per-canvas persistence: the backing
+//! `render::Canvas2D`
 //! lives in `HostState::canvases`, keyed by the canvas element's own
 //! `NodeId`, so its drawn pixels and `fillStyle` survive across separate
 //! `getContext('2d')` calls on the same element - the one real deviation
@@ -49,15 +53,60 @@ use std::rc::Rc;
 use quickjs_sys as sys;
 
 use layout_engine::Color;
-use render::Canvas2D;
+use render::{Canvas2D, LinearGradient};
 
 use crate::dom_bindings::node_id;
 use crate::js_helpers::{define_getter_setter, define_method, Getter, Setter};
 
 const CONTEXT_2D_CLASS_KIND: &str = "CanvasRenderingContext2D";
+const GRADIENT_CLASS_KIND: &str = "CanvasGradient";
 
 const DEFAULT_CANVAS_WIDTH: u32 = 300;
 const DEFAULT_CANVAS_HEIGHT: u32 = 150;
+
+/// `ctx.createLinearGradient(x0, y0, x1, y1)`'s backing - `addColorStop`
+/// just accumulates `(offset, color)` pairs; [`resolve_gradient`] (called
+/// when this object is actually assigned to `ctx.fillStyle`) is what
+/// reduces them down to the 2-stop [`LinearGradient`] `render::Canvas2D`
+/// itself supports (see that type's own doc on why only 2 effective
+/// stops).
+struct GradientData {
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+    stops: Vec<(f32, Color)>,
+}
+
+/// Reduces an arbitrary-length stop list down to the start/end pair
+/// `render::LinearGradient` needs: the color at the smallest offset becomes
+/// `start`, the color at the largest becomes `end`. A single stop is used
+/// for both ends (a solid-color "gradient"); zero stops resolves to
+/// nothing (real spec would render fully transparent black - a call site
+/// that skips setting a fill style in that case is an accepted, documented
+/// gap rather than matching that exactly).
+fn resolve_gradient(data: &GradientData) -> Option<LinearGradient> {
+    let mut min = None;
+    let mut max = None;
+    for &(offset, color) in &data.stops {
+        if min.map(|(o, _)| offset < o).unwrap_or(true) {
+            min = Some((offset, color));
+        }
+        if max.map(|(o, _)| offset >= o).unwrap_or(true) {
+            max = Some((offset, color));
+        }
+    }
+    let (_, start) = min?;
+    let (_, end) = max?;
+    Some(LinearGradient {
+        x0: data.x0,
+        y0: data.y0,
+        x1: data.x1,
+        y1: data.y1,
+        start,
+        end,
+    })
+}
 
 unsafe fn read_js_string(ctx: *mut sys::JSContext, val: sys::JSValue) -> Option<String> {
     let mut len: usize = 0;
@@ -262,14 +311,132 @@ unsafe extern "C" fn fill_style_set(
     val: sys::JSValue,
 ) -> sys::JSValue {
     let ptr = context2d_opaque(sys::JS_GetRuntime(ctx), this_val);
+    if ptr.is_null() {
+        return sys::js_undefined();
+    }
+    // A `CanvasGradient` (from `createLinearGradient`) takes priority over
+    // treating `val` as a hex string - real spec assigns whatever value's
+    // own type dictates (string vs `CanvasGradient` object), this crate
+    // just checks the one gradient class it actually has.
+    if val.tag == sys::JS_TAG_OBJECT {
+        let rt = sys::JS_GetRuntime(ctx);
+        let class_id = crate::class_registry::class_id_for(rt, GRADIENT_CLASS_KIND);
+        let gptr = sys::JS_GetOpaque(val, class_id) as *mut RefCell<GradientData>;
+        if !gptr.is_null() {
+            if let Some(gradient) = resolve_gradient(&(*gptr).borrow()) {
+                (*ptr).borrow_mut().set_fill_gradient(gradient);
+            }
+            return sys::js_undefined();
+        }
+    }
+    if let Some(s) = read_js_string(ctx, val) {
+        if let Some(color) = parse_hex_color(s.trim()) {
+            (*ptr).borrow_mut().set_fill_style(color);
+        }
+    }
+    sys::js_undefined()
+}
+
+unsafe fn gradient_opaque(
+    rt: *mut sys::JSRuntime,
+    this_val: sys::JSValue,
+) -> *mut RefCell<GradientData> {
+    sys::JS_GetOpaque(
+        this_val,
+        crate::class_registry::class_id_for(rt, GRADIENT_CLASS_KIND),
+    ) as *mut RefCell<GradientData>
+}
+
+unsafe extern "C" fn gradient_finalizer(rt: *mut sys::JSRuntime, val: sys::JSValue) {
+    let ptr = gradient_opaque(rt, val);
     if !ptr.is_null() {
-        if let Some(s) = read_js_string(ctx, val) {
+        drop(Box::from_raw(ptr));
+    }
+}
+
+/// `gradient.addColorStop(offset, color)` - `color` only accepts the same
+/// `#rgb`/`#rrggbb` hex forms [`parse_hex_color`] does elsewhere.
+unsafe extern "C" fn add_color_stop(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let ptr = gradient_opaque(sys::JS_GetRuntime(ctx), this_val);
+    if !ptr.is_null() && argc >= 2 {
+        let offset = read_js_f32(*argv);
+        if let Some(s) = read_js_string(ctx, *argv.add(1)) {
             if let Some(color) = parse_hex_color(s.trim()) {
-                (*ptr).borrow_mut().set_fill_style(color);
+                (*ptr).borrow_mut().stops.push((offset, color));
             }
         }
     }
     sys::js_undefined()
+}
+
+/// Registers the `CanvasGradient` class (if not already done) - like
+/// `CanvasRenderingContext2D` itself, never `new`-able; only reachable via
+/// `createLinearGradient`.
+unsafe fn register_gradient_class(ctx: *mut sys::JSContext) {
+    let rt = sys::JS_GetRuntime(ctx);
+    let class_name = CString::new(GRADIENT_CLASS_KIND).unwrap();
+    let def = sys::JSClassDef {
+        class_name: class_name.as_ptr(),
+        finalizer: Some(gradient_finalizer),
+        gc_mark: std::ptr::null_mut(),
+        call: std::ptr::null_mut(),
+        exotic: std::ptr::null_mut(),
+    };
+    let class_id = crate::class_registry::ensure_class(rt, GRADIENT_CLASS_KIND, &def);
+    let existing = sys::JS_GetClassProto(ctx, class_id);
+    let already_registered = existing.tag == sys::JS_TAG_OBJECT;
+    sys::JS_FreeValue(ctx, existing);
+    if already_registered {
+        return;
+    }
+    let proto = sys::JS_NewObject(ctx);
+    define_method(ctx, proto, "addColorStop", add_color_stop, 2);
+    sys::JS_SetClassProto(ctx, class_id, proto);
+}
+
+/// `ctx.createLinearGradient(x0, y0, x1, y1)` - returns a new
+/// `CanvasGradient` (see [`GradientData`]) with no stops yet; real color
+/// only takes effect once it's assigned to `ctx.fillStyle` (see
+/// `fill_style_set`) after at least one `addColorStop` call.
+unsafe extern "C" fn create_linear_gradient(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 4 {
+        return sys::js_null();
+    }
+    let (x0, y0, x1, y1) = (
+        read_js_f32(*argv),
+        read_js_f32(*argv.add(1)),
+        read_js_f32(*argv.add(2)),
+        read_js_f32(*argv.add(3)),
+    );
+    register_gradient_class(ctx);
+    let rt = sys::JS_GetRuntime(ctx);
+    let class_id = crate::class_registry::class_id_for(rt, GRADIENT_CLASS_KIND);
+    let obj = sys::JS_NewObjectClass(ctx, class_id);
+    if sys::js_is_exception(&obj) {
+        return obj;
+    }
+    let data = GradientData {
+        x0,
+        y0,
+        x1,
+        y1,
+        stops: Vec::new(),
+    };
+    sys::JS_SetOpaque(
+        obj,
+        Box::into_raw(Box::new(RefCell::new(data))) as *mut c_void,
+    );
+    obj
 }
 
 unsafe extern "C" fn stroke_style_get(
@@ -446,6 +613,13 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     define_method(ctx, proto, "translate", translate, 2);
     define_method(ctx, proto, "getImageData", get_image_data, 4);
     define_method(ctx, proto, "putImageData", put_image_data, 3);
+    define_method(
+        ctx,
+        proto,
+        "createLinearGradient",
+        create_linear_gradient,
+        4,
+    );
     define_getter_setter(
         ctx,
         proto,

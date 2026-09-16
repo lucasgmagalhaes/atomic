@@ -85,6 +85,9 @@ impl Canvas2D {
             Some(super::FillGradient::Radial(gradient)) => {
                 self.draw_radial_gradient_rect(x, y, w, h, gradient)
             }
+            Some(super::FillGradient::Conic(gradient)) => {
+                self.draw_conic_gradient_rect(x, y, w, h, gradient)
+            }
             None => self.draw_rect(x, y, w, h, self.fill_style, false),
         }
     }

@@ -1,6 +1,6 @@
 //! `CanvasGradient` - the shared backing for `ctx.createLinearGradient`/
-//! `ctx.createRadialGradient`, and `fillStyle`'s gradient-object branch
-//! (see `super::fill_stroke::fill_style_set`).
+//! `ctx.createRadialGradient`/`ctx.createConicGradient`, and `fillStyle`'s
+//! gradient-object branch (see `super::fill_stroke::fill_style_set`).
 use std::cell::RefCell;
 use std::ffi::CString;
 use std::os::raw::{c_int, c_void};
@@ -8,7 +8,7 @@ use std::os::raw::{c_int, c_void};
 use quickjs_sys as sys;
 
 use layout_engine::Color;
-use render::{FillGradient, LinearGradient, RadialGradient};
+use render::{ConicGradient, FillGradient, LinearGradient, RadialGradient};
 
 use crate::js_helpers::define_method;
 
@@ -27,6 +27,7 @@ pub(super) const GRADIENT_CLASS_KIND: &str = "CanvasGradient";
 enum GradientKind {
     Linear { x0: f32, y0: f32, x1: f32, y1: f32 },
     Radial { cx: f32, cy: f32, radius: f32 },
+    Conic { start_angle: f32, cx: f32, cy: f32 },
 }
 
 pub(super) struct GradientData {
@@ -68,6 +69,17 @@ pub(super) fn resolve_gradient(data: &GradientData) -> Option<FillGradient> {
             cx,
             cy,
             radius,
+            start,
+            end,
+        }),
+        GradientKind::Conic {
+            start_angle,
+            cx,
+            cy,
+        } => FillGradient::Conic(ConicGradient {
+            start_angle,
+            cx,
+            cy,
             start,
             end,
         }),
@@ -199,4 +211,30 @@ pub(super) unsafe extern "C" fn create_radial_gradient(
         read_js_f32(*argv.add(5)),
     );
     make_gradient_object(ctx, GradientKind::Radial { cx, cy, radius })
+}
+
+/// `ctx.createConicGradient(startAngle, x, y)` - `startAngle` in radians,
+/// matching real spec.
+pub(super) unsafe extern "C" fn create_conic_gradient(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 3 {
+        return sys::js_null();
+    }
+    let (start_angle, cx, cy) = (
+        read_js_f32(*argv),
+        read_js_f32(*argv.add(1)),
+        read_js_f32(*argv.add(2)),
+    );
+    make_gradient_object(
+        ctx,
+        GradientKind::Conic {
+            start_angle,
+            cx,
+            cy,
+        },
+    )
 }

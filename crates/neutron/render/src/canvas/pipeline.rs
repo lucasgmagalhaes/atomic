@@ -94,6 +94,22 @@ pub(super) struct RadialVertex {
     pub(super) end: [f32; 4],
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub(super) struct ConicVertex {
+    pub(super) position: [f32; 2],
+    /// Same "position relative to the gradient center, in pixel units"
+    /// shape as [`RadialVertex::local_pos`] - here it feeds `atan2` per
+    /// fragment instead of `length`.
+    pub(super) local_pos: [f32; 2],
+    /// `ctx.createConicGradient(startAngle, x, y)`'s own `startAngle`,
+    /// radians - the angle the gradient's `0.0` stop starts at, matching
+    /// real spec.
+    pub(super) start_angle: f32,
+    pub(super) start: [f32; 4],
+    pub(super) end: [f32; 4],
+}
+
 pub(super) const RADIAL_SHADER_SRC: &str = r#"
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
@@ -127,9 +143,54 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 }
 "#;
 
+/// Same "affine `local_pos` interpolates exactly, nonlinear math happens
+/// per-fragment" trick [`RADIAL_SHADER_SRC`] uses - here `atan2` (angle
+/// from center) instead of `length` (distance from center). Angle
+/// increases clockwise from the positive x-axis, matching real spec's own
+/// convention (and this crate's y-down pixel space needs no extra sign
+/// flip for that - `atan2(y, x)` in a y-down space already reads
+/// clockwise).
+pub(super) const CONIC_SHADER_SRC: &str = r#"
+struct VertexOutput {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) local_pos: vec2<f32>,
+    @location(1) start_angle: f32,
+    @location(2) start: vec4<f32>,
+    @location(3) end: vec4<f32>,
+};
+
+@vertex
+fn vs_main(
+    @location(0) position: vec2<f32>,
+    @location(1) local_pos: vec2<f32>,
+    @location(2) start_angle: f32,
+    @location(3) start: vec4<f32>,
+    @location(4) end: vec4<f32>,
+) -> VertexOutput {
+    var out: VertexOutput;
+    out.clip_position = vec4<f32>(position, 0.0, 1.0);
+    out.local_pos = local_pos;
+    out.start_angle = start_angle;
+    out.start = start;
+    out.end = end;
+    return out;
+}
+
+const TWO_PI: f32 = 6.283185307179586;
+
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    var angle = atan2(in.local_pos.y, in.local_pos.x) - in.start_angle;
+    angle = angle - floor(angle / TWO_PI) * TWO_PI;
+    let t = clamp(angle / TWO_PI, 0.0, 1.0);
+    return mix(in.start, in.end, t);
+}
+"#;
+
 /// Bundled GPU resources [`super::Canvas2D::new_async`] builds once at
-/// construction - device/queue/backing texture plus the three render
-/// pipelines (solid fill, hard-replace clear, radial gradient).
+/// construction - device/queue/backing texture plus the four render
+/// pipelines (solid fill, hard-replace clear, radial gradient, conic
+/// gradient).
 pub(super) struct GpuResources {
     pub(super) device: wgpu::Device,
     pub(super) queue: wgpu::Queue,
@@ -137,6 +198,7 @@ pub(super) struct GpuResources {
     pub(super) fill_pipeline: wgpu::RenderPipeline,
     pub(super) clear_pipeline: wgpu::RenderPipeline,
     pub(super) radial_pipeline: wgpu::RenderPipeline,
+    pub(super) conic_pipeline: wgpu::RenderPipeline,
 }
 
 pub(super) async fn build(width: u32, height: u32) -> GpuResources {
@@ -267,6 +329,70 @@ pub(super) async fn build(width: u32, height: u32) -> GpuResources {
         multiview: None,
     });
 
+    // Same vertex-attribute shape as `radial_vertex_layout` (both are
+    // `[f32;2], [f32;2], f32, [f32;4], [f32;4]`) - `ConicVertex`'s
+    // `start_angle` field just occupies the slot `RadialVertex::radius`
+    // does.
+    let conic_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("canvas2d-conic-gradient"),
+        source: wgpu::ShaderSource::Wgsl(CONIC_SHADER_SRC.into()),
+    });
+    let conic_vertex_layout = wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<ConicVertex>() as wgpu::BufferAddress,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &[
+            wgpu::VertexAttribute {
+                offset: 0,
+                shader_location: 0,
+                format: wgpu::VertexFormat::Float32x2,
+            },
+            wgpu::VertexAttribute {
+                offset: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
+                shader_location: 1,
+                format: wgpu::VertexFormat::Float32x2,
+            },
+            wgpu::VertexAttribute {
+                offset: std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress,
+                shader_location: 2,
+                format: wgpu::VertexFormat::Float32,
+            },
+            wgpu::VertexAttribute {
+                offset: std::mem::size_of::<[f32; 5]>() as wgpu::BufferAddress,
+                shader_location: 3,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+            wgpu::VertexAttribute {
+                offset: std::mem::size_of::<[f32; 9]>() as wgpu::BufferAddress,
+                shader_location: 4,
+                format: wgpu::VertexFormat::Float32x4,
+            },
+        ],
+    };
+    let conic_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("canvas2d-conic-gradient"),
+        layout: Some(&layout),
+        vertex: wgpu::VertexState {
+            module: &conic_shader,
+            entry_point: "vs_main",
+            buffers: &[conic_vertex_layout],
+            compilation_options: Default::default(),
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &conic_shader,
+            entry_point: "fs_main",
+            targets: &[Some(wgpu::ColorTargetState {
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: Default::default(),
+        }),
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview: None,
+    });
+
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("canvas2d-backing"),
         size: wgpu::Extent3d {
@@ -291,5 +417,6 @@ pub(super) async fn build(width: u32, height: u32) -> GpuResources {
         fill_pipeline,
         clear_pipeline,
         radial_pipeline,
+        conic_pipeline,
     }
 }

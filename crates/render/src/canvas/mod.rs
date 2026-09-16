@@ -10,14 +10,16 @@
 //! `createLinearGradient`/`createRadialGradient` (see
 //! [`LinearGradient`]/[`RadialGradient`]'s own docs for their exact scope
 //! cuts), and a convex-only filled path
-//! (`beginPath`/`moveTo`/`lineTo`/`closePath`/`fill` - see [`Canvas2D::fill`]'s
-//! own doc for why only convex polygons render correctly), a real `ctx.font`
+//! (`beginPath`/`moveTo`/`lineTo`/`arc`/`closePath`/`fill` - see
+//! [`Canvas2D::fill`]'s own doc for why only convex polygons render
+//! correctly and [`Canvas2D::arc`]'s own doc for its polyline-
+//! approximation scope cut), a real `ctx.font`
 //! (see [`Canvas2D::set_font`]'s own doc for its parser scope cut), and
 //! one-line `fillText`/`strokeText`/`measureText` (see
 //! [`Canvas2D::fill_text`]/[`Canvas2D::stroke_text`]'s own docs - no
 //! wrapping, `strokeText` isn't a real outline stroke). No stroking a
-//! path (only `strokeRect`'s rectangle-outline shortcut), no curves
-//! (`arc`/`bezierCurveTo`/`quadraticCurveTo`), no drawImage sources
+//! path (only `strokeRect`'s rectangle-outline shortcut), no
+//! `bezierCurveTo`/`quadraticCurveTo`, no drawImage sources
 //! beyond another `<canvas>`, no conic gradients or patterns, no
 //! `scale`/`rotate`/general transform matrix (just plain translation), no
 //! compositing modes beyond `fillRect`'s source-over and

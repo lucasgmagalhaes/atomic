@@ -651,6 +651,24 @@ fn to_data_url_produces_a_real_decodable_png() {
 }
 
 #[test]
+fn to_png_bytes_is_the_same_image_to_data_url_base64_encodes() {
+    let mut canvas = Canvas2D::new(4, 4);
+    canvas.set_fill_style(Color {
+        r: 0,
+        g: 255,
+        b: 0,
+        a: 255,
+    });
+    canvas.fill_rect(0.0, 0.0, 4.0, 4.0);
+
+    let bytes = canvas.to_png_bytes();
+    let decoded = image_decode::decode(&bytes).expect("valid PNG");
+    assert_eq!(decoded.width, 4);
+    assert_eq!(decoded.height, 4);
+    assert_eq!(&decoded.rgba[0..4], &[0, 255, 0, 255]);
+}
+
+#[test]
 fn set_font_and_getter_round_trip() {
     let mut canvas = Canvas2D::new(10, 10);
     canvas.set_font("20px monospace");

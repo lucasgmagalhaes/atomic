@@ -18,7 +18,10 @@
 //! beyond another `<canvas>`, no radial/conic gradients or patterns, no
 //! `scale`/`rotate`/general transform matrix (just plain translation), no
 //! compositing modes beyond `fillRect`'s source-over and
-//! `clearRect`'s hard replace-with-transparent.
+//! `clearRect`'s hard replace-with-transparent. `to_data_url` is real PNG
+//! encoding (`image_decode::encode_png`) plus base64, not a stub - see
+//! [`Canvas2D::to_data_url`]'s own doc for its one scope cut (PNG only,
+//! `image/jpeg`/`image/webp` requests silently fall back to PNG).
 use bytemuck::{Pod, Zeroable};
 
 use layout_engine::{Color, FontFamily, GenericFontFamily};
@@ -739,6 +742,28 @@ impl Canvas2D {
         drop(padded);
         output_buffer.unmap();
         pixels
+    }
+
+    /// `ctx.toDataURL()`/`ctx.toDataURL('image/png')` — real PNG encoding
+    /// (`image_decode::encode_png`) of the current canvas contents plus
+    /// base64, producing a genuine `data:image/png;base64,...` URL a page
+    /// could actually decode - not a stub/placeholder string. Scope cut:
+    /// **always PNG**, regardless of what MIME type a caller asks for -
+    /// this crate has no JPEG/WebP *encoder* (`image_decode`'s own `image`
+    /// crate dependency is decode-only for those two formats here), so an
+    /// `image/jpeg` request silently gets PNG bytes back instead (matching
+    /// this crate's general "best-effort, no separate error path"
+    /// convention) rather than a `image/png` MIME lie with truly different
+    /// bytes underneath. No `toBlob` (this crate's JS binding has no
+    /// `Blob`/callback machinery to hand results back asynchronously
+    /// through) — `toDataURL`'s synchronous string return is the one form
+    /// wired up.
+    pub fn to_data_url(&self) -> String {
+        let pixels = self.get_image_data();
+        let png = image_decode::encode_png(self.width, self.height, &pixels).unwrap_or_default();
+        use base64::Engine;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(png);
+        format!("data:image/png;base64,{encoded}")
     }
 
     /// `ctx.putImageData(imageData, x, y)` — writes `rgba` (tightly packed

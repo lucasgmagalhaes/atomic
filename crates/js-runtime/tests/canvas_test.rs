@@ -531,6 +531,37 @@ fn fill_text_with_empty_string_paints_nothing() {
 }
 
 #[test]
+fn to_data_url_returns_a_real_png_data_url_after_drawing() {
+    let (d, _) = dom_with_canvas();
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval(
+            "(() => { \
+               const c = document.querySelector('canvas'); \
+               const ctx2d = c.getContext('2d'); \
+               ctx2d.fillStyle = '#ff0000'; \
+               ctx2d.fillRect(0, 0, 10, 10); \
+               return c.toDataURL().startsWith('data:image/png;base64,'); \
+             })()",
+            "<test>",
+        )
+        .unwrap();
+    assert_eq!(result, "true");
+}
+
+#[test]
+fn to_data_url_with_no_active_context_returns_empty_string() {
+    let (d, _) = dom_with_canvas();
+    let rt = Runtime::new();
+    let ctx = Context::with_dom(&rt, d);
+    let result = ctx
+        .eval("document.querySelector('canvas').toDataURL()", "<test>")
+        .unwrap();
+    assert_eq!(result, "");
+}
+
+#[test]
 fn put_image_data_writes_pixels_that_get_image_data_then_reads_back() {
     let mut d = dom::Dom::new();
     let root = d.root();

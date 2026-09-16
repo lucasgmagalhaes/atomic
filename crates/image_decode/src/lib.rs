@@ -5,7 +5,11 @@
 //! hand-roll it" convention already applied to `hyper`/`rusqlite`/
 //! `wgpu`) that hands back real pixel dimensions and RGBA8 bytes —
 //! nothing browser-specific lives here, that's `layout-engine` (intrinsic
-//! sizing) and `render` (painting) each consuming [`DecodedImage`].
+//! sizing) and `render` (painting) each consuming [`DecodedImage`]. Also
+//! the reverse direction - [`encode_png`] - for `Canvas2D::to_data_url`
+//! (`render::canvas`'s own module), the same "one small shared crate
+//! wrapping `image`, not duplicated in each consumer" reasoning applies
+//! either way.
 //!
 //! Deliberately its own tiny crate rather than living inside
 //! `layout-engine` or `render` directly: both of those need to depend on
@@ -42,4 +46,20 @@ pub fn decode(bytes: &[u8]) -> Option<DecodedImage> {
         height,
         rgba: rgba.into_raw(),
     })
+}
+
+/// Encodes tightly-packed RGBA8 pixels (same layout [`decode`] itself
+/// returns) into a real PNG file's bytes. `None` only if `rgba`'s length
+/// doesn't match `width * height * 4` (the one way `image::RgbaImage`'s
+/// own constructor can fail here) - a real encoder, not a stub.
+pub fn encode_png(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>> {
+    let buf = image::RgbaImage::from_raw(width, height, rgba.to_vec())?;
+    let mut png_bytes = Vec::new();
+    image::DynamicImage::ImageRgba8(buf)
+        .write_to(
+            &mut std::io::Cursor::new(&mut png_bytes),
+            image::ImageFormat::Png,
+        )
+        .ok()?;
+    Some(png_bytes)
 }

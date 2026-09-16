@@ -1,9 +1,10 @@
 //! Real `HTMLCanvasElement.getContext('2d')` (`spec/matrix/browser-apis.md`'s
 //! Canvas2D gap): wires the already-existing, GPU-backed `render::Canvas2D`
 //! (`fillRect`/`clearRect`/`fillStyle`/`strokeRect`/`strokeStyle`/
-//! `lineWidth`/`save`/`restore`/`translate`/`createLinearGradient` — see
-//! that module's own scope-cut doc, which this binding inherits
-//! unchanged) into JavaScript and into this worker's real page
+//! `lineWidth`/`save`/`restore`/`translate`/`createLinearGradient`/
+//! `createRadialGradient` — see that module's own scope-cut doc, which
+//! this binding inherits unchanged) into JavaScript and into this
+//! worker's real page
 //! compositing. Also adds `drawImage(source, dx, dy)` - canvas-to-canvas
 //! only (see [`draw_image`]'s own doc), built entirely from
 //! `get_image_data`/`put_image_data` with no new `render::Canvas2D` API -
@@ -21,11 +22,10 @@
 //! The returned `CanvasRenderingContext2D` is a real, minimal object with
 //! just the methods/properties `render::Canvas2D` itself implements - no
 //! paths, general strokes, text, `<img>`/`<video>`/`ImageBitmap` image
-//! sources, radial/conic gradients or patterns, or `scale`/`rotate`/
-//! general transform matrix (see that
-//! module's own doc for exactly what *is* real, including a 2-stop
-//! `createLinearGradient`). Real per-canvas persistence: the backing
-//! `render::Canvas2D`
+//! sources, conic gradients or patterns, or `scale`/`rotate`/general
+//! transform matrix (see that module's own doc for exactly what *is*
+//! real, including 2-stop `createLinearGradient`/`createRadialGradient`).
+//! Real per-canvas persistence: the backing `render::Canvas2D`
 //! lives in `HostState::canvases`, keyed by the canvas element's own
 //! `NodeId`, so its drawn pixels and `fillStyle` survive across separate
 //! `getContext('2d')` calls on the same element - the one real deviation
@@ -64,7 +64,7 @@ use std::rc::Rc;
 use quickjs_sys as sys;
 
 use layout_engine::Color;
-use render::{Canvas2D, LinearGradient};
+use render::{Canvas2D, FillGradient, LinearGradient, RadialGradient};
 
 use crate::dom_bindings::node_id;
 use crate::js_helpers::{define_getter_setter, define_method, Getter, Setter};
@@ -75,28 +75,33 @@ const GRADIENT_CLASS_KIND: &str = "CanvasGradient";
 const DEFAULT_CANVAS_WIDTH: u32 = 300;
 const DEFAULT_CANVAS_HEIGHT: u32 = 150;
 
-/// `ctx.createLinearGradient(x0, y0, x1, y1)`'s backing - `addColorStop`
-/// just accumulates `(offset, color)` pairs; [`resolve_gradient`] (called
-/// when this object is actually assigned to `ctx.fillStyle`) is what
-/// reduces them down to the 2-stop [`LinearGradient`] `render::Canvas2D`
-/// itself supports (see that type's own doc on why only 2 effective
-/// stops).
+/// `ctx.createLinearGradient(...)`/`ctx.createRadialGradient(...)`'s
+/// shared backing - one `CanvasGradient` class covers both (real spec's
+/// own shape too: both factories return the same `CanvasGradient` type).
+/// `addColorStop` just accumulates `(offset, color)` pairs regardless of
+/// `kind`; [`resolve_gradient`] (called when this object is actually
+/// assigned to `ctx.fillStyle`) is what reduces them down to the 2-stop
+/// shape `render::Canvas2D` itself supports (see [`LinearGradient`]/
+/// [`RadialGradient`]'s own docs on why only 2 effective stops).
+enum GradientKind {
+    Linear { x0: f32, y0: f32, x1: f32, y1: f32 },
+    Radial { cx: f32, cy: f32, radius: f32 },
+}
+
 struct GradientData {
-    x0: f32,
-    y0: f32,
-    x1: f32,
-    y1: f32,
+    kind: GradientKind,
     stops: Vec<(f32, Color)>,
 }
 
 /// Reduces an arbitrary-length stop list down to the start/end pair
-/// `render::LinearGradient` needs: the color at the smallest offset becomes
-/// `start`, the color at the largest becomes `end`. A single stop is used
-/// for both ends (a solid-color "gradient"); zero stops resolves to
-/// nothing (real spec would render fully transparent black - a call site
-/// that skips setting a fill style in that case is an accepted, documented
-/// gap rather than matching that exactly).
-fn resolve_gradient(data: &GradientData) -> Option<LinearGradient> {
+/// `render::LinearGradient`/`RadialGradient` need: the color at the
+/// smallest offset becomes `start`, the color at the largest becomes
+/// `end`. A single stop is used for both ends (a solid-color "gradient");
+/// zero stops resolves to nothing (real spec would render fully
+/// transparent black - a call site that skips setting a fill style in
+/// that case is an accepted, documented gap rather than matching that
+/// exactly).
+fn resolve_gradient(data: &GradientData) -> Option<FillGradient> {
     let mut min = None;
     let mut max = None;
     for &(offset, color) in &data.stops {
@@ -109,13 +114,22 @@ fn resolve_gradient(data: &GradientData) -> Option<LinearGradient> {
     }
     let (_, start) = min?;
     let (_, end) = max?;
-    Some(LinearGradient {
-        x0: data.x0,
-        y0: data.y0,
-        x1: data.x1,
-        y1: data.y1,
-        start,
-        end,
+    Some(match data.kind {
+        GradientKind::Linear { x0, y0, x1, y1 } => FillGradient::Linear(LinearGradient {
+            x0,
+            y0,
+            x1,
+            y1,
+            start,
+            end,
+        }),
+        GradientKind::Radial { cx, cy, radius } => FillGradient::Radial(RadialGradient {
+            cx,
+            cy,
+            radius,
+            start,
+            end,
+        }),
     })
 }
 
@@ -564,6 +578,27 @@ unsafe fn register_gradient_class(ctx: *mut sys::JSContext) {
     sys::JS_SetClassProto(ctx, class_id, proto);
 }
 
+/// Shared by [`create_linear_gradient`]/[`create_radial_gradient`] -
+/// builds a new `CanvasGradient` JS object wrapping `kind`, no stops yet.
+unsafe fn make_gradient_object(ctx: *mut sys::JSContext, kind: GradientKind) -> sys::JSValue {
+    register_gradient_class(ctx);
+    let rt = sys::JS_GetRuntime(ctx);
+    let class_id = crate::class_registry::class_id_for(rt, GRADIENT_CLASS_KIND);
+    let obj = sys::JS_NewObjectClass(ctx, class_id);
+    if sys::js_is_exception(&obj) {
+        return obj;
+    }
+    let data = GradientData {
+        kind,
+        stops: Vec::new(),
+    };
+    sys::JS_SetOpaque(
+        obj,
+        Box::into_raw(Box::new(RefCell::new(data))) as *mut c_void,
+    );
+    obj
+}
+
 /// `ctx.createLinearGradient(x0, y0, x1, y1)` - returns a new
 /// `CanvasGradient` (see [`GradientData`]) with no stops yet; real color
 /// only takes effect once it's assigned to `ctx.fillStyle` (see
@@ -583,25 +618,27 @@ unsafe extern "C" fn create_linear_gradient(
         read_js_f32(*argv.add(2)),
         read_js_f32(*argv.add(3)),
     );
-    register_gradient_class(ctx);
-    let rt = sys::JS_GetRuntime(ctx);
-    let class_id = crate::class_registry::class_id_for(rt, GRADIENT_CLASS_KIND);
-    let obj = sys::JS_NewObjectClass(ctx, class_id);
-    if sys::js_is_exception(&obj) {
-        return obj;
+    make_gradient_object(ctx, GradientKind::Linear { x0, y0, x1, y1 })
+}
+
+/// `ctx.createRadialGradient(x0, y0, r0, x1, y1, r1)` - see
+/// [`RadialGradient`]'s own doc for the scope cut: only the outer circle
+/// (`x1`, `y1`, `r1`) is kept, `x0`/`y0`/`r0` are accepted but ignored.
+unsafe extern "C" fn create_radial_gradient(
+    ctx: *mut sys::JSContext,
+    _this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    if argc < 6 {
+        return sys::js_null();
     }
-    let data = GradientData {
-        x0,
-        y0,
-        x1,
-        y1,
-        stops: Vec::new(),
-    };
-    sys::JS_SetOpaque(
-        obj,
-        Box::into_raw(Box::new(RefCell::new(data))) as *mut c_void,
+    let (cx, cy, radius) = (
+        read_js_f32(*argv.add(3)),
+        read_js_f32(*argv.add(4)),
+        read_js_f32(*argv.add(5)),
     );
-    obj
+    make_gradient_object(ctx, GradientKind::Radial { cx, cy, radius })
 }
 
 unsafe extern "C" fn stroke_style_get(
@@ -827,6 +864,13 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
         "createLinearGradient",
         create_linear_gradient,
         4,
+    );
+    define_method(
+        ctx,
+        proto,
+        "createRadialGradient",
+        create_radial_gradient,
+        6,
     );
     define_method(ctx, proto, "drawImage", draw_image, 3);
     define_method(ctx, proto, "beginPath", begin_path, 0);

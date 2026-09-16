@@ -6,7 +6,7 @@ pub mod image;
 pub mod layer;
 pub mod text;
 
-pub use canvas::{Canvas2D, LinearGradient};
+pub use canvas::{Canvas2D, FillGradient, LinearGradient, RadialGradient};
 pub use compositor::composite_layer_onto;
 pub use display_list::{
     build_display_list, build_glyph_list, build_image_list, ClipRect, ClippedGlyph, ImageQuad, Rect,

@@ -10,16 +10,25 @@
 //! `createLinearGradient` (see [`LinearGradient`]'s own doc for its exact
 //! scope cuts), and a convex-only filled path
 //! (`beginPath`/`moveTo`/`lineTo`/`closePath`/`fill` - see [`Canvas2D::fill`]'s
-//! own doc for why only convex polygons render correctly). No stroking a
+//! own doc for why only convex polygons render correctly) and one-line
+//! `fillText` (see [`Canvas2D::fill_text`]'s own doc for its scope cuts:
+//! fixed font/size, no `ctx.font`, no wrapping/metrics). No stroking a
 //! path (only `strokeRect`'s rectangle-outline shortcut), no curves
-//! (`arc`/`bezierCurveTo`/`quadraticCurveTo`), no text, no drawImage
-//! sources beyond another `<canvas>`, no radial/conic gradients or
-//! patterns, no `scale`/`rotate`/general transform matrix (just plain
-//! translation), no compositing modes beyond `fillRect`'s source-over and
+//! (`arc`/`bezierCurveTo`/`quadraticCurveTo`), no drawImage sources
+//! beyond another `<canvas>`, no radial/conic gradients or patterns, no
+//! `scale`/`rotate`/general transform matrix (just plain translation), no
+//! compositing modes beyond `fillRect`'s source-over and
 //! `clearRect`'s hard replace-with-transparent.
 use bytemuck::{Pod, Zeroable};
 
-use layout_engine::Color;
+use layout_engine::{Color, FontFamily, GenericFontFamily};
+
+use crate::display_list::ClippedGlyph;
+
+/// `ctx.font`'s stand-in until that property is wired up - every
+/// `fillText` call uses this fixed size and a generic sans-serif family,
+/// see [`Canvas2D::fill_text`]'s own doc.
+const DEFAULT_FONT_SIZE: f32 = 16.0;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -476,6 +485,67 @@ impl Canvas2D {
             }
         }
         self.submit_vertices(&vertices, false);
+    }
+
+    /// `ctx.fillText(text, x, y)` — real shaping/rasterization via
+    /// `layout_engine::layout_text` (`cosmic-text`+`swash`, the same real
+    /// pipeline page text uses) and `render::text::composite_glyphs` (the
+    /// same CPU alpha-blend compositor page text uses), not a stub. Built
+    /// as a full-canvas `get_image_data`/`composite_glyphs`/
+    /// `put_image_data` round trip - correctness over throughput, same
+    /// tradeoff `render::text`'s own module doc already makes, and no new
+    /// GPU pipeline needed.
+    ///
+    /// Scope cuts: no `ctx.font` yet - every call uses a fixed
+    /// [`DEFAULT_FONT_SIZE`] and a generic sans-serif family (real spec's
+    /// own default is `"10px sans-serif"`; this crate's fixed size is
+    /// larger for legibility, not a spec match). No text wrapping (`x`, `y`
+    /// only - the `maxWidth` 4th argument isn't accepted, matching
+    /// `layout_text`'s own `max_width: None` = single unbounded line). `y`
+    /// behaves like real spec's `textBaseline = "top"` (measured from the
+    /// text's own top, not the default `"alphabetic"` baseline) - this
+    /// reuses `layout_text`'s glyphs exactly as `layout_engine`'s own
+    /// page-text pipeline positions them (box-top-relative), with no
+    /// separate baseline-offset math added on top. No `strokeText`,
+    /// `measureText`, or gradient fill (`fillStyle`'s plain color only).
+    pub fn fill_text(&mut self, text: &str, x: f32, y: f32) {
+        if text.is_empty() {
+            return;
+        }
+        let layout = layout_engine::layout_text(
+            text,
+            DEFAULT_FONT_SIZE,
+            None,
+            self.fill_style,
+            FontFamily::generic(GenericFontFamily::SansSerif),
+        );
+        if layout.glyphs.is_empty() {
+            return;
+        }
+        let (tx, ty) = (
+            (x + self.translate_x).round() as i32,
+            (y + self.translate_y).round() as i32,
+        );
+        let glyphs: Vec<ClippedGlyph> = layout
+            .glyphs
+            .iter()
+            .map(|g| {
+                let mut positioned = *g;
+                positioned.x += tx;
+                positioned.y += ty;
+                ClippedGlyph {
+                    glyph: positioned,
+                    clip: None,
+                    opacity: 1.0,
+                    fixed: false,
+                    sticky: None,
+                }
+            })
+            .collect();
+
+        let mut pixels = self.get_image_data();
+        crate::text::composite_glyphs(&mut pixels, self.width, self.height, &glyphs);
+        self.put_image_data(0, 0, self.width, self.height, &pixels);
     }
 
     pub fn width(&self) -> u32 {

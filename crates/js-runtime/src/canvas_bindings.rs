@@ -8,7 +8,9 @@
 //! only (see [`draw_image`]'s own doc), built entirely from
 //! `get_image_data`/`put_image_data` with no new `render::Canvas2D` API -
 //! and `beginPath`/`moveTo`/`lineTo`/`closePath`/`fill` (convex polygons
-//! only, no stroke, no curves - see `render::Canvas2D::fill`'s own doc).
+//! only, no stroke, no curves - see `render::Canvas2D::fill`'s own doc) -
+//! plus `fillText(text, x, y)` (fixed font/size, no `ctx.font`, no
+//! `maxWidth` - see `render::Canvas2D::fill_text`'s own doc).
 //!
 //! `getContext(id)` only recognizes `"2d"` (any other value, including
 //! `"webgl"`, returns `null` - no WebGL/`OffscreenCanvas` context here).
@@ -192,6 +194,26 @@ unsafe extern "C" fn context2d_finalizer(rt: *mut sys::JSRuntime, val: sys::JSVa
     if !ptr.is_null() {
         drop(Box::from_raw(ptr));
     }
+}
+
+/// `ctx.fillText(text, x, y)` — the `maxWidth` 4th argument isn't
+/// accepted (see `render::Canvas2D::fill_text`'s own doc for this and its
+/// other scope cuts).
+unsafe extern "C" fn fill_text(
+    ctx: *mut sys::JSContext,
+    this_val: sys::JSValue,
+    argc: c_int,
+    argv: *mut sys::JSValue,
+) -> sys::JSValue {
+    let ptr = context2d_opaque(sys::JS_GetRuntime(ctx), this_val);
+    if !ptr.is_null() && argc >= 3 {
+        if let Some(text) = read_js_string(ctx, *argv) {
+            let x = read_js_f32(*argv.add(1));
+            let y = read_js_f32(*argv.add(2));
+            (*ptr).borrow_mut().fill_text(&text, x, y);
+        }
+    }
+    sys::js_undefined()
 }
 
 unsafe extern "C" fn begin_path(
@@ -741,6 +763,7 @@ pub(crate) unsafe fn register(ctx: *mut sys::JSContext) {
     define_method(ctx, proto, "lineTo", line_to, 2);
     define_method(ctx, proto, "closePath", close_path, 0);
     define_method(ctx, proto, "fill", fill, 0);
+    define_method(ctx, proto, "fillText", fill_text, 3);
     define_getter_setter(
         ctx,
         proto,

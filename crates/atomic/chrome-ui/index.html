@@ -1,0 +1,1377 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>Atomic</title>
+<style>
+:root {
+  --bg: #131421;
+  --panel: #12131f;
+  --panel2: #141625;
+  --surface: #1a1c2b;
+  --text: #e9e9ed;
+  --muted: rgba(233, 233, 237, 0.55);
+  --muted2: rgba(233, 233, 237, 0.4);
+  --accent: #9184d9;
+  --accent-200: #b5abfc;
+  --accent-800: #3a3468;
+  --accent-bg: rgba(145, 132, 217, 0.14);
+  --ok: #8fe0b8;
+  --warn: #e0c168;
+  --err: #e08a9a;
+  --border: rgba(233, 233, 237, 0.07);
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px system-ui, sans-serif;
+}
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+.toolbar {
+  height: 44px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 6px 0 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.brand {
+  font-weight: 600;
+  color: var(--accent-200);
+}
+.tabs {
+  display: flex;
+  gap: 2px;
+}
+.tab {
+  padding: 4px 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.tab.active {
+  color: var(--accent-200);
+  background: var(--accent-bg);
+}
+.tab:not(.active) {
+  color: var(--muted);
+}
+.tab:not(.active):hover {
+  background: rgba(233, 233, 237, 0.06);
+}
+.body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.sidebar {
+  width: 56px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 0;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+}
+.ws-icon {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-weight: 500;
+}
+.ws-icon .badge {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: var(--accent-800);
+  border: 1.5px solid var(--panel);
+  color: var(--accent-200);
+  font-size: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.list {
+  width: 244px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel2);
+  border-right: 1px solid var(--border);
+}
+.list.collapsed {
+  width: 68px;
+}
+.list-header {
+  height: 44px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+}
+.list-body {
+  flex: 1;
+  overflow: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.acc-card {
+  padding: 9px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.acc-card:hover {
+  background: rgba(233, 233, 237, 0.05);
+}
+.acc-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel2);
+}
+.btn {
+  border: none;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.btn-primary {
+  background: var(--accent-bg);
+  color: var(--accent-200);
+  border: 1px solid var(--accent-800);
+}
+.btn-secondary {
+  background: rgba(233, 233, 237, 0.06);
+  color: var(--text);
+}
+.statbar {
+  height: 30px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 12px;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.grid-toolbar {
+  height: 40px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+}
+.seg {
+  display: flex;
+  border: 1px solid rgba(233, 233, 237, 0.12);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.seg > div {
+  padding: 5px 11px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.pane-grid {
+  flex: 1;
+  min-height: 0;
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+}
+.pane {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #0f1019;
+}
+.pane-head {
+  height: 32px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  background: #15172a;
+  font-size: 12px;
+}
+.pane-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #1b1c26;
+  color: var(--muted2);
+  font-size: 11px;
+}
+.screen {
+  height: 100%;
+  overflow: auto;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.stat-cards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+.card {
+  padding: 14px;
+  border-radius: 10px;
+  background: var(--surface);
+}
+.card .label {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.card .value {
+  font-size: 26px;
+  margin-top: 6px;
+}
+.card .note {
+  font-size: 11.5px;
+  color: var(--muted2);
+}
+.bars {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  margin-top: 14px;
+}
+.bar {
+  flex: 1;
+  border-radius: 2px 2px 0 0;
+  background: linear-gradient(180deg, var(--accent-200), var(--accent-800));
+}
+.proc-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+}
+.automation-layout {
+  height: 100%;
+  display: grid;
+  grid-template-columns: 280px 1fr;
+}
+.script-item {
+  padding: 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.script-item:hover {
+  background: rgba(233, 233, 237, 0.05);
+}
+.code {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.85;
+  padding: 14px 16px;
+  overflow: auto;
+}
+.code-line {
+  display: flex;
+  gap: 14px;
+}
+.code-n {
+  width: 18px;
+  text-align: right;
+  color: rgba(233, 233, 237, 0.25);
+}
+.log {
+  border-top: 1px solid var(--border);
+  background: #101120;
+  padding: 10px 16px;
+}
+.log-line {
+  display: flex;
+  gap: 10px;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.9;
+}
+.dl-list, .settings-nav-wrap {
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+.dl-row, .hist-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+}
+.settings-layout {
+  height: 100%;
+  display: grid;
+  grid-template-columns: 200px 1fr;
+}
+.settings-nav {
+  padding: 16px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-right: 1px solid var(--border);
+}
+.settings-nav-item {
+  padding: 7px 9px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.settings-row {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(8, 9, 15, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal {
+  width: 520px;
+  padding: 22px;
+  border-radius: 14px;
+  background: var(--surface);
+}
+.context-menu {
+  position: fixed;
+  z-index: 50;
+  width: 222px;
+  padding: 5px;
+  border-radius: 10px;
+  background: var(--surface);
+}
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 9px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.menu-item:hover {
+  background: var(--accent-bg);
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+}
+.field input {
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(233, 233, 237, 0.14);
+  background: #101120;
+  color: var(--text);
+}
+</style>
+<div id="root"></div>
+<script src="node_modules/preact/dist/preact.umd.js"></script>
+<script src="node_modules/preact/hooks/dist/hooks.umd.js"></script>
+<script src="node_modules/htm/dist/htm.umd.js"></script>
+<script>
+const html = htm.bind(preact.h);
+const { useState } = preactHooks;
+
+// ---- Bridge: same convention proven in toolbar.html/chrome_bridge_test.rs
+// ---- Rust -> JS: window.__atomicBridge.setState(partial) merges into app state.
+// ---- JS -> Rust: dispatch(action) logs JSON over console.log (CONSOLE drains it).
+function dispatch(action) {
+  console.log(JSON.stringify(action));
+}
+
+// ---- Static/fake data (2026-09-16, spec/ROADMAP.md P5: "land with
+// ---- static/fake data first") - ported directly from mockup/Atomic
+// ---- Browser.dc.html's own ACC/WS/SETTINGS/CODE constants. Real
+// ---- integration (crates/atomic pushing real accounts/workspaces/stats
+// ---- via setState) replaces this, not this file's own structure.
+const ACC = [
+  {
+    name: "Conta 1",
+    hue: "#e0c168",
+    status: "Online",
+    up: "9s",
+    cpu: "0.1%",
+    ram: "125 MB",
+    live: true,
+    host: "idlegame.com",
+  },
+  {
+    name: "Conta 2",
+    hue: "#7fb2f0",
+    status: "Closed",
+    up: "—",
+    cpu: "—",
+    ram: "—",
+    live: false,
+    host: "www.idlegame.com",
+  },
+  {
+    name: "Account 5",
+    hue: "#b5abfc",
+    status: "Closed",
+    up: "—",
+    cpu: "—",
+    ram: "—",
+    live: false,
+    host: "idlegame.com",
+  },
+  {
+    name: "Account 6",
+    hue: "#e08a5a",
+    status: "Reconnecting",
+    up: "2m",
+    cpu: "0.4%",
+    ram: "96 MB",
+    live: false,
+    host: "idlegame.com",
+  },
+  {
+    name: "Conta 7",
+    hue: "#7fe0c1",
+    status: "Online",
+    up: "9s",
+    cpu: "0.1%",
+    ram: "128 MB",
+    live: true,
+    host: "idlegame.com",
+  },
+  {
+    name: "Conta 8",
+    hue: "#7fb2f0",
+    status: "Closed",
+    up: "—",
+    cpu: "—",
+    ram: "—",
+    live: false,
+    host: "idlegame.com",
+  },
+];
+const WS = [
+  { id: "main", name: "Principal", initial: "P", count: 6 },
+  { id: "farm", name: "Farm squad", initial: "F", count: 4 },
+  { id: "trades", name: "Trades", initial: "T", count: 2 },
+  { id: "testing", name: "Testing", initial: "Q", count: 1 },
+];
+const SETTINGS = {
+  Network: {
+    sub: "Proxy assignment and connection isolation",
+    rows: [
+      {
+        label: "Proxy mode",
+        help: "Applied per profile at launch",
+        control: "Shared pool · 12 endpoints healthy",
+      },
+      {
+        label: "Per-profile DNS",
+        help: "Resolve through the profile proxy",
+        control: "Enabled",
+      },
+      {
+        label: "WebRTC leak guard",
+        help: "Blocks host candidates",
+        control: "Strict",
+      },
+      {
+        label: "Retry policy",
+        help: "When a pane drops its socket",
+        control: "3 attempts · 5s backoff",
+      },
+    ],
+  },
+  Performance: {
+    sub: "How many renderers run and how hard they run",
+    rows: [
+      {
+        label: "Max live panes",
+        help: "Beyond this, panes suspend",
+        control: "6",
+      },
+      {
+        label: "Background throttling",
+        help: "Idle panes drop to 5 FPS",
+        control: "On, after 30s",
+      },
+      {
+        label: "Hardware acceleration",
+        help: "GPU rasterization for game canvases",
+        control: "On",
+      },
+      { label: "Frame cap", help: "Per pane", control: "50 FPS" },
+    ],
+  },
+  Privacy: {
+    sub: "Storage isolation and what survives a restart",
+    rows: [
+      {
+        label: "Session isolation",
+        help: "Cookies, storage and cache per profile",
+        control: "Full",
+      },
+      {
+        label: "Clear on close",
+        help: "Applies to non-pinned profiles",
+        control: "Cache only",
+      },
+      {
+        label: "Credential vault",
+        help: "Autofill for game logins",
+        control: "Encrypted · OS keychain",
+      },
+      {
+        label: "Telemetry",
+        help: "Crash traces only, no page content",
+        control: "Off",
+      },
+    ],
+  },
+  Automation: {
+    sub: "Defaults for scripts and input sync",
+    rows: [
+      {
+        label: "Input sync scope",
+        help: "Mirror clicks and typing across panes",
+        control: "Active workspace",
+      },
+      {
+        label: "Script sandbox",
+        help: "Isolated worker per run",
+        control: "On",
+      },
+      {
+        label: "Failure handling",
+        help: "When a step throws",
+        control: "Pause workspace",
+      },
+      {
+        label: "Schedule engine",
+        help: "Cron triggers while minimized",
+        control: "Enabled",
+      },
+    ],
+  },
+  Appearance: {
+    sub: "Chrome density and pane presentation",
+    rows: [
+      {
+        label: "Theme",
+        help: "Follows Nocturne tokens",
+        control: "Nocturne dark",
+      },
+      {
+        label: "Account card density",
+        help: "Rows in the profile list",
+        control: "Comfortable",
+      },
+      { label: "Toolbar", help: "Address bar shape", control: "Rounded pill" },
+      {
+        label: "Status bar detail",
+        help: "Telemetry in the footer",
+        control: "Full",
+      },
+    ],
+  },
+};
+const CODE = [
+  "async function run(pane) {",
+  "  await pane.goto(profile.startUrl);",
+  "  await pane.fill(\"#trainer\", profile.login);",
+  "  await pane.fill(\"#password\", vault.get(profile.id));",
+  "  await pane.click(\"button[type=submit]\");",
+  "",
+  "  // keep the session warm",
+  "  every(\"4m\", () => pane.click(\".claim-idle\"));",
+  "  on(\"disconnect\", () => pane.reload());",
+  "}",
+  "",
+  "export default { run, scope: \"workspace\" };",
+];
+const SCRIPTS = [
+  { name: "Auto login", state: "active", trigger: "On profile launch" },
+  { name: "Claim idle rewards", state: "active", trigger: "Every 4 minutes" },
+  { name: "Reconnect watchdog", state: "paused", trigger: "On socket drop" },
+  { name: "Nightly report", state: "idle", trigger: "Cron 03:00" },
+];
+const DOWNLOADS = [
+  {
+    file: "idlegame-client-patch-1.9.4.zip",
+    meta: "184 MB of 320 MB · 6.2 MB/s",
+    profile: "Conta 1",
+    state: "Downloading",
+    pct: "57%",
+  },
+  {
+    file: "trade-log-2026-08-21.csv",
+    meta: "48 KB · complete",
+    profile: "Trades",
+    state: "Done",
+    pct: "100%",
+  },
+  {
+    file: "idle-report.pdf",
+    meta: "1.2 MB · complete",
+    profile: "Conta 7",
+    state: "Done",
+    pct: "100%",
+  },
+  {
+    file: "proxy-pool.json",
+    meta: "blocked by privacy rule",
+    profile: "Testing",
+    state: "Blocked",
+    pct: "0%",
+  },
+];
+const HISTORY = [
+  { title: "IdleGame — create account", url: "idlegame.com/", time: "20:14" },
+  { title: "Market · offers", url: "idlegame.com/market", time: "20:09" },
+  { title: "Guild ledger", url: "idlegame.com/guild", time: "19:52" },
+  { title: "Patch notes 1.9.4", url: "idlegame.com/news", time: "19:40" },
+];
+const GRID_COLS = { 1: "1fr", 2: "1fr 1fr", 4: "1fr 1fr", 6: "1fr 1fr 1fr" };
+const GRID_ROWS = { 1: "1fr", 2: "1fr", 4: "1fr 1fr", 6: "1fr 1fr" };
+
+const DEFAULT_STATE = {
+  view: "grid",
+  grid: 2,
+  active: 0,
+  dense: false,
+  listOpen: true,
+  sync: true,
+  menu: null,
+  modal: null,
+  section: "Network",
+  script: 0,
+  running: true,
+  lang: "en",
+  activeWorkspace: "main",
+};
+
+const TABS = [
+  { id: "grid", label: "Browser" },
+  { id: "monitor", label: "Monitor" },
+  { id: "automation", label: "Automation" },
+  { id: "downloads", label: "Downloads" },
+  { id: "settings", label: "Settings" },
+];
+
+function Toolbar({ state, set }) {
+  return html`
+    <div class="toolbar">
+      <div class="brand">Atomic</div>
+      <div class="tabs">
+        ${
+    TABS.map((tab) =>
+      html`
+          <div
+            class=${"tab" + (state.view === tab.id ? " active" : "")}
+            onClick=${() => {
+        dispatch({ action: "switchTab", id: tab.id });
+        set({ view: tab.id });
+      }}
+          >${tab.label}</div>
+        `
+    )
+  }
+      </div>
+    </div>
+  `;
+}
+
+function Sidebar({ state, set }) {
+  return html`
+    <div class="sidebar">
+      ${
+    WS.map((ws) =>
+      html`
+        <div
+          class="ws-icon"
+          title=${ws.name}
+          style=${{
+        color: ws.id === state.activeWorkspace
+          ? "var(--accent-200)"
+          : "var(--muted)",
+        background: ws.id === state.activeWorkspace
+          ? "var(--accent-bg)"
+          : "transparent",
+      }}
+          onClick=${() => {
+        dispatch({ action: "switchWorkspace", id: ws.id });
+        set({ activeWorkspace: ws.id });
+      }}
+        >
+          ${ws.initial}
+          <span class="badge">${ws.count}</span>
+        </div>
+      `
+    )
+  }
+    </div>
+  `;
+}
+
+function AccountList({ state, set }) {
+  const activeWs = WS.find((w) => w.id === state.activeWorkspace) || WS[0];
+  return html`
+    <div class=${"list" + (state.listOpen ? "" : " collapsed")}>
+      <div class="list-header">
+        <div style="flex:1;font-weight:500">${activeWs.name}</div>
+        <div style="cursor:pointer;color:var(--muted)" onClick=${() =>
+    set({ listOpen: !state.listOpen })}>${state.listOpen ? "«" : "»"}</div>
+      </div>
+      <div class="list-body">
+        ${
+    ACC.map((a, i) =>
+      html`
+          <div
+            class="acc-card"
+            style=${{
+        background: i === state.active ? "var(--accent-bg)" : "transparent",
+      }}
+            onClick=${() => {
+        dispatch({ action: "selectAccount", index: i });
+        set({ active: i, view: "grid" });
+      }}
+          >
+            <div class="acc-row">
+              <span class="dot" style=${{ background: a.hue }}></span>
+              <div style="flex:1;font-weight:500">${a.name}</div>
+              <span class="dot" style=${{
+        background: a.live ? "var(--ok)" : "rgba(233,233,237,.18)",
+      }}></span>
+            </div>
+            ${
+        state.listOpen && html`
+              <div style="padding-left:14px;font-size:11.5px;color:${
+          a.status === "Online"
+            ? "var(--ok)"
+            : a.status === "Closed"
+            ? "var(--muted2)"
+            : "var(--warn)"
+        }">
+                ${a.status}
+              </div>
+            `
+      }
+          </div>
+        `
+    )
+  }
+      </div>
+      <div style="padding:10px;display:flex;gap:6px;border-top:1px solid var(--border)">
+        <button class="btn btn-secondary" style="flex:1" onClick=${() => {
+    dispatch({ action: "openAddProfile" });
+    set({ modal: "add" });
+  }}>+ Add account</button>
+      </div>
+    </div>
+  `;
+}
+
+function GridScreen({ state, set }) {
+  const panes = ACC.slice(0, state.grid);
+  return html`
+    <div style="display:flex;flex-direction:column;height:100%;min-height:0">
+      <div class="grid-toolbar">
+        <div style="font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)">Tiling</div>
+        <div class="seg">
+          ${
+    [1, 2, 4, 6].map((n) =>
+      html`
+            <div
+              style=${{
+        color: state.grid === n ? "var(--accent)" : "var(--muted)",
+      }}
+              onClick=${() => {
+        dispatch({ action: "setGrid", n });
+        set({ grid: n });
+      }}
+            >${n}</div>
+          `
+    )
+  }
+        </div>
+        <div style="flex:1"></div>
+        <div
+          class="tab"
+          style=${{ color: state.sync ? "var(--accent)" : "var(--muted)" }}
+          onClick=${() => set({ sync: !state.sync })}
+        >Input sync ${state.sync ? "on" : "off"}</div>
+      </div>
+      <div class="pane-grid" style=${{
+    gridTemplateColumns: GRID_COLS[state.grid],
+    gridTemplateRows: GRID_ROWS[state.grid],
+  }}>
+        ${
+    panes.map((p, i) =>
+      html`
+          <div class="pane" data-pane-index=${i}>
+            <div class="pane-head">
+              <span class="dot" style=${{ background: p.hue }}></span>
+              <div style="font-weight:500">${p.name}</div>
+              <div style="color:var(--muted2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.host}</div>
+            </div>
+            <div class="pane-body">pane content composited natively here</div>
+          </div>
+        `
+    )
+  }
+      </div>
+    </div>
+  `;
+}
+
+function MonitorScreen() {
+  const bars = [
+    22,
+    31,
+    18,
+    44,
+    52,
+    38,
+    29,
+    61,
+    48,
+    35,
+    27,
+    55,
+    42,
+    33,
+    58,
+    70,
+    49,
+    36,
+    28,
+    44,
+    63,
+    51,
+    39,
+    30,
+    47,
+    66,
+    54,
+    41,
+    32,
+    57,
+  ];
+  const cards = [
+    {
+      label: "Live panes",
+      value: "3 / 6",
+      note: "2 suspended, 1 reconnecting",
+    },
+    { label: "CPU", value: "2.3%", note: "peak 11% · 4 renderers" },
+    { label: "Memory", value: "745 MB", note: "124 MB avg per profile" },
+    { label: "Frames", value: "50 FPS", note: "capped in settings" },
+  ];
+  return html`
+    <div class="screen">
+      <div>
+        <div style="font-size:20px">Resource monitor</div>
+        <div style="color:var(--muted)">Per-profile renderer processes · sampled every 2s</div>
+      </div>
+      <div class="stat-cards">
+        ${
+    cards.map((c) =>
+      html`
+          <div class="card">
+            <div class="label">${c.label}</div>
+            <div class="value">${c.value}</div>
+            <div class="note">${c.note}</div>
+          </div>
+        `
+    )
+  }
+      </div>
+      <div style="flex:1;min-height:0;display:grid;grid-template-columns:1.35fr 1fr;gap:12px">
+        <div class="card" style="display:flex;flex-direction:column">
+          <div class="label" style="color:var(--muted)">CPU per profile · last 60s</div>
+          <div class="bars">
+            ${
+    bars.map((v) => html`<div class="bar" style=${{ height: v + "%" }}></div>`)
+  }
+          </div>
+        </div>
+        <div class="card" style="padding:0;overflow:hidden;display:flex;flex-direction:column">
+          <div style="padding:12px 14px" class="label">Processes</div>
+          <div style="flex:1;overflow:auto">
+            ${
+    ACC.map((a) =>
+      html`
+              <div class="proc-row">
+                <span class="dot" style=${{ background: a.hue }}></span>
+                <div style="flex:1">${a.name}</div>
+                <div style="width:52px;text-align:right">${a.cpu}</div>
+                <div style="width:64px;text-align:right">${a.ram}</div>
+                <div style="color:var(--accent-200);cursor:pointer" onClick=${() =>
+        dispatch({ action: "killProcess", name: a.name })}>kill</div>
+              </div>
+            `
+    )
+  }
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function AutomationScreen({ state, set }) {
+  const active = SCRIPTS[state.script];
+  const logLines = [
+    {
+      time: "20:14:02",
+      tag: "launch",
+      color: "var(--accent-200)",
+      msg: "Conta 1 · renderer 4812 ready",
+    },
+    {
+      time: "20:14:03",
+      tag: "fill",
+      color: "var(--ok)",
+      msg: "#trainer, #password from vault",
+    },
+    {
+      time: "20:14:05",
+      tag: "ok",
+      color: "var(--ok)",
+      msg: "session established in 1.8s",
+    },
+    {
+      time: "20:18:05",
+      tag: "claim",
+      color: "var(--accent-200)",
+      msg: "idle rewards ×3 collected",
+    },
+    {
+      time: "20:19:41",
+      tag: "warn",
+      color: "var(--warn)",
+      msg: "Account 6 socket dropped — retrying",
+    },
+  ];
+  return html`
+    <div class="automation-layout">
+      <div style="border-right:1px solid var(--border);display:flex;flex-direction:column">
+        <div style="padding:16px 16px 10px">
+          <div style="font-size:16px">Scripts</div>
+          <div style="color:var(--muted)">Run per profile or across a workspace</div>
+        </div>
+        <div style="flex:1;padding:0 10px;display:flex;flex-direction:column;gap:6px">
+          ${
+    SCRIPTS.map((s, i) =>
+      html`
+            <div
+              class="script-item"
+              style=${{
+        background: i === state.script ? "var(--accent-bg)" : "transparent",
+      }}
+              onClick=${() => {
+        dispatch({ action: "selectScript", index: i });
+        set({ script: i });
+      }}
+            >
+              <div style="display:flex;align-items:center;gap:8px">
+                <div style="flex:1;font-weight:500">${s.name}</div>
+                <div style="font-size:10px;padding:2px 6px;border-radius:5px;color:${
+        s.state === "active"
+          ? "var(--ok)"
+          : s.state === "paused"
+          ? "var(--warn)"
+          : "var(--muted)"
+      }">${s.state}</div>
+              </div>
+              <div style="color:var(--muted2);margin-top:3px">${s.trigger}</div>
+            </div>
+          `
+    )
+  }
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;min-width:0">
+        <div style="height:44px;flex:none;display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid var(--border)">
+          <div style="flex:1;font-weight:500">${active.name}</div>
+          <button class="btn btn-primary" onClick=${() => {
+    dispatch({ action: "toggleScriptRun" });
+    set({ running: !state.running });
+  }}>${state.running ? "Pause" : "Run"}</button>
+          <button class="btn btn-secondary">Dry run</button>
+        </div>
+        <div style="flex:1;min-height:0;display:grid;grid-template-rows:1fr 200px">
+          <div class="code">
+            ${
+    CODE.map((line, i) =>
+      html`
+              <div class="code-line"><span class="code-n">${
+        i + 1
+      }</span><span style="white-space:pre">${line}</span></div>
+            `
+    )
+  }
+          </div>
+          <div class="log">
+            <div class="label" style="color:var(--muted);margin-bottom:8px">Run log</div>
+            ${
+    logLines.map((l) =>
+      html`
+              <div class="log-line"><span style="color:var(--muted2)">${l.time}</span><span style=${{
+        color: l.color,
+      }}>${l.tag}</span><span>${l.msg}</span></div>
+            `
+    )
+  }
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function DownloadsScreen() {
+  return html`
+    <div class="screen">
+      <div>
+        <div style="font-size:20px">Downloads &amp; history</div>
+        <div style="color:var(--muted)">Scoped per profile — nothing is shared between accounts</div>
+      </div>
+      <div class="dl-list">
+        ${
+    DOWNLOADS.map((d) =>
+      html`
+          <div class="dl-row">
+            <div style="flex:1;min-width:0">
+              <div>${d.file}</div>
+              <div style="color:var(--muted2)">${d.meta}</div>
+            </div>
+            <div style="font-size:11px;padding:3px 8px;border-radius:6px;color:var(--accent-200);background:var(--accent-800)">${d.profile}</div>
+            <div style="width:74px;text-align:right;color:var(--muted)">${d.state}</div>
+          </div>
+        `
+    )
+  }
+      </div>
+      <div class="dl-list">
+        <div style="padding:12px 14px" class="label">Recent history</div>
+        ${
+    HISTORY.map((h) =>
+      html`
+          <div class="hist-row">
+            <span class="dot" style="background:var(--accent-800)"></span>
+            <div style="flex:1">${h.title}</div>
+            <div style="color:var(--muted2)">${h.url}</div>
+            <div style="width:56px;text-align:right;color:var(--muted2)">${h.time}</div>
+          </div>
+        `
+    )
+  }
+      </div>
+    </div>
+  `;
+}
+
+function SettingsScreen({ state, set }) {
+  const sec = SETTINGS[state.section];
+  const rows = state.section === "Language"
+    ? [
+      {
+        label: "Interface language",
+        help: "Applies to menus, dialogs and the status bar",
+        control: state.lang === "pt" ? "Português (BR)" : "English (US)",
+      },
+      ...sec ? sec.rows.slice(1) : [],
+    ]
+    : (sec ? sec.rows : []);
+  const navKeys = [...Object.keys(SETTINGS), "Language"];
+  return html`
+    <div class="settings-layout">
+      <div class="settings-nav">
+        <div class="label" style="padding:0 8px 10px;color:var(--muted)">Settings</div>
+        ${
+    navKeys.map((k) =>
+      html`
+          <div
+            class="settings-nav-item"
+            style=${{
+        color: k === state.section ? "var(--accent-200)" : "var(--muted)",
+        background: k === state.section ? "var(--accent-bg)" : "transparent",
+      }}
+            onClick=${() => {
+        dispatch({ action: "selectSettingsSection", section: k });
+        set({ section: k });
+      }}
+          >${k}</div>
+        `
+    )
+  }
+      </div>
+      <div class="screen">
+        <div>
+          <div style="font-size:19px">${state.section}</div>
+          <div style="color:var(--muted)">${
+    state.section === "Language"
+      ? "Interface language and what each profile requests from the site"
+      : (sec ? sec.sub : "")
+  }</div>
+        </div>
+        ${
+    state.section === "Language" && html`
+          <div class="card" style="display:flex;align-items:center;gap:12px">
+            <div style="flex:1">Interface language — applied instantly, no restart</div>
+            <div class="seg">
+              <div style=${{
+      color: state.lang === "en" ? "var(--accent)" : "var(--muted)",
+    }} onClick=${() => {
+      dispatch({ action: "setLang", lang: "en" });
+      set({ lang: "en" });
+    }}>English (US)</div>
+              <div style=${{
+      color: state.lang === "pt" ? "var(--accent)" : "var(--muted)",
+    }} onClick=${() => {
+      dispatch({ action: "setLang", lang: "pt" });
+      set({ lang: "pt" });
+    }}>Português (BR)</div>
+            </div>
+          </div>
+        `
+  }
+        ${
+    rows.map((r) =>
+      html`
+          <div class="settings-row">
+            <div>
+              <div style="font-weight:500">${r.label}</div>
+              <div style="color:var(--muted2);margin-top:2px">${r.help}</div>
+            </div>
+            <div>${r.control}</div>
+          </div>
+        `
+    )
+  }
+      </div>
+    </div>
+  `;
+}
+
+function OnboardingScreen({ set }) {
+  const steps = [
+    {
+      step: "01",
+      title: "Create profiles",
+      body: "One isolated session per account.",
+    },
+    {
+      step: "02",
+      title: "Tile them",
+      body: "1, 2, 4 or 6 panes with input sync.",
+    },
+    {
+      step: "03",
+      title: "Automate",
+      body: "Login and claim scripts per workspace.",
+    },
+  ];
+  return html`
+    <div style="height:100%;display:flex;align-items:center;justify-content:center;padding:40px">
+      <div style="width:560px;text-align:center">
+        <div style="font-size:28px">No profiles yet</div>
+        <p style="color:var(--muted);margin:8px 0 0">Each profile is an isolated browser session — its own cookies, storage and optional proxy.</p>
+        <div style="display:flex;gap:8px;justify-content:center;margin-top:22px">
+          <button class="btn btn-primary" onClick=${() => {
+    dispatch({ action: "openAddProfile" });
+    set({ modal: "add" });
+  }}>Create first profile</button>
+          <button class="btn btn-secondary">Import from Chrome</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:34px;text-align:left">
+          ${
+    steps.map((o) =>
+      html`
+            <div class="card">
+              <div class="label">${o.step}</div>
+              <div style="font-weight:500;margin-top:5px">${o.title}</div>
+              <div style="color:var(--muted2);margin-top:3px">${o.body}</div>
+            </div>
+          `
+    )
+  }
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function AddProfileModal({ set }) {
+  return html`
+    <div class="modal-overlay" onClick=${() => set({ modal: null })}>
+      <div class="modal" onClick=${(e) => e.stopPropagation()}>
+        <div style="font-size:19px">Add profile</div>
+        <div style="color:var(--muted);margin-bottom:16px">Isolated session · saved to the active workspace</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div class="field"><label>Display name</label><input value="Conta 9" /></div>
+          <div class="field"><label>Start URL</label><input value="https://idlegame.com/" /></div>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:20px">
+          <button class="btn btn-secondary" onClick=${() =>
+    set({ modal: null })}>Cancel</button>
+          <button
+            class="btn btn-primary"
+            onClick=${() => {
+    dispatch({ action: "createProfile" });
+    set({ modal: null });
+  }}
+          >Create &amp; launch</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function ContextMenu({ state, set }) {
+  const items = [
+    { label: "Reload pane", key: "⌘R" },
+    { label: "Duplicate profile", key: "⌘D" },
+    { label: "Run auto login", key: "⌘L" },
+    { label: "Close pane", key: "⌘W" },
+  ];
+  return html`
+    <div onClick=${() =>
+    set({ menu: null })} style="position:fixed;inset:0;z-index:40"></div>
+    <div class="context-menu" style=${{
+    left: state.menu.x + "px",
+    top: state.menu.y + "px",
+  }}>
+      ${
+    items.map((mi) =>
+      html`
+        <div class="menu-item" onClick=${() => {
+        dispatch({ action: "contextMenuAction", label: mi.label });
+        set({ menu: null });
+      }}>
+          <span style="flex:1">${mi.label}</span><span style="color:var(--muted2)">${mi.key}</span>
+        </div>
+      `
+    )
+  }
+    </div>
+  `;
+}
+
+function StatusBar({ state }) {
+  const ws = WS.find((w) => w.id === state.activeWorkspace) || WS[0];
+  return html`
+    <div class="statbar">
+      <div style="color:var(--accent-200)">Online</div>
+      <div>${ws.name}</div>
+      <div style="flex:1"></div>
+      <div>CPU <b>2.3%</b></div>
+      <div>RAM <b>745 MB</b></div>
+      <div>FPS <b>50</b></div>
+    </div>
+  `;
+}
+
+const SCREENS = {
+  grid: GridScreen,
+  monitor: MonitorScreen,
+  automation: AutomationScreen,
+  downloads: DownloadsScreen,
+  settings: SettingsScreen,
+  onboarding: OnboardingScreen,
+};
+
+function App() {
+  const [state, setState] = useState(DEFAULT_STATE);
+  const set = (patch) => setState((s) => ({ ...s, ...patch }));
+  const Screen = SCREENS[state.view] || GridScreen;
+
+  // Rust -> JS push: replaces (merges into) the whole app state - the
+  // same primitive toolbar.html's own bridge already proved.
+  window.__atomicBridge = {
+    setState(next) {
+      setState((s) => ({ ...s, ...next }));
+    },
+  };
+
+  return html`
+    <div class="shell">
+      <${Toolbar} state=${state} set=${set} />
+      <div class="body">
+        <${Sidebar} state=${state} set=${set} />
+        <${AccountList} state=${state} set=${set} />
+        <div class="main">
+          <${Screen} state=${state} set=${set} />
+        </div>
+      </div>
+      <${StatusBar} state=${state} />
+      ${state.menu && html`<${ContextMenu} state=${state} set=${set} />`}
+      ${state.modal === "add" && html`<${AddProfileModal} set=${set} />`}
+    </div>
+  `;
+}
+
+preact.render(html`<${App} />`, document.getElementById("root"));
+</script>

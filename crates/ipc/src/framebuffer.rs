@@ -40,11 +40,26 @@ fn buffer_ptr(shmem: &Shmem, index: u32, frame_len: usize) -> *mut u8 {
 
 /// Opens (creating if needed) the named shared-memory region for a
 /// `width` × `height` RGBA8 double-buffered frame.
+///
+/// The `shared_memory` crate's `flink` is a real on-disk file (its
+/// mechanism for naming a Windows shared-memory mapping, which has no
+/// POSIX-style global namespace) - resolved under `flink`'s own relative
+/// path if `name` isn't absolute, i.e. whatever the process's current
+/// working directory happens to be. A caller using a fixed, un-suffixed
+/// name (e.g. `atomic::chrome_ui`'s single "atomic-chrome-ui" chrome
+/// browser, as opposed to per-pane names that already carry a unique
+/// pane id) left exactly that file sitting in `crates/atomic/` after
+/// every test run - a real, reproducible repo-pollution bug, not
+/// something to `.gitignore` around. Anchoring every flink under the OS
+/// temp dir (this codebase's existing convention for other per-run
+/// scratch state - see `pane::spawn_pane_with_proxy`'s downloads/history
+/// dirs) fixes it for every caller, not just this one name.
 fn open_or_create(name: &str, width: u32, height: u32) -> Result<Shmem, ShmemError> {
     let size = region_len(width, height);
-    match ShmemConf::new().size(size).flink(name).create() {
+    let link_path = std::env::temp_dir().join(format!("atomic-shmem-{name}"));
+    match ShmemConf::new().size(size).flink(&link_path).create() {
         Ok(shmem) => Ok(shmem),
-        Err(ShmemError::LinkExists) => ShmemConf::new().flink(name).open(),
+        Err(ShmemError::LinkExists) => ShmemConf::new().flink(&link_path).open(),
         Err(e) => Err(e),
     }
 }

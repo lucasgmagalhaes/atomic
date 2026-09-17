@@ -17,15 +17,32 @@ fn main() {
     let result = ctx.eval(source, "quickjs-run.js");
     let elapsed = t0.elapsed();
 
-    let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
-    unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut usage) };
-
     println!(
         "elapsed_us={} maxrss_bytes={} result={:?}",
         elapsed.as_micros(),
-        usage.ru_maxrss,
+        peak_rss_bytes(),
         result
     );
+}
+
+/// Current process's resident memory, in bytes — `libc::getrusage`'s
+/// `ru_maxrss` on Unix (KiB there, converted to bytes to match); on
+/// Windows, `libc` has no `rusage` at all, so this reuses
+/// `platform_apis::process_stats::sample`'s real `GetProcessMemoryInfo`
+/// call against this same process's own pid instead (working-set bytes,
+/// not a true historical peak, but the closest real equivalent available).
+#[cfg(unix)]
+fn peak_rss_bytes() -> i64 {
+    let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
+    unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut usage) };
+    usage.ru_maxrss * 1024
+}
+
+#[cfg(windows)]
+fn peak_rss_bytes() -> u64 {
+    platform_apis::process_stats::sample(std::process::id())
+        .map(|stats| stats.memory_bytes)
+        .unwrap_or(0)
 }
 
 fn script_for(name: &str) -> &'static str {

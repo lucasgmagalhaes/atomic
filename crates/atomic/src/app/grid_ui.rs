@@ -1,23 +1,84 @@
 //! The pane grid: click/scroll/keyboard routing into a pane's real DOM,
-//! the per-pane context menu, texture paint, and the resource overlay.
+//! the per-pane context menu, texture paint, and the resource overlay —
+//! now composited on top of the chrome browser's own texture (see
+//! `spec/architecture/chrome-ui.md`) instead of a bare `egui` background,
+//! at rects the chrome page's own CSS grid actually laid out
+//! (`ChromeUi::pane_rects`) rather than `tiling::grid_layout`'s own
+//! auto-tiling algorithm - the chrome page is the single source of truth
+//! for where a pane goes now, same reasoning that module's own doc
+//! documents for why Rust doesn't hand-compute the CSS grid math.
 
 use atomic::i18n;
 use atomic::tiling;
 
 use super::resource_overlay::draw_resource_overlay;
-use super::{AtomicApp, PANE_HEIGHT, PANE_WIDTH};
+use super::{AtomicApp, CHROME_HEIGHT, CHROME_WIDTH, PANE_HEIGHT, PANE_WIDTH};
 
 impl AtomicApp {
     pub(super) fn draw_pane_grid(&mut self, ui: &mut egui::Ui) {
         egui::CentralPanel::default().show(ui, |ui| {
             let available = ui.available_rect_before_wrap();
-            let container = tiling::Rect { x: available.min.x, y: available.min.y, width: available.width(), height: available.height() };
+
+            // The chrome texture is rendered at a fixed CHROME_WIDTH x
+            // CHROME_HEIGHT (see ChromeUi::spawn's own doc on why - no
+            // live resize yet) but displayed scaled to fill whatever the
+            // real window size is - every rect the chrome page itself
+            // reports via `pane_rects()` is in its own unscaled CSS-pixel
+            // space, so it must be scaled by the same factor before it
+            // means anything in this window's real screen coordinates.
+            if let Some(texture) = self.chrome.poll_texture(ui.ctx()) {
+                ui.put(available, egui::Image::new((texture.id(), available.size())));
+            }
+            let scale_x = available.width() / CHROME_WIDTH as f32;
+            let scale_y = available.height() / CHROME_HEIGHT as f32;
+            let to_screen = |r: atomic::chrome_ui::PaneRect| tiling::Rect {
+                x: available.min.x + r.x * scale_x,
+                y: available.min.y + r.y * scale_y,
+                width: r.width * scale_x,
+                height: r.height * scale_y,
+            };
+
             // Only the active workspace's panes - see
             // `active_workspace_pane_indices`'s doc. A pane belonging to a
             // different (inactive) workspace keeps running but isn't
             // drawn or ticked here.
             let visible = self.active_workspace_pane_indices();
-            let cells = tiling::grid_layout(container, visible.len());
+            let chrome_rects = self.chrome.pane_rects();
+            let cells: Vec<tiling::Rect> = if chrome_rects.len() >= visible.len() && !visible.is_empty() {
+                chrome_rects.into_iter().take(visible.len()).map(to_screen).collect()
+            } else {
+                // The chrome page hasn't rendered a matching pane count
+                // yet (e.g. this frame's state push hasn't taken effect
+                // in the page's own render cycle) - fall back to the old
+                // auto-tiling algorithm for this one frame rather than
+                // drawing nothing.
+                let container = tiling::Rect { x: available.min.x, y: available.min.y, width: available.width(), height: available.height() };
+                tiling::grid_layout(container, visible.len())
+            };
+
+            // Real click/scroll/key routing to the chrome browser itself:
+            // this background response covers the whole panel *before*
+            // the per-pane loop below draws its own responses on top, so
+            // a pointer event lands here only when it doesn't hit any
+            // pane's own (smaller, later-drawn) response area - the
+            // toolbar/sidebar/account-list/screen chrome around the
+            // panes, in other words. Coordinates are translated back into
+            // the chrome's own unscaled CSS-pixel space (the inverse of
+            // `to_screen` above) before forwarding.
+            let background = ui.interact(available, ui.id().with("chrome-background"), egui::Sense::click());
+            if let Some(pos) = background.interact_pointer_pos() {
+                if background.clicked() {
+                    let cx = ((pos.x - available.min.x) / scale_x) as f64;
+                    let cy = ((pos.y - available.min.y) / scale_y) as f64;
+                    self.chrome.click_at(cx, cy);
+                }
+            }
+            if background.hovered() {
+                let raw_scroll = ui.input(|i| i.smooth_scroll_delta);
+                if raw_scroll.y != 0.0 {
+                    self.chrome.scroll_by(-raw_scroll.y as f64 / scale_y as f64);
+                }
+            }
 
             // Deliberately not a `for (pane, cell) in self.panes.iter_mut()...`
             // loop: the context menu below needs `&self.workspace` (to list

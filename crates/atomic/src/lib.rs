@@ -1,6 +1,7 @@
 pub mod automation_bridge;
 pub mod browser_view;
 pub mod chrome_import;
+pub mod chrome_ui;
 pub mod downloads;
 pub mod history;
 pub mod i18n;

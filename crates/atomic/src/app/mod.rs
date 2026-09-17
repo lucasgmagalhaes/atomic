@@ -29,17 +29,13 @@
 //! module), matching how the `dom` crate's own split reaches `Dom`'s
 //! private fields from its sibling submodules.
 
-mod add_profile_ui;
 mod automation_engine;
-mod automation_ui;
 mod chrome_import_actions;
+mod chrome_ui_bridge;
 mod grid_ui;
 mod pane;
 mod panes;
 mod resource_overlay;
-mod settings_ui;
-mod side_panel_ui;
-mod toolbar_ui;
 mod update;
 mod vault;
 mod workspaces;
@@ -134,7 +130,17 @@ pub(crate) struct AtomicApp {
     /// a previous attempt's typed values don't linger into the next one.
     add_profile_form: Option<AddProfileForm>,
     add_profile_error: Option<String>,
+    /// The app's own shell UI (toolbar/sidebar/screens), a CEF browser
+    /// spawned once at startup — see `spec/architecture/chrome-ui.md` and
+    /// `atomic::chrome_ui`'s own doc. Fixed at `CHROME_WIDTH`/`CHROME_HEIGHT`
+    /// for now, same "no live resize yet" scope
+    /// `browser_view::BrowserView`'s own doc already documents for
+    /// content panes.
+    chrome: atomic::chrome_ui::ChromeUi,
 }
+
+pub(crate) const CHROME_WIDTH: u32 = 1440;
+pub(crate) const CHROME_HEIGHT: u32 = 900;
 
 /// One in-progress "Add Profile" modal's form fields - see the mockup's
 /// own "Add profile modal" (name, start URL, email/password autofill,
@@ -183,6 +189,7 @@ impl Default for AtomicApp {
             imported_bookmarks: Vec::new(),
             add_profile_form: None,
             add_profile_error: None,
+            chrome: atomic::chrome_ui::ChromeUi::spawn(CHROME_WIDTH, CHROME_HEIGHT),
         }
     }
 }

@@ -505,6 +505,7 @@ dependencies = [
  "platform-apis",
  "profile",
  "security",
+ "serde_json",
  "storage",
  "url",
 ]

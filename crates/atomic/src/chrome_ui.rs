@@ -193,15 +193,27 @@ impl ChromeUi {
         }
     }
 
-    /// Queries the page for every `.pane[data-pane-index]`'s real,
-    /// currently-rendered rect — one `EVAL` round trip for all of them,
-    /// not one per pane. Empty if the page hasn't rendered any panes yet
-    /// (e.g. still on a non-grid screen) or the query itself fails.
+    /// Queries the page for every pane's real, currently-rendered
+    /// *content* rect — one `EVAL` round trip for all of them, not one
+    /// per pane. Empty if the page hasn't rendered any panes yet (e.g.
+    /// still on a non-grid screen) or the query itself fails.
+    ///
+    /// Deliberately `.pane-body`, not the outer `[data-pane-index]`
+    /// `.pane` div itself: `.pane` also contains `.pane-head` (the
+    /// Preact-rendered 32px title bar showing the pane's real name/host)
+    /// above `.pane-body`. Compositing the pane's texture over the whole
+    /// `.pane` rect painted our own texture (and its own top-left
+    /// CPU/RAM/FPS overlay - see `resource_overlay`) directly on top of
+    /// that title bar, a real visible bug reported after the first real
+    /// run of the integrated app - the two texts overlapping made the
+    /// window look "hazy"/doubled. `.pane-body` is exactly the area
+    /// `index.html`'s own placeholder text ("pane content composited
+    /// natively here") names as the intended target.
     pub fn pane_rects(&mut self) -> Vec<PaneRect> {
         let Some(profile) = &self.profile else {
             return Vec::new();
         };
-        let script = "JSON.stringify([...document.querySelectorAll('[data-pane-index]')].map(function(el){var r=el.getBoundingClientRect();return {x:r.left,y:r.top,width:r.width,height:r.height};}))";
+        let script = "JSON.stringify([...document.querySelectorAll('[data-pane-index] .pane-body')].map(function(el){var r=el.getBoundingClientRect();return {x:r.left,y:r.top,width:r.width,height:r.height};}))";
         let Ok(Ok(result)) = profile.borrow_mut().evaluate(script) else {
             return Vec::new();
         };

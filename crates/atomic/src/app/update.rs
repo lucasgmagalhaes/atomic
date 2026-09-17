@@ -41,7 +41,14 @@ impl eframe::App for AtomicApp {
         self.tick_automation_engine();
 
         let grid = nearest_supported_grid_size(self.active_workspace_pane_indices().len());
-        self.chrome.push_state(&format!(r#"{{"grid":{grid}}}"#));
+        // Only push when it actually changes - see `last_pushed_chrome_grid`'s
+        // own doc on why pushing this every frame regardless made the whole
+        // chrome UI feel unclickable (a real, reproduced CLICK_AT-after-EVAL
+        // hit-test race, not a missing click handler).
+        if self.last_pushed_chrome_grid != Some(grid) {
+            self.chrome.push_state(&format!(r#"{{"grid":{grid}}}"#));
+            self.last_pushed_chrome_grid = Some(grid);
+        }
 
         for action in self.chrome.drain_actions() {
             self.handle_chrome_action(action);

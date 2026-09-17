@@ -137,6 +137,19 @@ pub(crate) struct AtomicApp {
     /// `browser_view::BrowserView`'s own doc already documents for
     /// content panes.
     chrome: atomic::chrome_ui::ChromeUi,
+    /// The last `grid` value actually pushed into the chrome page via
+    /// [`ChromeUi::push_state`] - `update.rs` only calls `push_state`
+    /// again when this changes, not on every frame regardless. Pushing
+    /// unconditionally every ~16ms was a real, reproduced bug (not just
+    /// wasted CDP round trips): each `push_state` call is a
+    /// DOM-affecting `EVAL`, and sending `CLICK_AT` shortly after one can
+    /// race Blink's own hit-test state (the same hazard
+    /// `chrome_toolbar_preact_test.rs`/`profile_worker_test.rs` document
+    /// and work around with a fixed sleep in tests) - continuous
+    /// per-frame pushes meant a real user's click almost always landed
+    /// shortly after a recent `EVAL`, making the whole chrome UI feel
+    /// unclickable. `None` before the first push.
+    last_pushed_chrome_grid: Option<u32>,
 }
 
 pub(crate) const CHROME_WIDTH: u32 = 1440;
@@ -190,6 +203,7 @@ impl Default for AtomicApp {
             add_profile_form: None,
             add_profile_error: None,
             chrome: atomic::chrome_ui::ChromeUi::spawn(CHROME_WIDTH, CHROME_HEIGHT),
+            last_pushed_chrome_grid: None,
         }
     }
 }

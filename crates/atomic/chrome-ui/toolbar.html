@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>Atomic — toolbar</title>
+<style>
+body {
+  margin: 0;
+  background: #12131f;
+  color: #e9e9ed;
+  font: 13px system-ui, sans-serif;
+}
+.toolbar {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 6px 0 14px;
+}
+.tabs {
+  display: flex;
+  gap: 2px;
+}
+.tab {
+  padding: 4px 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.tab.active {
+  color: #b5abfc;
+  background: rgba(145, 132, 217, 0.16);
+}
+.tab:not(.active) {
+  color: rgba(233, 233, 237, 0.75);
+}
+.tab:hover:not(.active) {
+  background: rgba(233, 233, 237, 0.06);
+}
+.ws {
+  display: flex;
+  gap: 4px;
+}
+.ws-item {
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  cursor: pointer;
+  color: rgba(233, 233, 237, 0.7);
+}
+.ws-item.active {
+  color: #b5abfc;
+  background: rgba(145, 132, 217, 0.16);
+}
+</style>
+<div id="root"></div>
+<script src="node_modules/preact/dist/preact.umd.js"></script>
+<script src="node_modules/preact/hooks/dist/hooks.umd.js"></script>
+<script src="node_modules/htm/dist/htm.umd.js"></script>
+<script>
+const html = htm.bind(preact.h);
+const { useState } = preactHooks;
+
+// The single source of truth for this page - Rust pushes a full
+// replacement via `window.__atomicBridge.setState(...)` (see
+// spec/architecture/chrome-ui.md's bridge section); this page never
+// fetches or invents its own data.
+let currentState = {
+  activeTab: "browser",
+  workspaces: [],
+  activeWorkspace: null,
+};
+let rerender = () => {};
+
+// Every user action reports itself over `console.log` as JSON - the
+// real, already-proven JS -> Rust channel (CONSOLE's own plumbing),
+// not a new mechanism. This page never mutates `currentState` itself;
+// it waits for Rust to push the real new state back via `setState`,
+// same "one-way data flow" discipline a real Preact/React app already
+// wants.
+function dispatch(action) {
+  console.log(JSON.stringify(action));
+}
+
+const TABS = [
+  { id: "browser", label: "Browser" },
+  { id: "monitor", label: "Monitor" },
+  { id: "automation", label: "Automation" },
+  { id: "downloads", label: "Downloads" },
+  { id: "settings", label: "Settings" },
+];
+
+function Toolbar({ state }) {
+  return html`
+      <div class="toolbar">
+        <div class="tabs">
+          ${
+    TABS.map(
+      (tab) =>
+        html`
+              <div
+                class=${"tab" + (state.activeTab === tab.id ? " active" : "")}
+                onClick=${() => dispatch({ action: "switchTab", id: tab.id })}
+              >
+                ${tab.label}
+              </div>
+            `,
+    )
+  }
+        </div>
+        <div class="ws">
+          ${
+    state.workspaces.map(
+      (ws) =>
+        html`
+              <div
+                class=${
+          "ws-item" + (ws.id === state.activeWorkspace ? " active" : "")
+        }
+                onClick=${() =>
+          dispatch({ action: "switchWorkspace", id: ws.id })}
+              >
+                ${ws.name}
+              </div>
+            `,
+    )
+  }
+        </div>
+      </div>
+    `;
+}
+
+function App() {
+  const [state, setState] = useState(currentState);
+  rerender = () => setState({ ...currentState });
+  return html`<${Toolbar} state=${state} />`;
+}
+
+preact.render(html`<${App} />`, document.getElementById("root"));
+
+window.__atomicBridge = {
+  setState(next) {
+    currentState = next;
+    rerender();
+  },
+};
+</script>

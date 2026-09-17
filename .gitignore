@@ -23,6 +23,11 @@ target
 # graphify knowledge graph (local artifact, contains absolute local paths)
 graphify-out/
 
+# crates/atomic/chrome-ui's real npm-installed dependencies (Preact/htm) -
+# package.json/package-lock.json stay tracked, the installed packages
+# themselves don't, same convention as any other npm project.
+node_modules/
+
 # shared_memory crate's Windows backing-file marker, dropped in the process's
 # cwd when a shell.exe launched from apps/shell/ actually spawns a profile
 # (see apps/shell/src/browser_view.rs's BrowserView::spawn_with_identity)

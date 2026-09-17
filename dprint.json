@@ -24,6 +24,6 @@
     "npm:dprint-plugin-malva@0.16.0",
     "npm:dprint-plugin-markup@0.27.3"
   ],
-  "includes": ["crates/atomic/chrome/**/*.{html,css,js}"],
-  "excludes": ["target/**", "graphify-out/**"]
+  "includes": ["crates/atomic/chrome-ui/**/*.{html,css,js}"],
+  "excludes": ["target/**", "graphify-out/**", "**/node_modules/**"]
 }

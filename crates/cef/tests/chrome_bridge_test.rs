@@ -102,6 +102,16 @@ fn chrome_page_actions_reach_rust_via_the_console_channel() {
     // A real click on the real button, not a direct `.click()` eval call -
     // proves the same coordinate input injection a real toolbar click
     // would use also drives the bridge's JS -> Rust direction correctly.
+    //
+    // `CLICK_AT` right after `NAVIGATE` can race Blink's own hit-test state
+    // the same way it does right after a DOM-affecting `EVAL` (see
+    // `chrome_toolbar_preact_test.rs`'s identical comment and
+    // `spec/ROADMAP.md` P5's own tracked hazard) - `do_message_loop_work`
+    // being pumped during `navigate()` isn't proof a real paint has landed.
+    // A fixed sleep is a real, tracked hack, not a fix - remove once a real
+    // "wait for next paint" primitive exists.
+    std::thread::sleep(std::time::Duration::from_millis(1000));
+
     let click = chrome
         .click_at(30.0, 15.0)
         .expect("stdin/stdout protocol must not fail");

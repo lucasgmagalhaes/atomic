@@ -27,6 +27,33 @@ fn spawn(name: &str) -> profile::Profile {
         .expect("failed to spawn cef_profile_worker as the chrome browser")
 }
 
+/// `navigate()` only waits for CEF's own `on_load_end` (the document and
+/// its synchronous/`defer`red scripts have run) - it's real, but real
+/// Preact still needs its own render pass afterward to actually mount
+/// `window.__atomicBridge` and the app's DOM, and that isn't guaranteed
+/// to have happened by the time `on_load_end` fires (a real, reproduced
+/// race in testing: `evaluate("window.__atomicBridge.setState(...)")`
+/// threw `Cannot read properties of undefined` immediately after
+/// `navigate()` returned success). Polls for the actual condition this
+/// test needs instead of guessing a fixed sleep duration (the workaround
+/// `chrome_toolbar_preact_test.rs`/`chrome_bridge_test.rs` use for the
+/// unrelated `CLICK_AT`-after-paint hazard, tracked in `spec/ROADMAP.md`
+/// P5) - a real wait for the real, observable condition, not a fixed
+/// delay standing in for one.
+fn wait_for_the_app_to_mount(chrome: &mut profile::Profile) {
+    for _ in 0..50 {
+        let ready = chrome
+            .evaluate("typeof window.__atomicBridge !== 'undefined'")
+            .expect("stdin/stdout protocol must not fail")
+            .expect("evaluating a trivial expression must not throw");
+        if ready == "true" {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    panic!("window.__atomicBridge never appeared after navigate() returned");
+}
+
 #[test]
 fn every_screen_renders_real_dom_from_the_default_state() {
     let mut chrome = spawn("atomic-chrome-app-test-1");
@@ -34,6 +61,7 @@ fn every_screen_renders_real_dom_from_the_default_state() {
         .navigate(&app_url())
         .expect("stdin/stdout protocol must not fail")
         .expect("navigating to the real index.html app must succeed");
+    wait_for_the_app_to_mount(&mut chrome);
 
     // Default view is the grid - real panes rendered from real ACC data,
     // sliced to the default grid size (2).
@@ -74,6 +102,7 @@ fn switching_tabs_renders_each_screens_real_content() {
         .navigate(&app_url())
         .expect("stdin/stdout protocol must not fail")
         .expect("navigating to the real index.html app must succeed");
+    wait_for_the_app_to_mount(&mut chrome);
 
     // Drive real navigation through the same setState primitive the
     // toolbar's own onClick handlers use internally (this test exercises
@@ -127,6 +156,7 @@ fn real_data_values_reach_the_dom_on_the_downloads_screen() {
         .navigate(&app_url())
         .expect("stdin/stdout protocol must not fail")
         .expect("navigating to the real index.html app must succeed");
+    wait_for_the_app_to_mount(&mut chrome);
 
     chrome
         .evaluate("window.__atomicBridge.setState({view: 'downloads'})")

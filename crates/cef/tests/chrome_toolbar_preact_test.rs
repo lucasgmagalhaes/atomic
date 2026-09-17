@@ -33,6 +33,33 @@ fn toolbar_url() -> String {
     format!("file:///{}", path_str.replace('\\', "/"))
 }
 
+/// `navigate()` only waits for CEF's own `on_load_end` (document + its
+/// deferred scripts have run) - real Preact still needs its own render
+/// pass afterward to actually mount `window.__atomicBridge`, and that
+/// isn't guaranteed to have happened yet by the time `on_load_end` fires.
+/// Reproduced in testing (this file's own
+/// `preact_toolbar_renders_pushed_state_as_real_dom`: `setState` right
+/// after a successful `navigate()` threw `Cannot read properties of
+/// undefined`), same root cause as `chrome_app_test.rs`'s
+/// `wait_for_the_app_to_mount` - polls the real, observable condition
+/// instead of guessing a fixed delay (unlike the *other*, unrelated
+/// `CLICK_AT`-after-paint race this file also works around with a fixed
+/// sleep below, which has no equivalent observable condition to poll
+/// yet - see `spec/ROADMAP.md` P5).
+fn wait_for_the_app_to_mount(chrome: &mut profile::Profile) {
+    for _ in 0..50 {
+        let ready = chrome
+            .evaluate("typeof window.__atomicBridge !== 'undefined'")
+            .expect("stdin/stdout protocol must not fail")
+            .expect("evaluating a trivial expression must not throw");
+        if ready == "true" {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    panic!("window.__atomicBridge never appeared after navigate() returned");
+}
+
 #[test]
 fn preact_toolbar_renders_pushed_state_as_real_dom() {
     let path = worker_binary_path();
@@ -53,6 +80,7 @@ fn preact_toolbar_renders_pushed_state_as_real_dom() {
                  files actually exist under node_modules/ (file:// resolves <script src> \
                  relative to the HTML file, not the cwd)",
         );
+    wait_for_the_app_to_mount(&mut chrome);
 
     let state = r#"{"activeTab":"monitor","workspaces":[{"id":"main","name":"Principal"},{"id":"farm","name":"Farm squad"}],"activeWorkspace":"farm"}"#;
     chrome
@@ -118,6 +146,7 @@ fn clicking_a_real_preact_rendered_tab_reaches_rust() {
         .navigate(&toolbar_url())
         .expect("stdin/stdout protocol must not fail")
         .expect("navigating to the real toolbar.html bundle must succeed");
+    wait_for_the_app_to_mount(&mut chrome);
 
     let state = r#"{"activeTab":"browser","workspaces":[{"id":"main","name":"Principal"}],"activeWorkspace":"main"}"#;
     chrome

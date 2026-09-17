@@ -130,6 +130,17 @@ fn profile_click_at_and_type_key_drive_a_real_focused_input() {
         .expect("stdin/stdout protocol must not fail")
         .expect("navigating to a data: URL must succeed");
 
+    // Same real `CLICK_AT`-after-paint hazard `chrome_toolbar_preact_test.rs`
+    // documents (there, after a DOM-affecting `EVAL`; here, right after
+    // `navigate()` itself) - `on_load_end` firing isn't proof a real paint
+    // has landed for Blink's own hit-test state yet. Reproduced here too
+    // (this exact test failed under `cargo test --workspace`'s
+    // concurrency with an empty typed value, meaning the click missed the
+    // autofocused input entirely). Same tracked hack, not a fix - see
+    // spec/ROADMAP.md P5's input-routing item for the real "wait for next
+    // paint" primitive this needs instead.
+    std::thread::sleep(std::time::Duration::from_millis(1000));
+
     profile
         .click_at(50.0, 20.0)
         .expect("stdin/stdout protocol must not fail")

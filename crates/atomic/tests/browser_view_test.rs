@@ -272,23 +272,64 @@ fn spawn_with_identity_persists_cookies_across_a_respawn_with_the_same_id() {
 /// one-connection-only server can't do (a second navigation to it would
 /// just fail to connect).
 fn spawn_cookie_setting_server_multi() -> std::net::SocketAddr {
-    use std::io::{Read, Write};
+    use std::io::{BufRead, BufReader, Write};
     let listener =
         std::net::TcpListener::bind("127.0.0.1:0").expect("failed to bind a loopback test server");
     let addr = listener.local_addr().unwrap();
     std::thread::spawn(move || {
-        let mut first = true;
+        // Real Chromium issues more than one request per navigation (a
+        // real, observed one in this test: an automatic `GET
+        // /favicon.ico`, sent on its own connection, sometimes ahead of
+        // the actual page request depending on connection-accept
+        // ordering). Keying "first" off connection-arrival order (as this
+        // used to) let that extra request steal the `Set-Cookie` header
+        // meant for the real document, a real intermittent failure
+        // reproduced in testing - not a CEF/isolation bug, a test-server
+        // bug. Keying it off the *request path* instead makes the
+        // intent - "the page at `/` gets a cookie only the first time
+        // it's fetched" - actually match what's being asserted.
+        let mut root_served = false;
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { continue };
-            let mut buf = [0u8; 4096];
-            let _ = stream.read(&mut buf);
+            let mut reader = BufReader::new(&stream);
+            let mut request_line = String::new();
+            // `Ok(0)` (connection closed with zero bytes sent - a real,
+            // observed shape of a Chromium speculative preconnect that
+            // never sends a request on this particular socket) must NOT
+            // fall through to the `unwrap_or("/")` below: an earlier
+            // version of this fix defaulted a request line with no parseable
+            // path to "/", which let exactly this kind of empty connection
+            // steal the one-time cookie before the real request arrived -
+            // reproduced under `cargo test --workspace`'s concurrency even
+            // after keying on path instead of connection order. Only an
+            // actually-parsed `GET /` counts.
+            let Ok(n) = reader.read_line(&mut request_line) else {
+                continue;
+            };
+            if n == 0 {
+                continue;
+            }
+            let mut parts = request_line.split_whitespace();
+            let method = parts.next();
+            let path = parts.next();
+            let is_real_root_get = method == Some("GET") && path == Some("/");
+            // Drain the rest of the request so `Connection: close` isn't
+            // racing a client still writing headers.
+            loop {
+                let mut header_line = String::new();
+                match reader.read_line(&mut header_line) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) if header_line == "\r\n" || header_line.is_empty() => break,
+                    Ok(_) => continue,
+                }
+            }
             let body = "<div>hello</div>";
-            let set_cookie = if first {
+            let set_cookie = if is_real_root_get && !root_served {
+                root_served = true;
                 "Set-Cookie: identity-marker=1\r\n"
             } else {
                 ""
             };
-            first = false;
             let response = format!(
                 "HTTP/1.1 200 OK\r\n{set_cookie}Content-Length: {}\r\nConnection: close\r\n\r\n{}",
                 body.len(),

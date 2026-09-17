@@ -112,9 +112,18 @@ impl AtomicApp {
                     // landing in the letterboxed margin around the image
                     // (when the pane's aspect ratio doesn't match the
                     // cell's) is correctly ignored, not clamped onto an
-                    // edge.
+                    // edge. No `.min(1.0)` cap: `cell_rect` now comes from
+                    // the chrome page's own real (and usually much larger
+                    // than 512x320) `.pane-body` layout, not a small fixed
+                    // window - capping the scale left the pane rendered
+                    // tiny in the corner of a mostly-empty cell, a real
+                    // reported bug, not a resolution-quality tradeoff to
+                    // preserve. Upscaling until real live-resize support
+                    // lands (spec/ROADMAP.md P2/P3) is the honest tradeoff:
+                    // blurrier than native, but actually fills the space
+                    // the chrome page laid out for it.
                     let image_size = egui::vec2(PANE_WIDTH as f32, PANE_HEIGHT as f32);
-                    let scale = (cell_rect.width() / image_size.x).min(cell_rect.height() / image_size.y).min(1.0);
+                    let scale = (cell_rect.width() / image_size.x).min(cell_rect.height() / image_size.y);
                     let displayed_size = image_size * scale;
                     let image_rect = egui::Rect::from_center_size(cell_rect.center(), displayed_size);
                     if let Some(pos) = response.interact_pointer_pos() {
@@ -274,7 +283,9 @@ impl AtomicApp {
                 let pane = &mut self.panes[index];
                 if let Some(texture) = pane.browser.poll_texture(cell_ui.ctx()) {
                     let image_size = texture.size_vec2();
-                    let scale = (cell_rect.width() / image_size.x).min(cell_rect.height() / image_size.y).min(1.0);
+                    // No `.min(1.0)` cap here either - see the matching
+                    // click-routing math above for why.
+                    let scale = (cell_rect.width() / image_size.x).min(cell_rect.height() / image_size.y);
                     cell_ui.put(cell_rect, egui::Image::new((texture.id(), image_size * scale)));
                 } else if pane.browser.error().is_none() {
                     cell_ui.put(cell_rect, egui::Label::new(i18n::t(i18n::STARTING_PROFILE, self.locale)));

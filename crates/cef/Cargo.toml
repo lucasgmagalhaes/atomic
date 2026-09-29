@@ -10,7 +10,7 @@ edition = "2021"
 # (abort/exit code 3) on a bare CEF API call (`command_line_create()`)
 # made before `execute_process`/`initialize`, which upstream's own
 # examples call at the exact same point without issue once sandbox is off.
-cef = { version = "152", default-features = false, features = ["build-util", "resources"] }
+cef = { version = "154", default-features = false, features = ["build-util", "resources"] }
 serde_json = "1"
 ipc = { path = "../ipc" }
 
